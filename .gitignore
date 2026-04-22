@@ -4,3 +4,6 @@ uvicorn.log
 .venv/
 env/
 venv/
+data/
+fly-logs.txt
+analysis.json

@@ -4,7 +4,7 @@ from datetime import datetime
 
 class RiskScorer:
     def __init__(self):
-        self.risky_patterns = ["delete", "secrets", "production", "root", "sudo", "rm -rf"]
+        self.risky_patterns = ["delete", "secrets", "production", "root", "sudo", "rm -rf", "../"]
 
     def score(self, action: dict) -> float:
         score = 0.0
@@ -53,5 +53,9 @@ class ControlPlane:
         return result
 
     def _log_audit(self, entry: dict):
-        with open(self.audit_log_path, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        # Handle cases where directory might not be writable
+        try:
+            with open(self.audit_log_path, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception:
+            pass

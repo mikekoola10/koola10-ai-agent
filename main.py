@@ -12,6 +12,7 @@ from business import BusinessLoop
 from swarm import SwarmBus, SwarmNode
 from swarm.cloud import CloudSwarmRegistry, NodeInfo
 from swarm.router import TaskRouter
+from production import ProductGenerator, ProductDeployer
 
 app = FastAPI()
 memory = MemoryGraph()
@@ -21,6 +22,8 @@ control_plane = ControlPlane(threshold=0.6)
 business = BusinessLoop()
 swarm_bus = SwarmBus()
 swarm_node = SwarmNode(swarm_bus)
+product_generator = ProductGenerator()
+product_deployer = ProductDeployer()
 
 # Cross-Cloud Layer
 cloud_registry = CloudSwarmRegistry(swarm_bus.client)
@@ -163,3 +166,42 @@ async def route_swarm_task(preferred_region: Optional[str] = None):
     if not node:
         raise HTTPException(status_code=503, detail="No healthy swarm nodes available")
     return {"selected_node": node}
+
+@app.post("/production/generate")
+async def generate_product(spec: dict = Body(...)):
+    # Safety Check
+    safety_result = control_plane.evaluate({"type": "product_generation", "spec": spec})
+    if safety_result["decision"] == "BLOCK":
+        raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
+
+    return product_generator.generate(spec)
+
+@app.post("/production/deploy")
+async def deploy_product(product_name: str):
+    # Safety Check
+    safety_result = control_plane.evaluate({"type": "product_deployment", "product_name": product_name})
+    if safety_result["decision"] == "BLOCK":
+        raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
+
+    product_dir = os.path.join(product_generator.products_path, product_name)
+    if not os.path.exists(product_dir):
+        raise HTTPException(status_code=404, detail="Product directory not found")
+
+    return product_deployer.deploy(product_dir, product_name)
+
+@app.post("/production/full")
+async def full_production_cycle(spec: dict = Body(...)):
+    # Safety Check
+    safety_result = control_plane.evaluate({"type": "full_production", "spec": spec})
+    if safety_result["decision"] == "BLOCK":
+        raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
+
+    # Generate
+    gen_result = product_generator.generate(spec)
+    # Deploy
+    deploy_result = product_deployer.deploy(gen_result["directory"], gen_result["product_name"])
+
+    # Log to business loop
+    business.log_action({"type": "full_production", "spec": spec}, {"gen": gen_result, "deploy": deploy_result})
+
+    return {"generation": gen_result, "deployment": deploy_result}
