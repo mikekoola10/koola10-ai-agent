@@ -4,12 +4,14 @@ from tools import registry
 from semantic_memory import SemanticMemory
 from agents import Orchestrator
 from safety import ControlPlane
+from business import BusinessLoop
 
 app = FastAPI()
 memory = MemoryGraph()
 semantic = SemanticMemory()
 orchestrator = Orchestrator()
 control_plane = ControlPlane(threshold=0.6)
+business = BusinessLoop()
 
 @app.get("/")
 async def health_check():
@@ -33,15 +35,21 @@ async def get_meetings():
 
 @app.post("/tools/execute")
 async def execute_tool(tool_name: str, payload: dict = Body(...)):
+    action_info = {"type": "tool_execution", "tool": tool_name, "payload": payload}
+
     # Safety Check
-    safety_result = control_plane.evaluate({"type": "tool_execution", "tool": tool_name, "payload": payload})
+    safety_result = control_plane.evaluate(action_info)
     if safety_result["decision"] == "BLOCK":
         raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
 
     result = registry.run(tool_name, payload)
+
+    # Log Action in Business Loop
+    action_id = business.log_action(action_info, result.__dict__ if hasattr(result, "__dict__") else result)
+
     if not result.success:
-        return {"success": False, "error": result.error}
-    return {"success": True, "output": result.output}
+        return {"success": False, "error": result.error, "action_id": action_id}
+    return {"success": True, "output": result.output, "action_id": action_id}
 
 @app.get("/semantic/search")
 async def semantic_search(q: str, top_k: int = 5):
@@ -77,3 +85,14 @@ async def orchestrate_task(task: str):
 
     result = orchestrator.run(task)
     return result
+
+@app.post("/business/outcome")
+async def report_outcome(action_id: str, outcome: dict = Body(...)):
+    success = business.log_outcome(action_id, outcome)
+    if not success:
+        raise HTTPException(status_code=404, detail="Action ID not found")
+    return {"status": "outcome logged"}
+
+@app.get("/business/metrics")
+async def get_metrics():
+    return business.get_feedback_signal()
