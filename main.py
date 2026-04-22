@@ -14,6 +14,10 @@ from swarm.cloud import CloudSwarmRegistry, NodeInfo
 from swarm.router import TaskRouter
 from production import ProductGenerator, ProductDeployer
 from economic import EconomicLedger, EconomicDecisionEngine, EconomicStrategy
+from compliance.enterprise import (
+    ImmutableAuditLogger, PolicyAsCode, DataBoundaryGuard,
+    ApprovalWorkflow, GlobalKillSwitch
+)
 
 app = FastAPI()
 memory = MemoryGraph()
@@ -28,6 +32,13 @@ product_deployer = ProductDeployer()
 economic_ledger = EconomicLedger(initial_balance=100.0)
 economic_decision = EconomicDecisionEngine()
 economic_strategy = EconomicStrategy(economic_decision)
+
+# Enterprise Compliance Layer
+audit_logger = ImmutableAuditLogger()
+policy_engine = PolicyAsCode()
+data_boundary = DataBoundaryGuard()
+approval_flow = ApprovalWorkflow()
+kill_switch = GlobalKillSwitch(swarm_bus.client)
 
 # Cross-Cloud Layer
 cloud_registry = CloudSwarmRegistry(swarm_bus.client)
@@ -59,6 +70,31 @@ async def heartbeat_task():
         except Exception as e:
             print(f"Heartbeat failed: {e}")
 
+async def enterprise_compliance_check(action: dict):
+    # 1. Global Kill-Switch
+    if kill_switch.is_active():
+        reason = kill_switch.get_reason()
+        raise HTTPException(status_code=503, detail=f"System is under global kill-switch. Reason: {reason}")
+
+    # 2. Data Boundary / Region Check
+    if not data_boundary.check_region(FLY_REGION):
+        raise HTTPException(status_code=403, detail=f"Action prohibited in region {FLY_REGION}")
+
+    # 3. Policy as Code
+    policy_res = policy_engine.evaluate(action)
+    if policy_res["decision"] == "BLOCK":
+        raise HTTPException(status_code=403, detail=f"Action blocked by policy: {policy_res['policy']} (Rule: {policy_res['rule']})")
+
+    # 4. Basic Safety Gating (Risk Scorer)
+    safety_res = control_plane.evaluate(action)
+    if safety_res["decision"] == "BLOCK":
+        # Check if we should move to approval workflow instead of immediate block
+        request_id = approval_flow.create_request(action, ["admin-1"])
+        raise HTTPException(status_code=403, detail=f"Action requires approval. Request ID: {request_id}. Risk score: {safety_res['risk_score']}")
+
+    # 5. Immutable Audit
+    audit_logger.log_event(action)
+
 @app.get("/")
 async def health_check():
     return {"status": "ok"}
@@ -83,10 +119,7 @@ async def get_meetings():
 async def execute_tool(tool_name: str, payload: dict = Body(...)):
     action_info = {"type": "tool_execute", "tool": tool_name, "payload": payload}
 
-    # Safety Check
-    safety_result = control_plane.evaluate(action_info)
-    if safety_result["decision"] == "BLOCK":
-        raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
+    await enterprise_compliance_check(action_info)
 
     result = registry.run(tool_name, payload)
 
@@ -124,10 +157,8 @@ async def get_path(source: str, target: str, max_depth: int = Query(3)):
 
 @app.post("/orchestrate")
 async def orchestrate_task(task: str):
-    # Safety Check
-    safety_result = control_plane.evaluate({"type": "orchestration", "task": task})
-    if safety_result["decision"] == "BLOCK":
-        raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
+    action_info = {"type": "orchestration", "task": task}
+    await enterprise_compliance_check(action_info)
 
     result = orchestrator.run(task)
     return result
@@ -173,19 +204,12 @@ async def route_swarm_task(preferred_region: Optional[str] = None):
 
 @app.post("/production/generate")
 async def generate_product(spec: dict = Body(...)):
-    # Safety Check
-    safety_result = control_plane.evaluate({"type": "product_generation", "spec": spec})
-    if safety_result["decision"] == "BLOCK":
-        raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
-
+    await enterprise_compliance_check({"type": "product_generation", "spec": spec})
     return product_generator.generate(spec)
 
 @app.post("/production/deploy")
 async def deploy_product(product_name: str):
-    # Safety Check
-    safety_result = control_plane.evaluate({"type": "product_deployment", "product_name": product_name})
-    if safety_result["decision"] == "BLOCK":
-        raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
+    await enterprise_compliance_check({"type": "product_deployment", "product_name": product_name})
 
     product_dir = os.path.join(product_generator.products_path, product_name)
     if not os.path.exists(product_dir):
@@ -202,10 +226,8 @@ async def full_production_cycle(spec: dict = Body(...)):
     if econ_res["recommendation"] == "BLOCK":
         raise HTTPException(status_code=402, detail=f"Action blocked by economic engine. ROI too low: {econ_res['roi']}")
 
-    # Safety Check
-    safety_result = control_plane.evaluate(action_info)
-    if safety_result["decision"] == "BLOCK":
-        raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
+    # Enterprise Compliance Check
+    await enterprise_compliance_check(action_info)
 
     # Record Cost
     economic_ledger.record_cost("full_production", econ_res["cost_estimate"], f"Production cycle for {spec.get('name')}")
@@ -244,12 +266,43 @@ async def execute_economic_task(action: dict = Body(...)):
     if econ_res["cost_estimate"] > economic_ledger.get_balance():
         raise HTTPException(status_code=402, detail="Insufficient budget in economic ledger")
 
-    # 3. Safety Gating
-    safety_res = control_plane.evaluate(action)
-    if safety_res["decision"] == "BLOCK":
-        raise HTTPException(status_code=403, detail="Action blocked by safety control plane")
+    # 3. Enterprise Compliance Gating
+    await enterprise_compliance_check(action)
 
     # 4. Record Cost & Execute (Simplified for milestone)
     economic_ledger.record_cost(action.get("type", "other"), econ_res["cost_estimate"], f"Economic execution of {action.get('type')}")
 
-    return {"status": "authorized_and_recorded", "economics": econ_res, "safety": safety_res}
+    return {"status": "authorized_and_recorded", "economics": econ_res}
+
+@app.post("/compliance/enterprise/killswitch/trigger")
+async def trigger_killswitch(reason: str, ttl: int = 3600):
+    kill_switch.trigger(reason, ttl)
+    return {"status": "killswitch_active", "reason": reason}
+
+@app.post("/compliance/enterprise/killswitch/reset")
+async def reset_killswitch():
+    kill_switch.reset()
+    return {"status": "killswitch_reset"}
+
+@app.get("/compliance/enterprise/audit/verify")
+async def verify_audit():
+    is_valid = audit_logger.verify_chain()
+    return {"is_valid": is_valid}
+
+@app.get("/compliance/enterprise/audit/export")
+async def export_audit():
+    return {"audit_bundle": audit_logger.export_bundle()}
+
+@app.post("/compliance/enterprise/policy/add")
+async def add_policy(name: str, rules: list = Body(...)):
+    policy_engine.add_policy(name, rules)
+    return {"status": "policy_added", "name": name}
+
+@app.get("/compliance/enterprise/approval/{request_id}")
+async def get_approval_status(request_id: str):
+    return approval_flow.check_status(request_id)
+
+@app.post("/compliance/enterprise/approval/{request_id}/approve")
+async def approve_request(request_id: str, approver: str):
+    success = approval_flow.approve(request_id, approver)
+    return {"success": success}
