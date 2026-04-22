@@ -1,0 +1,20 @@
+app = "koola10"
+primary_region = "ams"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[mounts]]
+  source = "metaclaw_data"
+  destination = "/data"
+
+[env]
+  PORT = "8080"
+
+[processes]
+  app = "./agent"
