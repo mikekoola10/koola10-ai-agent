@@ -1,13 +1,15 @@
-from fastapi import FastAPI, Body, Query
+from fastapi import FastAPI, Body, Query, HTTPException
 from memory_graph import MemoryGraph
 from tools import registry
 from semantic_memory import SemanticMemory
 from agents import Orchestrator
+from safety import ControlPlane
 
 app = FastAPI()
 memory = MemoryGraph()
 semantic = SemanticMemory()
 orchestrator = Orchestrator()
+control_plane = ControlPlane(threshold=0.6)
 
 @app.get("/")
 async def health_check():
@@ -31,6 +33,11 @@ async def get_meetings():
 
 @app.post("/tools/execute")
 async def execute_tool(tool_name: str, payload: dict = Body(...)):
+    # Safety Check
+    safety_result = control_plane.evaluate({"type": "tool_execution", "tool": tool_name, "payload": payload})
+    if safety_result["decision"] == "BLOCK":
+        raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
+
     result = registry.run(tool_name, payload)
     if not result.success:
         return {"success": False, "error": result.error}
@@ -63,5 +70,10 @@ async def get_path(source: str, target: str, max_depth: int = Query(3)):
 
 @app.post("/orchestrate")
 async def orchestrate_task(task: str):
+    # Safety Check
+    safety_result = control_plane.evaluate({"type": "orchestration", "task": task})
+    if safety_result["decision"] == "BLOCK":
+        raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
+
     result = orchestrator.run(task)
     return result
