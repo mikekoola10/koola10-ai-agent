@@ -2,10 +2,12 @@ from fastapi import FastAPI, Body, Query
 from memory_graph import MemoryGraph
 from tools import registry
 from semantic_memory import SemanticMemory
+from agents import Orchestrator
 
 app = FastAPI()
 memory = MemoryGraph()
 semantic = SemanticMemory()
+orchestrator = Orchestrator()
 
 @app.get("/")
 async def health_check():
@@ -58,3 +60,8 @@ async def get_ranked_decisions():
 async def get_path(source: str, target: str, max_depth: int = Query(3)):
     path = memory.find_path(source, target, max_depth=max_depth)
     return {"source": source, "target": target, "path": path}
+
+@app.post("/orchestrate")
+async def orchestrate_task(task: str):
+    result = orchestrator.run(task)
+    return result
