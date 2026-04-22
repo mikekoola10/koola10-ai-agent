@@ -13,6 +13,7 @@ from swarm import SwarmBus, SwarmNode
 from swarm.cloud import CloudSwarmRegistry, NodeInfo
 from swarm.router import TaskRouter
 from production import ProductGenerator, ProductDeployer
+from economic import EconomicLedger, EconomicDecisionEngine, EconomicStrategy
 
 app = FastAPI()
 memory = MemoryGraph()
@@ -24,6 +25,9 @@ swarm_bus = SwarmBus()
 swarm_node = SwarmNode(swarm_bus)
 product_generator = ProductGenerator()
 product_deployer = ProductDeployer()
+economic_ledger = EconomicLedger(initial_balance=100.0)
+economic_decision = EconomicDecisionEngine()
+economic_strategy = EconomicStrategy(economic_decision)
 
 # Cross-Cloud Layer
 cloud_registry = CloudSwarmRegistry(swarm_bus.client)
@@ -77,7 +81,7 @@ async def get_meetings():
 
 @app.post("/tools/execute")
 async def execute_tool(tool_name: str, payload: dict = Body(...)):
-    action_info = {"type": "tool_execution", "tool": tool_name, "payload": payload}
+    action_info = {"type": "tool_execute", "tool": tool_name, "payload": payload}
 
     # Safety Check
     safety_result = control_plane.evaluate(action_info)
@@ -191,10 +195,20 @@ async def deploy_product(product_name: str):
 
 @app.post("/production/full")
 async def full_production_cycle(spec: dict = Body(...)):
+    action_info = {"type": "full_production", "spec": spec}
+
+    # Economic Check
+    econ_res = economic_decision.should_execute(action_info)
+    if econ_res["recommendation"] == "BLOCK":
+        raise HTTPException(status_code=402, detail=f"Action blocked by economic engine. ROI too low: {econ_res['roi']}")
+
     # Safety Check
-    safety_result = control_plane.evaluate({"type": "full_production", "spec": spec})
+    safety_result = control_plane.evaluate(action_info)
     if safety_result["decision"] == "BLOCK":
         raise HTTPException(status_code=403, detail=f"Action blocked by safety control plane. Risk score: {safety_result['risk_score']}")
+
+    # Record Cost
+    economic_ledger.record_cost("full_production", econ_res["cost_estimate"], f"Production cycle for {spec.get('name')}")
 
     # Generate
     gen_result = product_generator.generate(spec)
@@ -202,6 +216,40 @@ async def full_production_cycle(spec: dict = Body(...)):
     deploy_result = product_deployer.deploy(gen_result["directory"], gen_result["product_name"])
 
     # Log to business loop
-    business.log_action({"type": "full_production", "spec": spec}, {"gen": gen_result, "deploy": deploy_result})
+    business.log_action(action_info, {"gen": gen_result, "deploy": deploy_result})
 
-    return {"generation": gen_result, "deployment": deploy_result}
+    return {"generation": gen_result, "deployment": deploy_result, "economics": econ_res}
+
+@app.post("/economic/evaluate")
+async def evaluate_economics(action: dict = Body(...)):
+    return economic_decision.should_execute(action)
+
+@app.get("/economic/ledger")
+async def get_ledger():
+    return economic_ledger.get_summary()
+
+@app.post("/economic/revenue")
+async def report_revenue(amount: float, source: str):
+    economic_ledger.record_revenue(amount, source)
+    return {"status": "revenue recorded", "new_balance": economic_ledger.get_balance()}
+
+@app.post("/economic/execute")
+async def execute_economic_task(action: dict = Body(...)):
+    # 1. Economic Gating
+    econ_res = economic_decision.should_execute(action)
+    if econ_res["recommendation"] == "BLOCK":
+        raise HTTPException(status_code=402, detail=f"Action blocked by economic engine. ROI {econ_res['roi']} < minimum.")
+
+    # 2. Budget Check
+    if econ_res["cost_estimate"] > economic_ledger.get_balance():
+        raise HTTPException(status_code=402, detail="Insufficient budget in economic ledger")
+
+    # 3. Safety Gating
+    safety_res = control_plane.evaluate(action)
+    if safety_res["decision"] == "BLOCK":
+        raise HTTPException(status_code=403, detail="Action blocked by safety control plane")
+
+    # 4. Record Cost & Execute (Simplified for milestone)
+    economic_ledger.record_cost(action.get("type", "other"), econ_res["cost_estimate"], f"Economic execution of {action.get('type')}")
+
+    return {"status": "authorized_and_recorded", "economics": econ_res, "safety": safety_res}
