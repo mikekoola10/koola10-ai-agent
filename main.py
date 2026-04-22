@@ -1,3 +1,7 @@
+import asyncio
+import os
+import time
+from typing import Optional
 from fastapi import FastAPI, Body, Query, HTTPException
 from memory_graph import MemoryGraph
 from tools import registry
@@ -6,6 +10,8 @@ from agents import Orchestrator
 from safety import ControlPlane
 from business import BusinessLoop
 from swarm import SwarmBus, SwarmNode
+from swarm.cloud import CloudSwarmRegistry, NodeInfo
+from swarm.router import TaskRouter
 
 app = FastAPI()
 memory = MemoryGraph()
@@ -15,6 +21,36 @@ control_plane = ControlPlane(threshold=0.6)
 business = BusinessLoop()
 swarm_bus = SwarmBus()
 swarm_node = SwarmNode(swarm_bus)
+
+# Cross-Cloud Layer
+cloud_registry = CloudSwarmRegistry(swarm_bus.client)
+task_router = TaskRouter(cloud_registry)
+
+NODE_ID = os.getenv("NODE_ID", "koola10-primary")
+FLY_REGION = os.getenv("FLY_REGION", "local")
+ENDPOINT = os.getenv("ENDPOINT", "http://localhost:8080")
+
+@app.on_event("startup")
+async def startup_event():
+    # Register Node
+    node_info = NodeInfo(
+        node_id=NODE_ID,
+        region=FLY_REGION,
+        endpoint=ENDPOINT,
+        last_seen=time.time()
+    )
+    cloud_registry.register(node_info)
+
+    # Start Heartbeat
+    asyncio.create_task(heartbeat_task())
+
+async def heartbeat_task():
+    while True:
+        await asyncio.sleep(30)
+        try:
+            cloud_registry.heartbeat(NODE_ID)
+        except Exception as e:
+            print(f"Heartbeat failed: {e}")
 
 @app.get("/")
 async def health_check():
@@ -114,3 +150,16 @@ async def send_swarm_result(result: dict = Body(...)):
 async def listen_swarm(limit: int = 10):
     messages = swarm_bus.get_recent_messages("results", limit=limit)
     return {"recent_results": messages}
+
+@app.get("/swarm/cloud/nodes")
+async def list_cloud_nodes(region: Optional[str] = None):
+    if region:
+        return {"nodes": cloud_registry.get_nodes_in_region(region)}
+    return {"nodes": cloud_registry.get_all_healthy_nodes()}
+
+@app.post("/swarm/cloud/route")
+async def route_swarm_task(preferred_region: Optional[str] = None):
+    node = task_router.select_optimal_node(preferred_region)
+    if not node:
+        raise HTTPException(status_code=503, detail="No healthy swarm nodes available")
+    return {"selected_node": node}

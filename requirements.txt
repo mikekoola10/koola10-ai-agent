@@ -3,3 +3,4 @@ uvicorn
 sentence-transformers
 numpy
 redis
+aiohttp
