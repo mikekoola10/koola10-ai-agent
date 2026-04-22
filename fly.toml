@@ -11,3 +11,7 @@ primary_region = "ams"
 
 [[vm]]
   size = "shared-cpu-1x"
+
+[[mounts]]
+  source = "koola10_data"
+  destination = "/data"
