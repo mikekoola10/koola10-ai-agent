@@ -5,6 +5,7 @@ from semantic_memory import SemanticMemory
 from agents import Orchestrator
 from safety import ControlPlane
 from business import BusinessLoop
+from swarm import SwarmBus, SwarmNode
 
 app = FastAPI()
 memory = MemoryGraph()
@@ -12,6 +13,8 @@ semantic = SemanticMemory()
 orchestrator = Orchestrator()
 control_plane = ControlPlane(threshold=0.6)
 business = BusinessLoop()
+swarm_bus = SwarmBus()
+swarm_node = SwarmNode(swarm_bus)
 
 @app.get("/")
 async def health_check():
@@ -96,3 +99,18 @@ async def report_outcome(action_id: str, outcome: dict = Body(...)):
 @app.get("/business/metrics")
 async def get_metrics():
     return business.get_feedback_signal()
+
+@app.post("/swarm/broadcast")
+async def broadcast_task(task: str):
+    msg = swarm_node.broadcast_task(task)
+    return {"status": "broadcasted", "message": msg}
+
+@app.post("/swarm/result")
+async def send_swarm_result(result: dict = Body(...)):
+    msg = swarm_node.send_result(result)
+    return {"status": "result_sent", "message": msg}
+
+@app.get("/swarm/listen")
+async def listen_swarm(limit: int = 10):
+    messages = swarm_bus.get_recent_messages("results", limit=limit)
+    return {"recent_results": messages}
