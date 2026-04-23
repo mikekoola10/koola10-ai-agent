@@ -1,7 +1,2 @@
 fastapi
 uvicorn
-sentence-transformers
-numpy
-redis
-aiohttp
-pyyaml

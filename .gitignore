@@ -1,9 +1,0 @@
-__pycache__/
-*.pyc
-uvicorn.log
-.venv/
-env/
-venv/
-data/
-fly-logs.txt
-analysis.json
