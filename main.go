@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Grant represents the unified grant structure
@@ -66,6 +67,22 @@ type ApplicationDraft struct {
 	ProjectDescription    string `json:"project_description"`
 	BudgetJustification   string `json:"budget_justification"`
 	OrganizationalCapacity string `json:"organizational_capacity"`
+	FollowUpDraft         string `json:"follow_up_draft,omitempty"`
+}
+
+// ApplicationSummary for the list endpoint
+type ApplicationSummary struct {
+	ApplicationID string `json:"application_id"`
+	GrantTitle    string `json:"grant_title"`
+	Status        string `json:"status"`
+	Deadline      string `json:"deadline"`
+}
+
+// MonitorResult represents a generated follow-up
+type MonitorResult struct {
+	ApplicationID string `json:"application_id"`
+	GrantTitle    string `json:"grant_title"`
+	FollowUpEmail string `json:"follow_up_email"`
 }
 
 var (
@@ -81,8 +98,12 @@ func main() {
 	}
 
 	// Ensure directories exist
-	os.MkdirAll(filepath.Dir(cachePath), 0755)
-	os.MkdirAll(appsDir, 0755)
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err != nil {
+		log.Printf("failed to create cache dir: %v", err)
+	}
+	if err := os.MkdirAll(appsDir, 0755); err != nil {
+		log.Printf("failed to create apps dir: %v", err)
+	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
@@ -91,6 +112,9 @@ func main() {
 	http.HandleFunc("/grants/search", handleSearch)
 	http.HandleFunc("/grants/apply", handleApply)
 	http.HandleFunc("/grants/status", handleStatus)
+	http.HandleFunc("/grants/applications", handleApplicationsList)
+	http.HandleFunc("/grants/monitor", handleMonitor)
+	http.HandleFunc("/grants/update-status", handleUpdateStatus)
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 
@@ -111,8 +135,12 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		searchReq["fundingCategories"] = category
 	}
 
-	body, _ := json.Marshal(searchReq)
-	resp, err := http.Post("https://api.grants.gov/v1/api/search2", "application/json", bytes.NewBuffer(body))
+	reqBody, err := json.Marshal(searchReq)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	resp, err := http.Post("https://api.grants.gov/v1/api/search2", "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		http.Error(w, "failed to search grants", http.StatusInternalServerError)
 		return
@@ -174,8 +202,9 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Save cache
 	cacheMutex.Lock()
-	cacheData, _ := json.Marshal(enrichedCache)
-	os.WriteFile(cachePath, cacheData, 0644)
+	if cacheData, err := json.Marshal(enrichedCache); err == nil {
+		os.WriteFile(cachePath, cacheData, 0644)
+	}
 	cacheMutex.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -204,7 +233,7 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 
 	grant, ok := enrichedCache[req.GrantID]
 	if !ok {
-		http.Error(w, "grant not found in cache", http.StatusNotFound)
+		http.Error(w, "grant not found in cache. please search for it first.", http.StatusNotFound)
 		return
 	}
 
@@ -239,9 +268,17 @@ Provide the response in JSON format with the following keys: executive_summary, 
 		"response_format": map[string]string{"type": "json_object"},
 	}
 
-	dsBody, _ := json.Marshal(dsReq)
+	dsBody, err := json.Marshal(dsReq)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	client := &http.Client{}
-	httpReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	httpReq, err := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
@@ -282,8 +319,9 @@ Provide the response in JSON format with the following keys: executive_summary, 
 
 	// Save draft
 	appPath := filepath.Join(appsDir, appID+".json")
-	appData, _ := json.Marshal(draft)
-	os.WriteFile(appPath, appData, 0644)
+	if appData, err := json.Marshal(draft); err == nil {
+		os.WriteFile(appPath, appData, 0644)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(draft)
@@ -296,7 +334,9 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	appPath := filepath.Join(appsDir, appID+".json")
+	// Sanitize to prevent path traversal
+	safeID := filepath.Base(appID)
+	appPath := filepath.Join(appsDir, safeID+".json")
 	data, err := os.ReadFile(appPath)
 	if err != nil {
 		http.Error(w, "application not found", http.StatusNotFound)
@@ -305,6 +345,185 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(data)
+}
+
+func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ApplicationID string `json:"application_id"`
+		Status        string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	safeID := filepath.Base(req.ApplicationID)
+	appPath := filepath.Join(appsDir, safeID+".json")
+	data, err := os.ReadFile(appPath)
+	if err != nil {
+		http.Error(w, "application not found", http.StatusNotFound)
+		return
+	}
+
+	var draft ApplicationDraft
+	if err := json.Unmarshal(data, &draft); err != nil {
+		http.Error(w, "failed to parse application data", http.StatusInternalServerError)
+		return
+	}
+
+	draft.Status = req.Status
+	updatedData, _ := json.Marshal(draft)
+	os.WriteFile(appPath, updatedData, 0644)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(draft)
+}
+
+func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
+	files, err := os.ReadDir(appsDir)
+	if err != nil {
+		http.Error(w, "failed to read applications", http.StatusInternalServerError)
+		return
+	}
+
+	// Load cache for titles and deadlines
+	cacheMutex.Lock()
+	enrichedCache := make(map[string]Grant)
+	if data, err := os.ReadFile(cachePath); err == nil {
+		json.Unmarshal(data, &enrichedCache)
+	}
+	cacheMutex.Unlock()
+
+	var summaries []ApplicationSummary
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ".json") {
+			data, err := os.ReadFile(filepath.Join(appsDir, file.Name()))
+			if err != nil {
+				continue
+			}
+			var draft ApplicationDraft
+			if err := json.Unmarshal(data, &draft); err == nil {
+				summary := ApplicationSummary{
+					ApplicationID: draft.ApplicationID,
+					Status:        draft.Status,
+				}
+				if grant, ok := enrichedCache[draft.GrantID]; ok {
+					summary.GrantTitle = grant.Title
+					summary.Deadline = grant.Deadline
+				}
+				summaries = append(summaries, summary)
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summaries)
+}
+
+func handleMonitor(w http.ResponseWriter, r *http.Request) {
+	files, err := os.ReadDir(appsDir)
+	if err != nil {
+		http.Error(w, "failed to read applications", http.StatusInternalServerError)
+		return
+	}
+
+	cacheMutex.Lock()
+	enrichedCache := make(map[string]Grant)
+	if data, err := os.ReadFile(cachePath); err == nil {
+		json.Unmarshal(data, &enrichedCache)
+	}
+	cacheMutex.Unlock()
+
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	var reports []MonitorResult
+
+	for _, file := range files {
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+
+		appPath := filepath.Join(appsDir, file.Name())
+		data, err := os.ReadFile(appPath)
+		if err != nil {
+			continue
+		}
+
+		var draft ApplicationDraft
+		if err := json.Unmarshal(data, &draft); err != nil {
+			continue
+		}
+
+		// Also check draft_generated if they haven't manually updated status but we still want to monitor?
+		// User said: "For each application with status 'submitted' or 'pending'"
+		if draft.Status != "submitted" && draft.Status != "pending" {
+			continue
+		}
+
+		grant, ok := enrichedCache[draft.GrantID]
+		if !ok || grant.Deadline == "" {
+			continue
+		}
+
+		// Parse deadline: "MM/DD/YYYY"
+		deadline, err := time.Parse("01/02/2006", grant.Deadline)
+		if err != nil {
+			continue
+		}
+
+		if time.Now().After(deadline) && draft.FollowUpDraft == "" && apiKey != "" {
+			// Generate follow-up
+			prompt := fmt.Sprintf("Write a polite, professional follow-up email to the agency '%s' regarding our application for the grant '%s' (ID: %s). The deadline has passed and we are checking on the status.", grant.Agency, grant.Title, grant.ID)
+
+			dsReq := map[string]interface{}{
+				"model": "deepseek-chat",
+				"messages": []map[string]string{
+					{"role": "system", "content": "You are a professional grant consultant. Return ONLY the email draft text."},
+					{"role": "user", "content": prompt},
+				},
+			}
+			dsBody, _ := json.Marshal(dsReq)
+			client := &http.Client{}
+			httpReq, err := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+			if err != nil {
+				continue
+			}
+			httpReq.Header.Set("Content-Type", "application/json")
+			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+			resp, err := client.Do(httpReq)
+			if err == nil {
+				var dsRes struct {
+					Choices []struct {
+						Message struct {
+							Content string `json:"content"`
+						} `json:"message"`
+					} `json:"choices"`
+				}
+				if json.NewDecoder(resp.Body).Decode(&dsRes) == nil && len(dsRes.Choices) > 0 {
+					draft.FollowUpDraft = dsRes.Choices[0].Message.Content
+					updatedData, _ := json.Marshal(draft)
+					os.WriteFile(appPath, updatedData, 0644)
+					reports = append(reports, MonitorResult{
+						ApplicationID: draft.ApplicationID,
+						GrantTitle:    grant.Title,
+						FollowUpEmail: draft.FollowUpDraft,
+					})
+				}
+				resp.Body.Close()
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":     "scan_complete",
+		"follow_ups": reports,
+	})
 }
 
 func generateID() string {
