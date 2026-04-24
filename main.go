@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -115,6 +116,8 @@ func main() {
 	http.HandleFunc("/grants/applications", handleApplicationsList)
 	http.HandleFunc("/grants/monitor", handleMonitor)
 	http.HandleFunc("/grants/update-status", handleUpdateStatus)
+	http.HandleFunc("/grants/apply-auto", handleApplyAuto)
+	http.HandleFunc("/grants/check-status", handleCheckStatus)
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 
@@ -524,6 +527,70 @@ func handleMonitor(w http.ResponseWriter, r *http.Request) {
 		"status":     "scan_complete",
 		"follow_ups": reports,
 	})
+}
+
+func handleApplyAuto(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		URL      string            `json:"url"`
+		FormData map[string]string `json:"form_data"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
+	if browserAgentURL == "" {
+		browserAgentURL = "https://koola10-browser.fly.dev"
+	}
+
+	jsonBody, _ := json.Marshal(req)
+	resp, err := http.Post(browserAgentURL+"/browser/submit-form", "application/json", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		http.Error(w, "failed to call browser agent: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	io.Copy(w, resp.Body)
+}
+
+func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		URL         string `json:"url"`
+		Instruction string `json:"instruction"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
+	if browserAgentURL == "" {
+		browserAgentURL = "https://koola10-browser.fly.dev"
+	}
+
+	jsonBody, _ := json.Marshal(req)
+	resp, err := http.Post(browserAgentURL+"/browser/extract", "application/json", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		http.Error(w, "failed to call browser agent: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	io.Copy(w, resp.Body)
 }
 
 func generateID() string {
