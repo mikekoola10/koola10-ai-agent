@@ -1,0 +1,26 @@
+# Build stage
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+COPY go.mod ./
+
+COPY . .
+RUN go build -o agent main.go
+
+# Run stage
+FROM alpine:latest
+
+# Install necessary runtime dependencies
+RUN apk add --no-cache ca-certificates
+
+WORKDIR /app
+COPY --from=builder /app/agent .
+
+# Create data directory for MetaClaw persistence
+RUN mkdir -p /data && chown 1000:1000 /data
+
+USER 1000:1000
+
+EXPOSE 8080
+
+CMD ["./agent"]
