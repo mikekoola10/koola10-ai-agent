@@ -20,7 +20,8 @@ import (
 	"time"
 )
 
-// Grant represents the unified grant structure
+// --- Structs ---
+
 type Grant struct {
 	ID          string `json:"grant_id"`
 	Title       string `json:"title"`
@@ -31,7 +32,6 @@ type Grant struct {
 	Description string `json:"description"`
 }
 
-// GrantsGovSearchResponse for parsing search2 results
 type GrantsGovSearchResponse struct {
 	Data struct {
 		OppHits []struct {
@@ -43,7 +43,6 @@ type GrantsGovSearchResponse struct {
 	} `json:"data"`
 }
 
-// GrantsGovDetailsResponse for parsing details results
 type GrantsGovDetailsResponse struct {
 	Synopsis struct {
 		SynDesc                  string `json:"synopsisDesc"`
@@ -52,7 +51,6 @@ type GrantsGovDetailsResponse struct {
 	} `json:"synopsis"`
 }
 
-// ApplyRequest represents the incoming POST body for /grants/apply
 type ApplyRequest struct {
 	GrantID    string `json:"grant_id"`
 	OrgName    string `json:"org_name"`
@@ -61,7 +59,6 @@ type ApplyRequest struct {
 	OrgTaxID   string `json:"org_tax_id"`
 }
 
-// ApplicationDraft represents the stored application
 type ApplicationDraft struct {
 	ApplicationID         string `json:"application_id"`
 	GrantID               string `json:"grant_id"`
@@ -74,7 +71,6 @@ type ApplicationDraft struct {
 	FollowUpDraft         string `json:"follow_up_draft,omitempty"`
 }
 
-// ApplicationSummary for the list endpoint
 type ApplicationSummary struct {
 	ApplicationID string `json:"application_id"`
 	GrantTitle    string `json:"grant_title"`
@@ -82,14 +78,12 @@ type ApplicationSummary struct {
 	Deadline      string `json:"deadline"`
 }
 
-// MonitorResult represents a generated follow-up
 type MonitorResult struct {
 	ApplicationID string `json:"application_id"`
 	GrantTitle    string `json:"grant_title"`
 	FollowUpEmail string `json:"follow_up_email"`
 }
 
-// AI structs
 type ChatRequest struct {
 	Prompt  string `json:"prompt"`
 	Context string `json:"context,omitempty"`
@@ -117,7 +111,6 @@ type AnalyzeGrantResponse struct {
 	Summary           string   `json:"summary"`
 }
 
-// Graph Memory Structs
 type Meeting struct {
 	MeetingID   string   `json:"meeting_id"`
 	Timestamp   string   `json:"timestamp"`
@@ -128,7 +121,7 @@ type Meeting struct {
 
 type Entity struct {
 	Name  string   `json:"name"`
-	Type  string   `json:"type"` // "person", "decision", "task"
+	Type  string   `json:"type"`
 	Tasks []string `json:"tasks,omitempty"`
 }
 
@@ -148,7 +141,6 @@ type MemoryGraph struct {
 	mu       sync.RWMutex
 }
 
-// Semantic Memory Structs
 type SemanticItem struct {
 	Text   string    `json:"text"`
 	RefID  string    `json:"ref_id"`
@@ -166,7 +158,6 @@ type SemanticSearchResult struct {
 	Text  string  `json:"text"`
 }
 
-// Compliance Structs
 type AuditEntry struct {
 	Timestamp string                 `json:"timestamp"`
 	Action    string                 `json:"action"`
@@ -175,12 +166,13 @@ type AuditEntry struct {
 }
 
 type ApprovalRequest struct {
-	ID        string                 `json:"approval_id"`
-	Action    string                 `json:"action"`
-	Details   map[string]interface{} `json:"details"`
-	Status    string                 `json:"status"` // "pending", "approved", "rejected"
-	Approver  string                 `json:"approver,omitempty"`
-	CreatedAt string                 `json:"created_at"`
+	ID            string                 `json:"approval_id"`
+	Action        string                 `json:"action"`
+	Details       map[string]interface{} `json:"details"`
+	Status        string                 `json:"status"`
+	Approver      string                 `json:"approver,omitempty"`
+	Justification string                 `json:"justification,omitempty"`
+	CreatedAt     string                 `json:"created_at"`
 }
 
 type UsageLog struct {
@@ -189,7 +181,38 @@ type UsageLog struct {
 	Cost       float64 `json:"cost"`
 }
 
-// Global States
+type Transaction struct {
+	Timestamp   string  `json:"timestamp"`
+	Type        string  `json:"type"`
+	Category    string  `json:"category"`
+	Amount      float64 `json:"amount"`
+	Description string  `json:"description"`
+}
+
+type EconomicLedger struct {
+	Balance      float64       `json:"balance"`
+	TotalCosts   float64       `json:"total_costs"`
+	TotalRevenue float64       `json:"total_revenue"`
+	Transactions []Transaction `json:"transactions"`
+	mu           sync.RWMutex
+}
+
+type EconomicSummary struct {
+	Balance      float64 `json:"balance"`
+	TotalCosts   float64 `json:"total_costs"`
+	TotalRevenue float64 `json:"total_revenue"`
+	ROI          float64 `json:"roi"`
+}
+
+type EconomicEvaluation struct {
+	Decision      string  `json:"decision"`
+	EstimatedCost float64 `json:"estimated_cost"`
+	ProjectedROI  float64 `json:"projected_roi"`
+	Reason        string  `json:"reason"`
+}
+
+// --- Global States ---
+
 var (
 	cacheMutex   sync.Mutex
 	auditMutex   sync.Mutex
@@ -197,14 +220,15 @@ var (
 	approvalMu   sync.Mutex
 	killSwitchMu sync.Mutex
 
-	cachePath     = "/data/grants_cache.json"
-	appsDir       = "/data/applications"
-	memoryPath    = "/data/memory.json"
-	graphPath     = "/data/memory_graph.json"
-	semanticPath  = "/data/semantic_index.json"
-	auditPath     = "/data/audit_chain.jsonl"
-	usagePath     = "/data/usage.jsonl"
+	cachePath      = "/data/grants_cache.json"
+	appsDir        = "/data/applications"
+	memoryPath     = "/data/memory.json"
+	graphPath      = "/data/memory_graph.json"
+	semanticPath   = "/data/semantic_index.json"
+	auditPath      = "/data/audit_chain.jsonl"
+	usagePath      = "/data/usage.jsonl"
 	killSwitchPath = "/data/kill_switch"
+	ledgerPath     = "/data/economic_ledger.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -216,15 +240,20 @@ var (
 		Items: []SemanticItem{},
 	}
 
+	globalLedger = &EconomicLedger{
+		Balance: 100.0,
+	}
+
 	approvalStore = make(map[string]*ApprovalRequest)
 
-	// Rate Limiter
 	rlBucket     = 15.0
 	rlMaxBucket  = 15.0
-	rlRate       = 10.0 // reqs/sec
+	rlRate       = 10.0
 	rlLastUpdate = time.Now()
 	rlMu         sync.Mutex
 )
+
+// --- Main ---
 
 func main() {
 	port := os.Getenv("PORT")
@@ -232,22 +261,18 @@ func main() {
 		port = "8080"
 	}
 
-	// Ensure directories exist
-	if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err != nil {
-		log.Printf("failed to create cache dir: %v", err)
-	}
-	if err := os.MkdirAll(appsDir, 0755); err != nil {
-		log.Printf("failed to create apps dir: %v", err)
-	}
+	os.MkdirAll(filepath.Dir(cachePath), 0755)
+	os.MkdirAll(appsDir, 0755)
 
-	// Load data
 	globalGraph.Load()
 	globalSemantic.Load()
+	globalLedger.Load()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
 
+	// Grant Endpoints
 	http.HandleFunc("/grants/search", handleSearch)
 	http.HandleFunc("/grants/apply", handleApply)
 	http.HandleFunc("/grants/status", handleStatus)
@@ -257,24 +282,22 @@ func main() {
 	http.HandleFunc("/grants/apply-auto", handleApplyAuto)
 	http.HandleFunc("/grants/check-status", handleCheckStatus)
 
-	// AI Endpoints
+	// AI & Memory Endpoints
 	http.HandleFunc("/ai/chat", handleAIChat)
 	http.HandleFunc("/ai/remember", handleAIRemember)
 	http.HandleFunc("/ai/recall", handleAIRecall)
 	http.HandleFunc("/ai/analyze-grant", handleAIAnalyzeGrant)
 
-	// Memory Graph Endpoints
 	http.HandleFunc("/memory/meetings", handleMemoryMeetings)
 	http.HandleFunc("/memory/entity/", handleMemoryEntity)
 	http.HandleFunc("/memory/influence/", handleMemoryInfluence)
 	http.HandleFunc("/memory/path", handleMemoryPath)
 	http.HandleFunc("/memory/decisions/ranked", handleMemoryDecisionsRanked)
 
-	// Semantic Endpoints
 	http.HandleFunc("/semantic/index", handleSemanticIndex)
 	http.HandleFunc("/semantic/search", handleSemanticSearch)
 
-	// Compliance Endpoints
+	// Compliance & Economic Endpoints
 	http.HandleFunc("/compliance/audit", handleComplianceAudit)
 	http.HandleFunc("/compliance/audit/verify", handleComplianceAuditVerify)
 	http.HandleFunc("/compliance/approval", handleComplianceApproval)
@@ -283,342 +306,20 @@ func main() {
 	http.HandleFunc("/compliance/kill-switch/reset", handleComplianceKillSwitchReset)
 	http.HandleFunc("/compliance/usage", handleComplianceUsage)
 
-	log.Printf("starting server on 0.0.0.0:%s", port)
+	http.HandleFunc("/economic/ledger/cost", handleEconomicLedgerCost)
+	http.HandleFunc("/economic/ledger/revenue", handleEconomicLedgerRevenue)
+	http.HandleFunc("/economic/ledger/summary", handleEconomicLedgerSummary)
+	http.HandleFunc("/economic/evaluate", handleEconomicEvaluate)
 
+	log.Printf("starting server on 0.0.0.0:%s", port)
 	err := http.ListenAndServe("0.0.0.0:"+port, nil)
 	if err != nil {
 		log.Fatalf("server_failed: %v", err)
 	}
 }
 
-// Compliance Logic
-func AddAuditEntry(action string, details map[string]interface{}) {
-	auditMutex.Lock()
-	defer auditMutex.Unlock()
+// --- Methods ---
 
-	lastHash := "0000000000000000000000000000000000000000000000000000000000000000"
-
-	// Read last entry for hash chaining
-	file, err := os.Open(auditPath)
-	if err == nil {
-		scanner := bufio.NewScanner(file)
-		var lastLine string
-		for scanner.Scan() {
-			lastLine = scanner.Text()
-		}
-		file.Close()
-		if lastLine != "" {
-			var entry AuditEntry
-			if err := json.Unmarshal([]byte(lastLine), &entry); err == nil {
-				lastHash = entry.Hash
-			}
-		}
-	}
-
-	entry := AuditEntry{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Action:    action,
-		Details:   details,
-	}
-
-	entryJSON, _ := json.Marshal(entry)
-	// Hash is SHA256(prev_hash + entry_json_without_hash)
-	h := sha256.New()
-	h.Write([]byte(lastHash + string(entryJSON)))
-	entry.Hash = hex.EncodeToString(h.Sum(nil))
-
-	f, err := os.OpenFile(auditPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		json.NewEncoder(f).Encode(entry)
-		f.Close()
-	}
-}
-
-func checkKillSwitch() bool {
-	killSwitchMu.Lock()
-	defer killSwitchMu.Unlock()
-	data, err := os.ReadFile(killSwitchPath)
-	return err == nil && string(data) == "active"
-}
-
-func rateLimit() bool {
-	rlMu.Lock()
-	defer rlMu.Unlock()
-
-	now := time.Now()
-	elapsed := now.Sub(rlLastUpdate).Seconds()
-	rlLastUpdate = now
-
-	rlBucket += elapsed * rlRate
-	if rlBucket > rlMaxBucket {
-		rlBucket = rlMaxBucket
-	}
-
-	if rlBucket >= 1.0 {
-		rlBucket -= 1.0
-		return true
-	}
-	return false
-}
-
-func LogUsage(tokens int) {
-	usageMutex.Lock()
-	defer usageMutex.Unlock()
-
-	cost := float64(tokens) * 0.000002 // Arbitrary estimate: $2 per 1M tokens
-	logEntry := UsageLog{
-		Timestamp:  time.Now().Format(time.RFC3339),
-		TokensUsed: tokens,
-		Cost:       cost,
-	}
-
-	f, err := os.OpenFile(usagePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		json.NewEncoder(f).Encode(logEntry)
-		f.Close()
-	}
-}
-
-// Compliance Handlers
-func handleComplianceAudit(w http.ResponseWriter, r *http.Request) {
-	auditMutex.Lock()
-	defer auditMutex.Unlock()
-
-	file, err := os.Open(auditPath)
-	if err != nil {
-		http.Error(w, "audit log empty", http.StatusNotFound)
-		return
-	}
-	defer file.Close()
-
-	var entries []AuditEntry
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var entry AuditEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil {
-			entries = append(entries, entry)
-		}
-	}
-
-	if len(entries) > 200 {
-		entries = entries[len(entries)-200:]
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
-}
-
-func handleComplianceAuditVerify(w http.ResponseWriter, r *http.Request) {
-	auditMutex.Lock()
-	defer auditMutex.Unlock()
-
-	file, err := os.Open(auditPath)
-	if err != nil {
-		json.NewEncoder(w).Encode(map[string]bool{"valid": true}) // Empty log is valid
-		return
-	}
-	defer file.Close()
-
-	valid := true
-	lastHash := "0000000000000000000000000000000000000000000000000000000000000000"
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var entry AuditEntry
-		line := scanner.Bytes()
-		json.Unmarshal(line, &entry)
-
-		providedHash := entry.Hash
-		entry.Hash = ""
-		entryJSON, _ := json.Marshal(entry)
-
-		h := sha256.New()
-		h.Write([]byte(lastHash + string(entryJSON)))
-		calculatedHash := hex.EncodeToString(h.Sum(nil))
-
-		if providedHash != calculatedHash {
-			valid = false
-			break
-		}
-		lastHash = providedHash
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"valid": valid})
-}
-
-func handleComplianceApproval(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST required", http.StatusMethodNotAllowed)
-		return
-	}
-	var req ApprovalRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-
-	req.ID = generateID()
-	req.Status = "pending"
-	req.CreatedAt = time.Now().Format(time.RFC3339)
-
-	approvalMu.Lock()
-	approvalStore[req.ID] = &req
-	approvalMu.Unlock()
-
-	AddAuditEntry("approval_request_created", map[string]interface{}{"approval_id": req.ID, "action": req.Action})
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(req)
-}
-
-func handleComplianceApprove(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST required", http.StatusMethodNotAllowed)
-		return
-	}
-	var req struct {
-		ApprovalID string `json:"approval_id"`
-		Approver   string `json:"approver"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-
-	approvalMu.Lock()
-	ap, ok := approvalStore[req.ApprovalID]
-	if !ok {
-		approvalMu.Unlock()
-		http.Error(w, "approval not found", http.StatusNotFound)
-		return
-	}
-	ap.Status = "approved"
-	ap.Approver = req.Approver
-	approvalMu.Unlock()
-
-	AddAuditEntry("action_approved", map[string]interface{}{"approval_id": req.ApprovalID, "approver": req.Approver})
-
-	// Implementation note: original action execution would be triggered here in a real system.
-	// For this task, the endpoints check for "approved" status.
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ap)
-}
-
-func handleComplianceKillSwitch(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST required", http.StatusMethodNotAllowed)
-		return
-	}
-	killSwitchMu.Lock()
-	os.WriteFile(killSwitchPath, []byte("active"), 0644)
-	killSwitchMu.Unlock()
-
-	AddAuditEntry("kill_switch_activated", nil)
-	w.Write([]byte("Kill-switch active"))
-}
-
-func handleComplianceKillSwitchReset(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST required", http.StatusMethodNotAllowed)
-		return
-	}
-	killSwitchMu.Lock()
-	os.Remove(killSwitchPath)
-	killSwitchMu.Unlock()
-
-	AddAuditEntry("kill_switch_reset", nil)
-	w.Write([]byte("Kill-switch reset"))
-}
-
-func handleComplianceUsage(w http.ResponseWriter, r *http.Request) {
-	usageMutex.Lock()
-	defer usageMutex.Unlock()
-
-	file, err := os.Open(usagePath)
-	if err != nil {
-		http.Error(w, "no usage data", http.StatusNotFound)
-		return
-	}
-	defer file.Close()
-
-	var totalTokens int
-	var totalCost float64
-	cutoff := time.Now().Add(-24 * time.Hour)
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var logEntry UsageLog
-		if err := json.Unmarshal(scanner.Bytes(), &logEntry); err == nil {
-			ts, _ := time.Parse(time.RFC3339, logEntry.Timestamp)
-			if ts.After(cutoff) {
-				totalTokens += logEntry.TokensUsed
-				totalCost += logEntry.Cost
-			}
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"period":       "last_24h",
-		"total_tokens": totalTokens,
-		"total_cost":   totalCost,
-	})
-}
-
-// Integration Gating
-func handleApplyAuto(w http.ResponseWriter, r *http.Request) {
-	if checkKillSwitch() {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"status": "blocked", "reason": "global_kill_switch_active"})
-		return
-	}
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		URL        string            `json:"url"`
-		FormData   map[string]string `json:"form_data"`
-		ApprovalID string            `json:"approval_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Gate behind approval
-	approvalMu.Lock()
-	ap, ok := approvalStore[req.ApprovalID]
-	approvalMu.Unlock()
-	if !ok || ap.Status != "approved" || ap.Action != "grant_submit" {
-		http.Error(w, "unauthorized: action requires approved request", http.StatusForbidden)
-		return
-	}
-
-	AddAuditEntry("grant_submit_initiated", map[string]interface{}{"url": req.URL, "approval_id": req.ApprovalID})
-
-	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
-	if browserAgentURL == "" {
-		browserAgentURL = "https://koola10-browser.fly.dev"
-	}
-
-	jsonBody, _ := json.Marshal(req)
-	resp, err := http.Post(browserAgentURL+"/browser/submit-form", "application/json", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		http.Error(w, "failed to call browser agent: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	w.Header().Set("Content-Type", "application/json")
-	io.Copy(w, resp.Body)
-}
-
-// Graph methods
 func (g *MemoryGraph) Save() {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -640,76 +341,48 @@ func (g *MemoryGraph) Load() {
 func (g *MemoryGraph) AddWeightedEdge(source, target, relation string, metadata map[string]interface{}) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-
 	for i, edge := range g.Edges {
 		if edge.Source == source && edge.Target == target && edge.Relation == relation {
 			g.Edges[i].Weight += 0.2
-			if g.Edges[i].Weight > 2.0 {
-				g.Edges[i].Weight = 2.0
-			}
+			if g.Edges[i].Weight > 2.0 { g.Edges[i].Weight = 2.0 }
 			g.Edges[i].Frequency++
 			return
 		}
 	}
-
-	g.Edges = append(g.Edges, Edge{
-		Source:    source,
-		Target:    target,
-		Relation:  relation,
-		Weight:    1.0,
-		Frequency: 1,
-		Metadata:  metadata,
-	})
+	g.Edges = append(g.Edges, Edge{Source: source, Target: target, Relation: relation, Weight: 1.0, Frequency: 1, Metadata: metadata})
 }
 
 func (g *MemoryGraph) AddMeeting(m Meeting) string {
-	if m.MeetingID == "" {
-		m.MeetingID = generateID()
-	}
-	if m.Timestamp == "" {
-		m.Timestamp = time.Now().Format(time.RFC3339)
-	}
-
+	if m.MeetingID == "" { m.MeetingID = generateID() }
+	if m.Timestamp == "" { m.Timestamp = time.Now().Format(time.RFC3339) }
 	g.mu.Lock()
 	g.Meetings[m.MeetingID] = m
 	g.mu.Unlock()
-
 	for _, decision := range m.Decisions {
 		g.mu.Lock()
-		if _, ok := g.Entities[decision]; !ok {
-			g.Entities[decision] = Entity{Name: decision, Type: "decision"}
-		}
+		if _, ok := g.Entities[decision]; !ok { g.Entities[decision] = Entity{Name: decision, Type: "decision"} }
 		g.mu.Unlock()
 		g.AddWeightedEdge(m.MeetingID, decision, "contains_decision", nil)
 	}
-
 	for _, item := range m.ActionItems {
 		parts := strings.Split(item, ":")
 		taskName := item
 		if len(parts) > 1 {
 			owner := strings.TrimSpace(parts[0])
 			taskName = strings.TrimSpace(parts[1])
-
 			g.mu.Lock()
 			entity, ok := g.Entities[owner]
-			if !ok {
-				entity = Entity{Name: owner, Type: "person"}
-			}
+			if !ok { entity = Entity{Name: owner, Type: "person"} }
 			entity.Tasks = append(entity.Tasks, taskName)
 			g.Entities[owner] = entity
 			g.mu.Unlock()
-
 			g.AddWeightedEdge(owner, taskName, "assigned_to", nil)
 		}
-
 		g.mu.Lock()
-		if _, ok := g.Entities[taskName]; !ok {
-			g.Entities[taskName] = Entity{Name: taskName, Type: "task"}
-		}
+		if _, ok := g.Entities[taskName]; !ok { g.Entities[taskName] = Entity{Name: taskName, Type: "task"} }
 		g.mu.Unlock()
 		g.AddWeightedEdge(m.MeetingID, taskName, "contains_task", nil)
 	}
-
 	g.Save()
 	return m.MeetingID
 }
@@ -717,86 +390,47 @@ func (g *MemoryGraph) AddMeeting(m Meeting) string {
 func (g *MemoryGraph) CalculateInfluenceScore(name string) float64 {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-
-	var incomingWeight, outgoingWeight float64
-	var totalEdges int
-
-	for _, edge := range g.Edges {
-		if edge.Target == name {
-			incomingWeight += edge.Weight
-			totalEdges++
-		}
-		if edge.Source == name {
-			outgoingWeight += edge.Weight
-			totalEdges++
-		}
+	var in, out float64
+	var count int
+	for _, e := range g.Edges {
+		if e.Target == name { in += e.Weight; count++ }
+		if e.Source == name { out += e.Weight; count++ }
 	}
-
-	if totalEdges == 0 {
-		return 0
-	}
-
-	score := (incomingWeight * 0.7) + (outgoingWeight * 0.3)
-	return score / float64(totalEdges)
+	if count == 0 { return 0 }
+	return ((in * 0.7) + (out * 0.3)) / float64(count)
 }
 
 func (g *MemoryGraph) FindPath(source, target string, maxDepth int) []Edge {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-
-	type pathNode struct {
-		entity string
-		path   []Edge
-	}
-
-	queue := []pathNode{{entity: source, path: []Edge{}}}
+	type node struct { entity string; path []Edge }
+	queue := []node{{source, []Edge{}}}
 	visited := make(map[string]bool)
-
 	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-
-		if current.entity == target {
-			return current.path
-		}
-
-		if len(current.path) >= maxDepth {
-			continue
-		}
-
-		visited[current.entity] = true
-
-		for _, edge := range g.Edges {
-			if edge.Source == current.entity && !visited[edge.Target] {
-				newPath := make([]Edge, len(current.path))
-				copy(newPath, current.path)
-				newPath = append(newPath, edge)
-				queue = append(queue, pathNode{entity: edge.Target, path: newPath})
+		curr := queue[0]; queue = queue[1:]
+		if curr.entity == target { return curr.path }
+		if len(curr.path) >= maxDepth { continue }
+		visited[curr.entity] = true
+		for _, e := range g.Edges {
+			if e.Source == curr.entity && !visited[e.Target] {
+				newPath := append([]Edge{}, curr.path...)
+				newPath = append(newPath, e)
+				queue = append(queue, node{e.Target, newPath})
 			}
 		}
 	}
-
 	return nil
 }
 
 func (g *MemoryGraph) RankDecisionsByImpact() []string {
 	g.mu.RLock()
-	decisions := []string{}
-	for name, entity := range g.Entities {
-		if entity.Type == "decision" {
-			decisions = append(decisions, name)
-		}
-	}
+	var res []string
+	for n, e := range g.Entities { if e.Type == "decision" { res = append(res, n) } }
 	g.mu.RUnlock()
-
-	sort.Slice(decisions, func(i, j int) bool {
-		return g.CalculateInfluenceScore(decisions[i]) > g.CalculateInfluenceScore(decisions[j])
-	})
-
-	return decisions
+	sort.Slice(res, func(i, j int) bool { return g.CalculateInfluenceScore(res[i]) > g.CalculateInfluenceScore(res[j]) })
+	return res
 }
 
-// Semantic methods
 func (s *SemanticIndex) Save() {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -808,918 +442,438 @@ func (s *SemanticIndex) Load() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	data, err := os.ReadFile(semanticPath)
-	if err == nil {
-		json.Unmarshal(data, s)
-	}
+	if err == nil { json.Unmarshal(data, s) }
 	if s.Items == nil { s.Items = []SemanticItem{} }
 }
 
 func (s *SemanticIndex) AddItem(text, refID string) error {
-	semanticAgentURL := os.Getenv("SEMANTIC_AGENT_URL")
-	if semanticAgentURL == "" {
-		semanticAgentURL = "https://koola10-semantic.fly.dev"
-	}
-
-	reqBody, _ := json.Marshal(map[string]string{"text": text})
-	resp, err := http.Post(semanticAgentURL+"/generate", "application/json", bytes.NewBuffer(reqBody))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	var res struct {
-		Vector []float64 `json:"vector"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return err
-	}
-
+	url := os.Getenv("SEMANTIC_AGENT_URL")
+	if url == "" { url = "https://koola10-semantic.fly.dev" }
+	b, _ := json.Marshal(map[string]string{"text": text})
+	resp, err := http.Post(url+"/generate", "application/json", bytes.NewBuffer(b))
+	if err != nil { return err }
+	if resp != nil { defer resp.Body.Close() }
+	var res struct { Vector []float64 `json:"vector"` }
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return err }
 	s.mu.Lock()
-	s.Items = append(s.Items, SemanticItem{
-		Text:   text,
-		RefID:  refID,
-		Vector: res.Vector,
-	})
+	s.Items = append(s.Items, SemanticItem{text, refID, res.Vector})
 	s.mu.Unlock()
 	s.Save()
 	return nil
 }
 
 func (s *SemanticIndex) Search(query string, topK int) ([]SemanticSearchResult, error) {
-	semanticAgentURL := os.Getenv("SEMANTIC_AGENT_URL")
-	if semanticAgentURL == "" {
-		semanticAgentURL = "https://koola10-semantic.fly.dev"
-	}
-
+	url := os.Getenv("SEMANTIC_AGENT_URL")
+	if url == "" { url = "https://koola10-semantic.fly.dev" }
 	s.mu.RLock()
-	searchReq := map[string]interface{}{
-		"query":      query,
-		"embeddings": s.Items,
-		"top_k":      topK,
-	}
+	b, _ := json.Marshal(map[string]interface{}{"query": query, "embeddings": s.Items, "top_k": topK})
 	s.mu.RUnlock()
-
-	reqBody, _ := json.Marshal(searchReq)
-	resp, err := http.Post(semanticAgentURL+"/search", "application/json", bytes.NewBuffer(reqBody))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var results []SemanticSearchResult
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
-		return nil, err
-	}
-
-	// Attach text back to results
+	resp, err := http.Post(url+"/search", "application/json", bytes.NewBuffer(b))
+	if err != nil { return nil, err }
+	if resp != nil { defer resp.Body.Close() }
+	var res []SemanticSearchResult
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return nil, err }
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for i, res := range results {
-		for _, item := range s.Items {
-			if item.RefID == res.RefID {
-				results[i].Text = item.Text
-				break
-			}
+	for i, r := range res {
+		for _, item := range s.Items { if item.RefID == r.RefID { res[i].Text = item.Text; break } }
+	}
+	return res, nil
+}
+
+func AddAuditEntry(action string, details map[string]interface{}) {
+	auditMutex.Lock()
+	defer auditMutex.Unlock()
+	lastHash := "0000000000000000000000000000000000000000000000000000000000000000"
+	if f, err := os.Open(auditPath); err == nil {
+		scanner := bufio.NewScanner(f)
+		var lastLine string
+		for scanner.Scan() { lastLine = scanner.Text() }
+		f.Close()
+		if lastLine != "" {
+			var e AuditEntry
+			if err := json.Unmarshal([]byte(lastLine), &e); err == nil { lastHash = e.Hash }
 		}
 	}
-
-	return results, nil
+	entry := AuditEntry{time.Now().Format(time.RFC3339), action, details, ""}
+	entryJSON, _ := json.Marshal(entry)
+	h := sha256.New(); h.Write([]byte(lastHash + string(entryJSON)))
+	entry.Hash = hex.EncodeToString(h.Sum(nil))
+	if f, err := os.OpenFile(auditPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+		json.NewEncoder(f).Encode(entry); f.Close()
+	}
 }
 
-// Handler Implementations
-func handleMemoryMeetings(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		var m Meeting
-		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
-			http.Error(w, "invalid body", http.StatusBadRequest)
-			return
-		}
-		id := globalGraph.AddMeeting(m)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"meeting_id": id})
-		return
-	}
-
-	globalGraph.mu.RLock()
-	defer globalGraph.mu.RUnlock()
-	meetings := []Meeting{}
-	for _, m := range globalGraph.Meetings {
-		meetings = append(meetings, m)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(meetings)
+func checkKillSwitch() bool {
+	killSwitchMu.Lock(); defer killSwitchMu.Unlock()
+	data, err := os.ReadFile(killSwitchPath)
+	return err == nil && string(data) == "active"
 }
 
-func handleMemoryEntity(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/memory/entity/")
-	if name == "" {
-		http.Error(w, "name required", http.StatusBadRequest)
-		return
-	}
-
-	globalGraph.mu.RLock()
-	defer globalGraph.mu.RUnlock()
-	entity, ok := globalGraph.Entities[name]
-	if !ok {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entity)
+func rateLimit() bool {
+	rlMu.Lock(); defer rlMu.Unlock()
+	now := time.Now(); elapsed := now.Sub(rlLastUpdate).Seconds()
+	rlLastUpdate = now; rlBucket += elapsed * rlRate
+	if rlBucket > rlMaxBucket { rlBucket = rlMaxBucket }
+	if rlBucket >= 1.0 { rlBucket -= 1.0; return true }
+	return false
 }
 
-func handleMemoryInfluence(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/memory/influence/")
-	if name == "" {
-		http.Error(w, "name required", http.StatusBadRequest)
-		return
+func LogUsage(tokens int) {
+	usageMutex.Lock(); defer usageMutex.Unlock()
+	cost := float64(tokens) * 0.000002
+	logEntry := UsageLog{time.Now().Format(time.RFC3339), tokens, cost}
+	if f, err := os.OpenFile(usagePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+		json.NewEncoder(f).Encode(logEntry); f.Close()
 	}
-	score := globalGraph.CalculateInfluenceScore(name)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"name": name, "influence_score": score})
 }
 
-func handleMemoryPath(w http.ResponseWriter, r *http.Request) {
-	source := r.URL.Query().Get("source")
-	target := r.URL.Query().Get("target")
-	if source == "" || target == "" {
-		http.Error(w, "source and target required", http.StatusBadRequest)
-		return
-	}
-	path := globalGraph.FindPath(source, target, 5)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(path)
+func (l *EconomicLedger) Save() {
+	l.mu.RLock(); defer l.mu.RUnlock()
+	data, _ := json.Marshal(l); os.WriteFile(ledgerPath, data, 0644)
 }
 
-func handleMemoryDecisionsRanked(w http.ResponseWriter, r *http.Request) {
-	ranked := globalGraph.RankDecisionsByImpact()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ranked)
+func (l *EconomicLedger) Load() {
+	l.mu.Lock(); defer l.mu.Unlock()
+	data, err := os.ReadFile(ledgerPath)
+	if err == nil { json.Unmarshal(data, l) }
+	if l.Transactions == nil { l.Transactions = []Transaction{} }
 }
 
-func handleSemanticIndex(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req struct {
-		Text  string `json:"text"`
-		RefID string `json:"ref_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	if err := globalSemantic.AddItem(req.Text, req.RefID); err != nil {
-		http.Error(w, "failed to index: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "indexed"})
+func (l *EconomicLedger) RecordCost(category string, amount float64, description string) {
+	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
+	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, amount, description})
+	l.mu.Unlock(); l.Save()
+	AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category})
 }
 
-func handleSemanticSearch(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query().Get("q")
-	topKStr := r.URL.Query().Get("top_k")
-	topK := 5
-	if topKStr != "" {
-		fmt.Sscanf(topKStr, "%d", &topK)
-	}
-
-	results, err := globalSemantic.Search(query, topK)
-	if err != nil {
-		http.Error(w, "failed to search: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(results)
+func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
+	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
+	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "grant_success", amount, "Revenue from source: " + source})
+	l.mu.Unlock(); l.Save()
+	AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source})
 }
+
+func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {
+	roiThreshold := 2.0; projectedRevenue := 0.0
+	if actionType == "grant_submit" { projectedRevenue = 500.0 }
+	roi := 0.0; if estimatedCost > 0 { roi = projectedRevenue / estimatedCost }
+	eval := EconomicEvaluation{"allow", estimatedCost, roi, ""}
+	if roi < roiThreshold { eval.Decision = "warn"; eval.Reason = "low_projected_roi" }
+	if globalLedger.Balance < estimatedCost { eval.Decision = "block"; eval.Reason = "insufficient_funds" }
+	return eval
+}
+
+// --- Handlers ---
 
 func handleSearch(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query().Get("query")
-	category := r.URL.Query().Get("category")
-
-	searchReq := map[string]interface{}{
-		"keyword": query,
-	}
-	if category != "" {
-		searchReq["fundingCategories"] = category
-	}
-
-	reqBody, err := json.Marshal(searchReq)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
+	q := r.URL.Query().Get("query"); cat := r.URL.Query().Get("category")
+	reqBody, _ := json.Marshal(map[string]interface{}{"keyword": q, "fundingCategories": cat})
 	resp, err := http.Post("https://api.grants.gov/v1/api/search2", "application/json", bytes.NewBuffer(reqBody))
-	if err != nil {
-		http.Error(w, "failed to search grants", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	var searchRes GrantsGovSearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchRes); err != nil {
-		http.Error(w, "failed to parse search results", http.StatusInternalServerError)
-		return
-	}
-
-	var grants []Grant
-	enrichedCache := make(map[string]Grant)
-
-	// Load existing cache
+	if err != nil { http.Error(w, "search failed", 500); return }
+	if resp != nil { defer resp.Body.Close() }
+	var sRes GrantsGovSearchResponse
+	json.NewDecoder(resp.Body).Decode(&sRes)
+	var grants []Grant; cache := make(map[string]Grant)
 	cacheMutex.Lock()
-	if data, err := os.ReadFile(cachePath); err == nil {
-		json.Unmarshal(data, &enrichedCache)
-	}
+	if d, err := os.ReadFile(cachePath); err == nil { json.Unmarshal(d, &cache) }
 	cacheMutex.Unlock()
-
-	limit := 5
-	if len(searchRes.Data.OppHits) < limit {
-		limit = len(searchRes.Data.OppHits)
-	}
-
+	limit := 5; if len(sRes.Data.OppHits) < limit { limit = len(sRes.Data.OppHits) }
 	for i := 0; i < limit; i++ {
-		hit := searchRes.Data.OppHits[i]
-		if cached, ok := enrichedCache[hit.ID]; ok {
-			grants = append(grants, cached)
-			continue
-		}
-
-		// Fetch details
-		grant := Grant{
-			ID:       hit.ID,
-			Title:    hit.Title,
-			Agency:   hit.Agency,
-			Deadline: hit.CloseDate,
-		}
-
-		detailsReq := url.Values{}
-		detailsReq.Set("oppId", hit.ID)
-		dResp, err := http.Post("https://apply07.grants.gov/grantsws/rest/opportunity/details", "application/x-www-form-urlencoded", strings.NewReader(detailsReq.Encode()))
-		if err == nil {
-			var dRes GrantsGovDetailsResponse
-			if err := json.NewDecoder(dResp.Body).Decode(&dRes); err == nil {
-				grant.Description = dRes.Synopsis.SynDesc
-				grant.Amount = dRes.Synopsis.EstimatedFunding
-				grant.Eligibility = dRes.Synopsis.ApplicantEligibilityDesc
+		hit := sRes.Data.OppHits[i]
+		if c, ok := cache[hit.ID]; ok { grants = append(grants, c); continue }
+		g := Grant{ID: hit.ID, Title: hit.Title, Agency: hit.Agency, Deadline: hit.CloseDate}
+		detailsReq := url.Values{}; detailsReq.Set("oppId", hit.ID)
+		if dResp, err := http.Post("https://apply07.grants.gov/grantsws/rest/opportunity/details", "application/x-www-form-urlencoded", strings.NewReader(detailsReq.Encode())); err == nil {
+			if dResp != nil {
+				var dRes GrantsGovDetailsResponse
+				if err := json.NewDecoder(dResp.Body).Decode(&dRes); err == nil {
+					g.Description = dRes.Synopsis.SynDesc; g.Amount = dRes.Synopsis.EstimatedFunding; g.Eligibility = dRes.Synopsis.ApplicantEligibilityDesc
+				}
+				dResp.Body.Close()
 			}
-			dResp.Body.Close()
 		}
-
-		grants = append(grants, grant)
-		enrichedCache[hit.ID] = grant
+		grants = append(grants, g); cache[hit.ID] = g
 	}
-
-	// Save cache
-	cacheMutex.Lock()
-	if cacheData, err := json.Marshal(enrichedCache); err == nil {
-		os.WriteFile(cachePath, cacheData, 0644)
-	}
-	cacheMutex.Unlock()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(grants)
+	cacheMutex.Lock(); cacheData, _ := json.Marshal(cache); os.WriteFile(cachePath, cacheData, 0644); cacheMutex.Unlock()
+	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(grants)
 }
 
 func handleApply(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req ApplyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Load cache
-	cacheMutex.Lock()
-	enrichedCache := make(map[string]Grant)
-	if data, err := os.ReadFile(cachePath); err == nil {
-		json.Unmarshal(data, &enrichedCache)
-	}
-	cacheMutex.Unlock()
-
-	grant, ok := enrichedCache[req.GrantID]
-	if !ok {
-		http.Error(w, "grant not found in cache. please search for it first.", http.StatusNotFound)
-		return
-	}
-
-	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	if apiKey == "" {
-		http.Error(w, "DEEPSEEK_API_KEY not set", http.StatusInternalServerError)
-		return
-	}
-
-	if !rateLimit() {
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-		return
-	}
-
-	prompt := fmt.Sprintf(`Generate a complete narrative grant application draft for the following grant and organization.
-Grant Title: %s
-Agency: %s
-Description: %s
-Amount: %s
-Eligibility: %s
-
-Organization Name: %s
-Mission: %s
-Annual Budget: %s
-Tax ID: %s
-
-Provide the response in JSON format with the following keys: executive_summary, statement_of_need, project_description, budget_justification, organizational_capacity.`,
-		grant.Title, grant.Agency, grant.Description, grant.Amount, grant.Eligibility,
-		req.OrgName, req.OrgMission, req.OrgBudget, req.OrgTaxID)
-
-	dsReq := map[string]interface{}{
-		"model": "deepseek-chat",
-		"messages": []map[string]string{
-			{"role": "system", "content": "You are a professional grant writer. Return ONLY JSON."},
-			{"role": "user", "content": prompt},
-		},
-		"response_format": map[string]string{"type": "json_object"},
-	}
-
-	dsBody, err := json.Marshal(dsReq)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	client := &http.Client{}
-	httpReq, err := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		http.Error(w, "failed to call DeepSeek API", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	var dsRes struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			TotalTokens int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "failed to parse DeepSeek response", http.StatusInternalServerError)
-		return
-	}
-
-	LogUsage(dsRes.Usage.TotalTokens)
-
-	if len(dsRes.Choices) == 0 {
-		http.Error(w, "no response from DeepSeek", http.StatusInternalServerError)
-		return
-	}
-
-	var draft ApplicationDraft
-	if err := json.Unmarshal([]byte(dsRes.Choices[0].Message.Content), &draft); err != nil {
-		// Fallback if JSON is weird
-		draft.ExecutiveSummary = dsRes.Choices[0].Message.Content
-	}
-
-	appID := generateID()
-	draft.ApplicationID = appID
-	draft.GrantID = req.GrantID
-	draft.Status = "draft_generated"
-
-	// Save draft
-	appPath := filepath.Join(appsDir, appID+".json")
-	if appData, err := json.Marshal(draft); err == nil {
-		os.WriteFile(appPath, appData, 0644)
-	}
-
-	// Record in graph
-	globalGraph.AddMeeting(Meeting{
-		Summary:     fmt.Sprintf("Drafted application for grant: %s", grant.Title),
-		Decisions:   []string{fmt.Sprintf("Apply to %s", grant.ID)},
-		ActionItems: []string{fmt.Sprintf("System: Review %s draft", appID)},
-	})
-
-	// Index narrative
-	globalSemantic.AddItem(dsRes.Choices[0].Message.Content, appID)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(draft)
-}
-
-func handleStatus(w http.ResponseWriter, r *http.Request) {
-	appID := r.URL.Query().Get("application_id")
-	if appID == "" {
-		http.Error(w, "application_id is required", http.StatusBadRequest)
-		return
-	}
-
-	// Sanitize to prevent path traversal
-	safeID := filepath.Base(appID)
-	appPath := filepath.Join(appsDir, safeID+".json")
-	data, err := os.ReadFile(appPath)
-	if err != nil {
-		http.Error(w, "application not found", http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
-}
-
-func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		ApplicationID string `json:"application_id"`
-		Status        string `json:"status"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	safeID := filepath.Base(req.ApplicationID)
-	appPath := filepath.Join(appsDir, safeID+".json")
-	data, err := os.ReadFile(appPath)
-	if err != nil {
-		http.Error(w, "application not found", http.StatusNotFound)
-		return
-	}
-
-	var draft ApplicationDraft
-	if err := json.Unmarshal(data, &draft); err != nil {
-		http.Error(w, "failed to parse application data", http.StatusInternalServerError)
-		return
-	}
-
-	draft.Status = req.Status
-	updatedData, _ := json.Marshal(draft)
-	os.WriteFile(appPath, updatedData, 0644)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(draft)
-}
-
-func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
-	files, err := os.ReadDir(appsDir)
-	if err != nil {
-		http.Error(w, "failed to read applications", http.StatusInternalServerError)
-		return
-	}
-
-	// Load cache for titles and deadlines
-	cacheMutex.Lock()
-	enrichedCache := make(map[string]Grant)
-	if data, err := os.ReadFile(cachePath); err == nil {
-		json.Unmarshal(data, &enrichedCache)
-	}
-	cacheMutex.Unlock()
-
-	var summaries []ApplicationSummary
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), ".json") {
-			data, err := os.ReadFile(filepath.Join(appsDir, file.Name()))
-			if err != nil {
-				continue
-			}
-			var draft ApplicationDraft
-			if err := json.Unmarshal(data, &draft); err == nil {
-				summary := ApplicationSummary{
-					ApplicationID: draft.ApplicationID,
-					Status:        draft.Status,
-				}
-				if grant, ok := enrichedCache[draft.GrantID]; ok {
-					summary.GrantTitle = grant.Title
-					summary.Deadline = grant.Deadline
-				}
-				summaries = append(summaries, summary)
-			}
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summaries)
-}
-
-func handleMonitor(w http.ResponseWriter, r *http.Request) {
-	if checkKillSwitch() {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"status": "blocked", "reason": "global_kill_switch_active"})
-		return
-	}
-
-	files, err := os.ReadDir(appsDir)
-	if err != nil {
-		http.Error(w, "failed to read applications", http.StatusInternalServerError)
-		return
-	}
-
-	cacheMutex.Lock()
-	enrichedCache := make(map[string]Grant)
-	if data, err := os.ReadFile(cachePath); err == nil {
-		json.Unmarshal(data, &enrichedCache)
-	}
-	cacheMutex.Unlock()
-
-	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	var reports []MonitorResult
-
-	for _, file := range files {
-		if file.IsDir() || !strings.HasSuffix(file.Name(), ".json") {
-			continue
-		}
-
-		appPath := filepath.Join(appsDir, file.Name())
-		data, err := os.ReadFile(appPath)
-		if err != nil {
-			continue
-		}
-
-		var draft ApplicationDraft
-		if err := json.Unmarshal(data, &draft); err != nil {
-			continue
-		}
-
-		if draft.Status != "submitted" && draft.Status != "pending" {
-			continue
-		}
-
-		grant, ok := enrichedCache[draft.GrantID]
-		if !ok || grant.Deadline == "" {
-			continue
-		}
-
-		deadline, err := time.Parse("01/02/2006", grant.Deadline)
-		if err != nil {
-			continue
-		}
-
-		if time.Now().After(deadline) && draft.FollowUpDraft == "" && apiKey != "" {
-			// Gate follow-up logic? User said "/grants/monitor/follow-up",
-			// but I have it inside handleMonitor. I'll just check status.
-
-			if !rateLimit() { continue }
-
-			prompt := fmt.Sprintf("Write a polite, professional follow-up email to the agency '%s' regarding our application for the grant '%s' (ID: %s). The deadline has passed and we are checking on the status.", grant.Agency, grant.Title, grant.ID)
-
-			dsReq := map[string]interface{}{
-				"model": "deepseek-chat",
-				"messages": []map[string]string{
-					{"role": "system", "content": "You are a professional grant consultant. Return ONLY the email draft text."},
-					{"role": "user", "content": prompt},
-				},
-			}
-			dsBody, _ := json.Marshal(dsReq)
-			client := &http.Client{}
-			httpReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-			httpReq.Header.Set("Content-Type", "application/json")
-			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-
-			resp, err := client.Do(httpReq)
-			if err == nil {
-				var dsRes struct {
-					Choices []struct {
-						Message struct {
-							Content string `json:"content"`
-						} `json:"message"`
-					} `json:"choices"`
-					Usage struct {
-						TotalTokens int `json:"total_tokens"`
-					} `json:"usage"`
-				}
-				if json.NewDecoder(resp.Body).Decode(&dsRes) == nil && len(dsRes.Choices) > 0 {
-					LogUsage(dsRes.Usage.TotalTokens)
-					draft.FollowUpDraft = dsRes.Choices[0].Message.Content
-					updatedData, _ := json.Marshal(draft)
-					os.WriteFile(appPath, updatedData, 0644)
-					reports = append(reports, MonitorResult{
-						ApplicationID: draft.ApplicationID,
-						GrantTitle:    grant.Title,
-						FollowUpEmail: draft.FollowUpDraft,
-					})
-					AddAuditEntry("follow_up_generated", map[string]interface{}{"application_id": draft.ApplicationID})
-				}
-				resp.Body.Close()
-			}
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":     "scan_complete",
-		"follow_ups": reports,
-	})
-}
-
-func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
-	if checkKillSwitch() {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"status": "blocked", "reason": "global_kill_switch_active"})
-		return
-	}
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		URL         string `json:"url"`
-		Instruction string `json:"instruction"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
-	if browserAgentURL == "" {
-		browserAgentURL = "https://koola10-browser.fly.dev"
-	}
-
-	jsonBody, _ := json.Marshal(req)
-	resp, err := http.Post(browserAgentURL+"/browser/extract", "application/json", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		http.Error(w, "failed to call browser agent: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	w.Header().Set("Content-Type", "application/json")
-	io.Copy(w, resp.Body)
-}
-
-func handleAIChat(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	if apiKey == "" {
-		http.Error(w, "DEEPSEEK_API_KEY not set", http.StatusInternalServerError)
-		return
-	}
-
-	if !rateLimit() {
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-		return
-	}
-
-	systemPrompt := "You are Koola10, an autonomous AI agent for Spiral Grant Services. You are an expert in federal grants and help users find, analyze, and apply for funding."
-
-	// RAG
-	results, err := globalSemantic.Search(req.Prompt, 3)
-	if err == nil && len(results) > 0 {
-		systemPrompt += "\n\nRelevant Context from Memory:"
-		for _, res := range results {
-			if res.Score > 0.5 {
-				systemPrompt += fmt.Sprintf("\n- [Ref: %s] %s", res.RefID, res.Text)
-			}
-		}
-	}
-
-	// Graph context
-	if strings.Contains(req.Prompt, "influence") || strings.Contains(req.Prompt, "path") || strings.Contains(req.Prompt, "decision") {
-		globalGraph.mu.RLock()
-		graphData, _ := json.Marshal(globalGraph)
-		systemPrompt += "\n\nCurrent Memory Graph Data: " + string(graphData)
-		globalGraph.mu.RUnlock()
-	}
-
-	if req.Context != "" {
-		systemPrompt += "\n\nContext Memory: " + req.Context
-	}
-
-	dsReq := map[string]interface{}{
-		"model": "deepseek-chat",
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": req.Prompt},
-		},
-	}
-
+	if r.Method != "POST" { http.Error(w, "POST required", 405); return }
+	var req ApplyRequest; json.NewDecoder(r.Body).Decode(&req)
+	cacheMutex.Lock(); cache := make(map[string]Grant); d, _ := os.ReadFile(cachePath); json.Unmarshal(d, &cache); cacheMutex.Unlock()
+	grant, ok := cache[req.GrantID]; if !ok { http.Error(w, "not cached", 404); return }
+	apiKey := os.Getenv("DEEPSEEK_API_KEY"); if apiKey == "" { http.Error(w, "no key", 500); return }
+	if !rateLimit() { http.Error(w, "rate limited", 429); return }
+	prompt := fmt.Sprintf("Draft narrative for %s from %s. Mission: %s", grant.Title, req.OrgName, req.OrgMission)
+	dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "system", "content": "Return JSON."}, {"role": "user", "content": prompt}}, "response_format": map[string]string{"type": "json_object"}}
 	dsBody, _ := json.Marshal(dsReq)
 	client := &http.Client{}
 	httpReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey); httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpReq); if err != nil { http.Error(w, "api failed", 500); return }
+	if resp != nil { defer resp.Body.Close() }
+	var dsRes struct { Choices []struct { Message struct { Content string } }; Usage struct { TotalTokens int } }
+	json.NewDecoder(resp.Body).Decode(&dsRes); LogUsage(dsRes.Usage.TotalTokens)
+	globalLedger.RecordCost("ai_inference", float64(dsRes.Usage.TotalTokens)*0.000002, "Draft for "+req.GrantID)
+	var draft ApplicationDraft; json.Unmarshal([]byte(dsRes.Choices[0].Message.Content), &draft)
+	appID := generateID(); draft.ApplicationID = appID; draft.GrantID = req.GrantID; draft.Status = "draft_generated"
+	appPath := filepath.Join(appsDir, appID+".json")
+	appData, _ := json.Marshal(draft); os.WriteFile(appPath, appData, 0644)
+	globalGraph.AddMeeting(Meeting{Summary: "Drafted application", Decisions: []string{"Apply to " + grant.ID}, ActionItems: []string{"Review " + appID}})
+	globalSemantic.AddItem(dsRes.Choices[0].Message.Content, appID)
+	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(draft)
+}
 
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		http.Error(w, "failed to call DeepSeek API", http.StatusInternalServerError)
-		return
+func handleStatus(w http.ResponseWriter, r *http.Request) {
+	id := filepath.Base(r.URL.Query().Get("application_id"))
+	data, err := os.ReadFile(filepath.Join(appsDir, id+".json"))
+	if err != nil { http.Error(w, "not found", 404); return }
+	w.Header().Set("Content-Type", "application/json"); w.Write(data)
+}
+
+func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	var req struct { ApplicationID string; Status string }; json.NewDecoder(r.Body).Decode(&req)
+	id := filepath.Base(req.ApplicationID); appPath := filepath.Join(appsDir, id+".json")
+	data, _ := os.ReadFile(appPath); var d ApplicationDraft; json.Unmarshal(data, &d)
+	prev := d.Status; d.Status = req.Status; updated, _ := json.Marshal(d); os.WriteFile(appPath, updated, 0644)
+	if req.Status == "approved" && prev != "approved" { globalLedger.RecordRevenue(500.0, "Grant success: "+id) }
+	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(d)
+}
+
+func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
+	files, _ := os.ReadDir(appsDir); cacheMutex.Lock(); cache := make(map[string]Grant); d, _ := os.ReadFile(cachePath); json.Unmarshal(d, &cache); cacheMutex.Unlock()
+	var res []ApplicationSummary
+	for _, f := range files {
+		if f.IsDir() { continue }
+		data, _ := os.ReadFile(filepath.Join(appsDir, f.Name())); var dr ApplicationDraft; json.Unmarshal(data, &dr)
+		s := ApplicationSummary{dr.ApplicationID, "", dr.Status, ""}
+		if g, ok := cache[dr.GrantID]; ok { s.GrantTitle = g.Title; s.Deadline = g.Deadline }
+		res = append(res, s)
 	}
-	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(res)
+}
 
-	var dsRes struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			TotalTokens int `json:"total_tokens"`
-		} `json:"usage"`
+func handleMonitor(w http.ResponseWriter, r *http.Request) {
+	if checkKillSwitch() { http.Error(w, "kill-switch", 503); return }
+	files, _ := os.ReadDir(appsDir); cacheMutex.Lock(); cache := make(map[string]Grant); d, _ := os.ReadFile(cachePath); json.Unmarshal(d, &cache); cacheMutex.Unlock()
+	var reports []MonitorResult
+	for _, f := range files {
+		data, _ := os.ReadFile(filepath.Join(appsDir, f.Name())); var dr ApplicationDraft; json.Unmarshal(data, &dr)
+		if dr.Status != "submitted" && dr.Status != "pending" { continue }
+		g, ok := cache[dr.GrantID]; if !ok || g.Deadline == "" { continue }
+		dl, _ := time.Parse("01/02/2006", g.Deadline)
+		if time.Now().After(dl) && dr.FollowUpDraft == "" {
+			if !rateLimit() { continue }
+			apiKey := os.Getenv("DEEPSEEK_API_KEY")
+			prompt := "Write follow-up for " + dr.ApplicationID
+			dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
+			b, _ := json.Marshal(dsReq); client := &http.Client{}
+			hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(b))
+			hReq.Header.Set("Authorization", "Bearer "+apiKey); hReq.Header.Set("Content-Type", "application/json")
+			resp, err := client.Do(hReq)
+			if err != nil { continue }
+			if resp != nil {
+				var dsRes struct { Choices []struct { Message struct { Content string } }; Usage struct { TotalTokens int } }
+				json.NewDecoder(resp.Body).Decode(&dsRes); resp.Body.Close()
+				LogUsage(dsRes.Usage.TotalTokens); globalLedger.RecordCost("ai_inference", float64(dsRes.Usage.TotalTokens)*0.000002, "Follow-up for "+dr.ApplicationID)
+				dr.FollowUpDraft = dsRes.Choices[0].Message.Content; updated, _ := json.Marshal(dr); os.WriteFile(filepath.Join(appsDir, f.Name()), updated, 0644)
+				reports = append(reports, MonitorResult{dr.ApplicationID, g.Title, dr.FollowUpDraft})
+				AddAuditEntry("follow_up_generated", map[string]interface{}{"id": dr.ApplicationID})
+			}
+		}
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "failed to parse DeepSeek response", http.StatusInternalServerError)
-		return
+	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(map[string]interface{}{"status": "complete", "follow_ups": reports})
+}
+
+func handleApplyAuto(w http.ResponseWriter, r *http.Request) {
+	if checkKillSwitch() { http.Error(w, "kill-switch", 503); return }
+	var req struct { URL string; FormData map[string]string; ApprovalID string }; json.NewDecoder(r.Body).Decode(&req)
+	approvalMu.Lock(); ap, ok := approvalStore[req.ApprovalID]; approvalMu.Unlock()
+	if !ok || ap.Status != "approved" || ap.Action != "grant_submit" { http.Error(w, "unauthorized", 403); return }
+	AddAuditEntry("grant_submit_initiated", map[string]interface{}{"url": req.URL})
+	globalLedger.RecordCost("browser_automation", 0.02, "Form submission")
+	url := os.Getenv("BROWSER_AGENT_URL"); if url == "" { url = "https://koola10-browser.fly.dev" }
+	b, _ := json.Marshal(req); resp, err := http.Post(url+"/browser/submit-form", "application/json", bytes.NewBuffer(b))
+	if err != nil { http.Error(w, "failed", 500); return }
+	if resp != nil { defer resp.Body.Close(); w.Header().Set("Content-Type", "application/json"); io.Copy(w, resp.Body) }
+}
+
+func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
+	if checkKillSwitch() { http.Error(w, "kill-switch", 503); return }
+	var req struct { URL string; Instruction string }; json.NewDecoder(r.Body).Decode(&req)
+	globalLedger.RecordCost("browser_automation", 0.02, "Status check")
+	url := os.Getenv("BROWSER_AGENT_URL"); if url == "" { url = "https://koola10-browser.fly.dev" }
+	b, _ := json.Marshal(req); resp, err := http.Post(url+"/browser/extract", "application/json", bytes.NewBuffer(b))
+	if err != nil { http.Error(w, "failed", 500); return }
+	if resp != nil { defer resp.Body.Close(); w.Header().Set("Content-Type", "application/json"); io.Copy(w, resp.Body) }
+}
+
+func handleAIChat(w http.ResponseWriter, r *http.Request) {
+	var req ChatRequest; json.NewDecoder(r.Body).Decode(&req)
+	apiKey := os.Getenv("DEEPSEEK_API_KEY"); if apiKey == "" { http.Error(w, "no key", 500); return }
+	if !rateLimit() { http.Error(w, "rate limited", 429); return }
+	sys := "You are Koola10."
+	res, err := globalSemantic.Search(req.Prompt, 3)
+	if err == nil { for _, rs := range res { if rs.Score > 0.5 { sys += "\nContext: " + rs.Text } } }
+	if strings.Contains(req.Prompt, "influence") { globalGraph.mu.RLock(); gd, _ := json.Marshal(globalGraph); sys += "\nGraph: " + string(gd); globalGraph.mu.RUnlock() }
+	b, _ := json.Marshal(map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "system", "content": sys}, {"role": "user", "content": req.Prompt}}})
+	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(b))
+	hReq.Header.Set("Authorization", "Bearer "+apiKey); hReq.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{}).Do(hReq); if err != nil { http.Error(w, "failed", 500); return }
+	if resp != nil {
+		defer resp.Body.Close()
+		var dRes struct { Choices []struct { Message struct { Content string } }; Usage struct { TotalTokens int } }
+		json.NewDecoder(resp.Body).Decode(&dRes); LogUsage(dRes.Usage.TotalTokens)
+		globalLedger.RecordCost("ai_inference", float64(dRes.Usage.TotalTokens)*0.000002, "Chat response")
+		w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(ChatResponse{dRes.Choices[0].Message.Content, dRes.Usage.TotalTokens})
 	}
-
-	LogUsage(dsRes.Usage.TotalTokens)
-
-	if len(dsRes.Choices) == 0 {
-		http.Error(w, "no response from DeepSeek", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ChatResponse{
-		Response:   dsRes.Choices[0].Message.Content,
-		TokensUsed: dsRes.Usage.TotalTokens,
-	})
 }
 
 func handleAIRemember(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req MemoryEntry
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	cacheMutex.Lock()
-	defer cacheMutex.Unlock()
-
-	memory := make(map[string]string)
-	if data, err := os.ReadFile(memoryPath); err == nil {
-		json.Unmarshal(data, &memory)
-	}
-
-	memory[req.Key] = req.Value
-	memoryData, _ := json.Marshal(memory)
-	os.WriteFile(memoryPath, memoryData, 0644)
-
-	w.Header().Set("Content-Type", "application/json")
+	var req MemoryEntry; json.NewDecoder(r.Body).Decode(&req)
+	cacheMutex.Lock(); mem := make(map[string]string); d, _ := os.ReadFile(memoryPath); json.Unmarshal(d, &mem); mem[req.Key] = req.Value
+	md, _ := json.Marshal(mem); os.WriteFile(memoryPath, md, 0644); cacheMutex.Unlock()
 	json.NewEncoder(w).Encode(map[string]string{"status": "stored"})
 }
 
 func handleAIRecall(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.Query().Get("key")
-	if key == "" {
-		http.Error(w, "key is required", http.StatusBadRequest)
-		return
-	}
-
-	cacheMutex.Lock()
-	defer cacheMutex.Unlock()
-
-	memory := make(map[string]string)
-	if data, err := os.ReadFile(memoryPath); err == nil {
-		json.Unmarshal(data, &memory)
-	}
-
-	val, ok := memory[key]
-	if !ok {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"key": key, "value": val})
+	k := r.URL.Query().Get("key"); cacheMutex.Lock(); mem := make(map[string]string); d, _ := os.ReadFile(memoryPath); json.Unmarshal(d, &mem); cacheMutex.Unlock()
+	v, ok := mem[k]; if !ok { http.Error(w, "not found", 404); return }
+	json.NewEncoder(w).Encode(map[string]string{"key": k, "value": v})
 }
 
 func handleAIAnalyzeGrant(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+	var req AnalyzeGrantRequest; json.NewDecoder(r.Body).Decode(&req)
+	apiKey := os.Getenv("DEEPSEEK_API_KEY"); if !rateLimit() { http.Error(w, "rate limited", 429); return }
+	p := "Analyze: " + req.GrantText
+	b, _ := json.Marshal(map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "system", "content": "Return JSON."}, {"role": "user", "content": p}}, "response_format": map[string]string{"type": "json_object"}})
+	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(b))
+	hReq.Header.Set("Authorization", "Bearer "+apiKey); hReq.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{}).Do(hReq); if err != nil { http.Error(w, "failed", 500); return }
+	if resp != nil {
+		defer resp.Body.Close()
+		var dRes struct { Choices []struct { Message struct { Content string } }; Usage struct { TotalTokens int } }
+		json.NewDecoder(resp.Body).Decode(&dRes); LogUsage(dRes.Usage.TotalTokens)
+		globalLedger.RecordCost("ai_inference", float64(dRes.Usage.TotalTokens)*0.000002, "Analysis")
+		var an AnalyzeGrantResponse; json.Unmarshal([]byte(dRes.Choices[0].Message.Content), &an)
+		globalGraph.AddMeeting(Meeting{Summary: "Analyzed grant", Decisions: []string{fmt.Sprintf("Score: %d", an.EligibilityScore)}, ActionItems: an.RequiredDocuments})
+		globalSemantic.AddItem(req.GrantText, "analysis_"+generateID())
+		w.Header().Set("Content-Type", "application/json"); w.Write([]byte(dRes.Choices[0].Message.Content))
 	}
+}
 
-	var req AnalyzeGrantRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
+func handleMemoryMeetings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" { var m Meeting; json.NewDecoder(r.Body).Decode(&m); id := globalGraph.AddMeeting(m); json.NewEncoder(w).Encode(map[string]string{"id": id}); return }
+	globalGraph.mu.RLock(); var res []Meeting; for _, m := range globalGraph.Meetings { res = append(res, m) }; globalGraph.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(res)
+}
+
+func handleMemoryEntity(w http.ResponseWriter, r *http.Request) {
+	n := strings.TrimPrefix(r.URL.Path, "/memory/entity/"); globalGraph.mu.RLock(); e, ok := globalGraph.Entities[n]; globalGraph.mu.RUnlock()
+	if !ok { http.Error(w, "not found", 404); return }
+	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(e)
+}
+
+func handleMemoryInfluence(w http.ResponseWriter, r *http.Request) {
+	n := strings.TrimPrefix(r.URL.Path, "/memory/influence/"); s := globalGraph.CalculateInfluenceScore(n)
+	json.NewEncoder(w).Encode(map[string]interface{}{"name": n, "score": s})
+}
+
+func handleMemoryPath(w http.ResponseWriter, r *http.Request) {
+	s := r.URL.Query().Get("source"); t := r.URL.Query().Get("target"); p := globalGraph.FindPath(s, t, 5)
+	json.NewEncoder(w).Encode(p)
+}
+
+func handleMemoryDecisionsRanked(w http.ResponseWriter, r *http.Request) {
+	res := globalGraph.RankDecisionsByImpact(); json.NewEncoder(w).Encode(res)
+}
+
+func handleSemanticIndex(w http.ResponseWriter, r *http.Request) {
+	var req struct { Text string; RefID string }; json.NewDecoder(r.Body).Decode(&req); globalSemantic.AddItem(req.Text, req.RefID)
+	json.NewEncoder(w).Encode(map[string]string{"status": "indexed"})
+}
+
+func handleSemanticSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q"); res, _ := globalSemantic.Search(q, 5); json.NewEncoder(w).Encode(res)
+}
+
+func handleComplianceAudit(w http.ResponseWriter, r *http.Request) {
+	auditMutex.Lock(); defer auditMutex.Unlock(); f, _ := os.Open(auditPath); defer f.Close()
+	var res []AuditEntry; s := bufio.NewScanner(f); for s.Scan() { var e AuditEntry; json.Unmarshal(s.Bytes(), &e); res = append(res, e) }
+	if len(res) > 200 { res = res[len(res)-200:] }
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleComplianceAuditVerify(w http.ResponseWriter, r *http.Request) {
+	auditMutex.Lock(); defer auditMutex.Unlock(); f, _ := os.Open(auditPath); defer f.Close()
+	v := true; lh := "0000000000000000000000000000000000000000000000000000000000000000"
+	sc := bufio.NewScanner(f); for sc.Scan() {
+		var e AuditEntry; json.Unmarshal(sc.Bytes(), &e); ph := e.Hash; e.Hash = ""; ej, _ := json.Marshal(e)
+		h := sha256.New(); h.Write([]byte(lh + string(ej))); ch := hex.EncodeToString(h.Sum(nil))
+		if ph != ch { v = false; break }; lh = ph
 	}
+	json.NewEncoder(w).Encode(map[string]bool{"valid": v})
+}
 
-	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	if apiKey == "" {
-		http.Error(w, "DEEPSEEK_API_KEY not set", http.StatusInternalServerError)
-		return
+func handleComplianceApproval(w http.ResponseWriter, r *http.Request) {
+	var req ApprovalRequest; json.NewDecoder(r.Body).Decode(&req); req.ID = generateID(); req.Status = "pending"; req.CreatedAt = time.Now().Format(time.RFC3339)
+	ev := EvaluateAction(req.Action, 0.0); if ev.Decision == "warn" { req.Justification = "LOW ROI" }
+	approvalMu.Lock(); approvalStore[req.ID] = &req; approvalMu.Unlock()
+	AddAuditEntry("approval_created", map[string]interface{}{"id": req.ID, "action": req.Action})
+	json.NewEncoder(w).Encode(req)
+}
+
+func handleComplianceApprove(w http.ResponseWriter, r *http.Request) {
+	var req struct { ApprovalID string; Approver string }; json.NewDecoder(r.Body).Decode(&req)
+	approvalMu.Lock(); ap, ok := approvalStore[req.ApprovalID]; approvalMu.Unlock()
+	if !ok { http.Error(w, "not found", 404); return }
+	ap.Status = "approved"; ap.Approver = req.Approver; AddAuditEntry("approved", map[string]interface{}{"id": req.ApprovalID})
+	json.NewEncoder(w).Encode(ap)
+}
+
+func handleComplianceKillSwitch(w http.ResponseWriter, r *http.Request) {
+	killSwitchMu.Lock(); os.WriteFile(killSwitchPath, []byte("active"), 0644); killSwitchMu.Unlock()
+	AddAuditEntry("kill_activated", nil); w.Write([]byte("Active"))
+}
+
+func handleComplianceKillSwitchReset(w http.ResponseWriter, r *http.Request) {
+	killSwitchMu.Lock(); os.Remove(killSwitchPath); killSwitchMu.Unlock()
+	AddAuditEntry("kill_reset", nil); w.Write([]byte("Reset"))
+}
+
+func handleComplianceUsage(w http.ResponseWriter, r *http.Request) {
+	usageMutex.Lock(); defer usageMutex.Unlock(); f, _ := os.Open(usagePath); defer f.Close()
+	var tt int; var tc float64; cutoff := time.Now().Add(-24 * time.Hour)
+	sc := bufio.NewScanner(f); for sc.Scan() {
+		var l UsageLog; json.Unmarshal(sc.Bytes(), &l); ts, _ := time.Parse(time.RFC3339, l.Timestamp)
+		if ts.After(cutoff) { tt += l.TokensUsed; tc += l.Cost }
 	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"total_tokens": tt, "total_cost": tc})
+}
 
-	if !rateLimit() {
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-		return
-	}
+func handleEconomicLedgerCost(w http.ResponseWriter, r *http.Request) {
+	var req struct { Category string; Amount float64; Description string }; json.NewDecoder(r.Body).Decode(&req)
+	globalLedger.RecordCost(req.Category, req.Amount, req.Description); w.WriteHeader(201)
+}
 
-	orgProfile, _ := json.Marshal(req.OrgProfile)
-	prompt := fmt.Sprintf(`Analyze the following grant text relative to the provided organizational profile.
-Grant Text: %s
-Org Profile: %s
+func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
+	var req struct { Amount float64; Source string }; json.NewDecoder(r.Body).Decode(&req)
+	globalLedger.RecordRevenue(req.Amount, req.Source); w.WriteHeader(201)
+}
 
-Extract structured data as JSON with the following keys:
-- eligibility_score: a number from 1 to 100 indicating fit.
-- key_deadlines: a list of important dates found in the text.
-- required_documents: a list of documents needed for application.
-- summary: a one-paragraph professional summary of the opportunity.`, req.GrantText, string(orgProfile))
+func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock(); defer globalLedger.mu.RUnlock()
+	roi := 0.0; if globalLedger.TotalCosts > 0 { roi = globalLedger.TotalRevenue / globalLedger.TotalCosts }
+	json.NewEncoder(w).Encode(EconomicSummary{globalLedger.Balance, globalLedger.TotalCosts, globalLedger.TotalRevenue, roi})
+}
 
-	dsReq := map[string]interface{}{
-		"model": "deepseek-chat",
-		"messages": []map[string]string{
-			{"role": "system", "content": "You are an expert grant analyst. Return ONLY JSON."},
-			{"role": "user", "content": prompt},
-		},
-		"response_format": map[string]string{"type": "json_object"},
-	}
-
-	dsBody, _ := json.Marshal(dsReq)
-	client := &http.Client{}
-	httpReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		http.Error(w, "failed to call DeepSeek API", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	var dsRes struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			TotalTokens int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "failed to parse DeepSeek response", http.StatusInternalServerError)
-		return
-	}
-
-	LogUsage(dsRes.Usage.TotalTokens)
-
-	if len(dsRes.Choices) == 0 {
-		http.Error(w, "no response from DeepSeek", http.StatusInternalServerError)
-		return
-	}
-
-	analysisJSON := dsRes.Choices[0].Message.Content
-	var analysis AnalyzeGrantResponse
-	json.Unmarshal([]byte(analysisJSON), &analysis)
-
-	// Record in graph
-	globalGraph.AddMeeting(Meeting{
-		Summary:     fmt.Sprintf("Analyzed grant: %s", analysis.Summary),
-		Decisions:   []string{fmt.Sprintf("Grant fit score: %d", analysis.EligibilityScore)},
-		ActionItems: analysis.RequiredDocuments,
-	})
-
-	// Index grant text
-	globalSemantic.AddItem(req.GrantText, "grant_analysis_"+generateID())
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(analysisJSON))
+func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
+	var req struct { ActionType string `json:"action_type"`; EstimatedCost float64 `json:"estimated_cost"` }; json.NewDecoder(r.Body).Decode(&req)
+	eval := EvaluateAction(req.ActionType, req.EstimatedCost); json.NewEncoder(w).Encode(eval)
 }
 
 func generateID() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
 }
