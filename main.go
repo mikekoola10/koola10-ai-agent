@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -114,11 +115,48 @@ type AnalyzeGrantResponse struct {
 	Summary           string   `json:"summary"`
 }
 
+// Graph Memory Structs
+type Meeting struct {
+	MeetingID   string   `json:"meeting_id"`
+	Timestamp   string   `json:"timestamp"`
+	Summary     string   `json:"summary"`
+	Decisions   []string `json:"decisions"`
+	ActionItems []string `json:"action_items"`
+}
+
+type Entity struct {
+	Name  string   `json:"name"`
+	Type  string   `json:"type"` // "person", "decision", "task"
+	Tasks []string `json:"tasks,omitempty"`
+}
+
+type Edge struct {
+	Source    string                 `json:"source"`
+	Target    string                 `json:"target"`
+	Relation  string                 `json:"relation"`
+	Weight    float64                `json:"weight"`
+	Frequency int                    `json:"frequency"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type MemoryGraph struct {
+	Meetings map[string]Meeting `json:"meetings"`
+	Entities map[string]Entity  `json:"entities"`
+	Edges    []Edge             `json:"edges"`
+	mu       sync.RWMutex
+}
+
 var (
 	cacheMutex sync.Mutex
 	cachePath  = "/data/grants_cache.json"
 	appsDir    = "/data/applications"
 	memoryPath = "/data/memory.json"
+	graphPath  = "/data/memory_graph.json"
+	globalGraph = &MemoryGraph{
+		Meetings: make(map[string]Meeting),
+		Entities: make(map[string]Entity),
+		Edges:    []Edge{},
+	}
 )
 
 func main() {
@@ -134,6 +172,9 @@ func main() {
 	if err := os.MkdirAll(appsDir, 0755); err != nil {
 		log.Printf("failed to create apps dir: %v", err)
 	}
+
+	// Load graph if exists
+	globalGraph.Load()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
@@ -154,6 +195,13 @@ func main() {
 	http.HandleFunc("/ai/recall", handleAIRecall)
 	http.HandleFunc("/ai/analyze-grant", handleAIAnalyzeGrant)
 
+	// Memory Graph Endpoints
+	http.HandleFunc("/memory/meetings", handleMemoryMeetings)
+	http.HandleFunc("/memory/entity/", handleMemoryEntity)
+	http.HandleFunc("/memory/influence/", handleMemoryInfluence)
+	http.HandleFunc("/memory/path", handleMemoryPath)
+	http.HandleFunc("/memory/decisions/ranked", handleMemoryDecisionsRanked)
+
 	log.Printf("starting server on 0.0.0.0:%s", port)
 
 	err := http.ListenAndServe("0.0.0.0:"+port, nil)
@@ -162,6 +210,256 @@ func main() {
 	}
 }
 
+// Graph methods
+func (g *MemoryGraph) Save() {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	data, _ := json.Marshal(g)
+	os.WriteFile(graphPath, data, 0644)
+}
+
+func (g *MemoryGraph) Load() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	data, err := os.ReadFile(graphPath)
+	if err == nil {
+		json.Unmarshal(data, g)
+	}
+	if g.Meetings == nil { g.Meetings = make(map[string]Meeting) }
+	if g.Entities == nil { g.Entities = make(map[string]Entity) }
+}
+
+func (g *MemoryGraph) AddWeightedEdge(source, target, relation string, metadata map[string]interface{}) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	for i, edge := range g.Edges {
+		if edge.Source == source && edge.Target == target && edge.Relation == relation {
+			g.Edges[i].Weight += 0.2
+			if g.Edges[i].Weight > 2.0 {
+				g.Edges[i].Weight = 2.0
+			}
+			g.Edges[i].Frequency++
+			return
+		}
+	}
+
+	g.Edges = append(g.Edges, Edge{
+		Source:    source,
+		Target:    target,
+		Relation:  relation,
+		Weight:    1.0,
+		Frequency: 1,
+		Metadata:  metadata,
+	})
+}
+
+func (g *MemoryGraph) AddMeeting(m Meeting) string {
+	if m.MeetingID == "" {
+		m.MeetingID = generateID()
+	}
+	if m.Timestamp == "" {
+		m.Timestamp = time.Now().Format(time.RFC3339)
+	}
+
+	g.mu.Lock()
+	g.Meetings[m.MeetingID] = m
+	g.mu.Unlock()
+
+	for _, decision := range m.Decisions {
+		g.mu.Lock()
+		if _, ok := g.Entities[decision]; !ok {
+			g.Entities[decision] = Entity{Name: decision, Type: "decision"}
+		}
+		g.mu.Unlock()
+		g.AddWeightedEdge(m.MeetingID, decision, "contains_decision", nil)
+	}
+
+	for _, item := range m.ActionItems {
+		parts := strings.Split(item, ":")
+		taskName := item
+		if len(parts) > 1 {
+			owner := strings.TrimSpace(parts[0])
+			taskName = strings.TrimSpace(parts[1])
+
+			g.mu.Lock()
+			entity, ok := g.Entities[owner]
+			if !ok {
+				entity = Entity{Name: owner, Type: "person"}
+			}
+			entity.Tasks = append(entity.Tasks, taskName)
+			g.Entities[owner] = entity
+			g.mu.Unlock()
+
+			g.AddWeightedEdge(owner, taskName, "assigned_to", nil)
+		}
+
+		g.mu.Lock()
+		if _, ok := g.Entities[taskName]; !ok {
+			g.Entities[taskName] = Entity{Name: taskName, Type: "task"}
+		}
+		g.mu.Unlock()
+		g.AddWeightedEdge(m.MeetingID, taskName, "contains_task", nil)
+	}
+
+	g.Save()
+	return m.MeetingID
+}
+
+func (g *MemoryGraph) CalculateInfluenceScore(name string) float64 {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	var incomingWeight, outgoingWeight float64
+	var totalEdges int
+
+	for _, edge := range g.Edges {
+		if edge.Target == name {
+			incomingWeight += edge.Weight
+			totalEdges++
+		}
+		if edge.Source == name {
+			outgoingWeight += edge.Weight
+			totalEdges++
+		}
+	}
+
+	if totalEdges == 0 {
+		return 0
+	}
+
+	score := (incomingWeight * 0.7) + (outgoingWeight * 0.3)
+	return score / float64(totalEdges)
+}
+
+func (g *MemoryGraph) FindPath(source, target string, maxDepth int) []Edge {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	type pathNode struct {
+		entity string
+		path   []Edge
+	}
+
+	queue := []pathNode{{entity: source, path: []Edge{}}}
+	visited := make(map[string]bool)
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		if current.entity == target {
+			return current.path
+		}
+
+		if len(current.path) >= maxDepth {
+			continue
+		}
+
+		visited[current.entity] = true
+
+		for _, edge := range g.Edges {
+			if edge.Source == current.entity && !visited[edge.Target] {
+				newPath := make([]Edge, len(current.path))
+				copy(newPath, current.path)
+				newPath = append(newPath, edge)
+				queue = append(queue, pathNode{entity: edge.Target, path: newPath})
+			}
+		}
+	}
+
+	return nil
+}
+
+func (g *MemoryGraph) RankDecisionsByImpact() []string {
+	g.mu.RLock()
+	decisions := []string{}
+	for name, entity := range g.Entities {
+		if entity.Type == "decision" {
+			decisions = append(decisions, name)
+		}
+	}
+	g.mu.RUnlock()
+
+	sort.Slice(decisions, func(i, j int) bool {
+		return g.CalculateInfluenceScore(decisions[i]) > g.CalculateInfluenceScore(decisions[j])
+	})
+
+	return decisions
+}
+
+// Handler Implementations
+func handleMemoryMeetings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var m Meeting
+		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		id := globalGraph.AddMeeting(m)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"meeting_id": id})
+		return
+	}
+
+	globalGraph.mu.RLock()
+	defer globalGraph.mu.RUnlock()
+	meetings := []Meeting{}
+	for _, m := range globalGraph.Meetings {
+		meetings = append(meetings, m)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(meetings)
+}
+
+func handleMemoryEntity(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/memory/entity/")
+	if name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+
+	globalGraph.mu.RLock()
+	defer globalGraph.mu.RUnlock()
+	entity, ok := globalGraph.Entities[name]
+	if !ok {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entity)
+}
+
+func handleMemoryInfluence(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/memory/influence/")
+	if name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+	score := globalGraph.CalculateInfluenceScore(name)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"name": name, "influence_score": score})
+}
+
+func handleMemoryPath(w http.ResponseWriter, r *http.Request) {
+	source := r.URL.Query().Get("source")
+	target := r.URL.Query().Get("target")
+	if source == "" || target == "" {
+		http.Error(w, "source and target required", http.StatusBadRequest)
+		return
+	}
+	path := globalGraph.FindPath(source, target, 5)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(path)
+}
+
+func handleMemoryDecisionsRanked(w http.ResponseWriter, r *http.Request) {
+	ranked := globalGraph.RankDecisionsByImpact()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ranked)
+}
+
+// Rest of the grant handlers... (keep them as they were, but I'll integrate them in next steps)
 func handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("query")
 	category := r.URL.Query().Get("category")
@@ -360,6 +658,13 @@ Provide the response in JSON format with the following keys: executive_summary, 
 	if appData, err := json.Marshal(draft); err == nil {
 		os.WriteFile(appPath, appData, 0644)
 	}
+
+	// Record in graph
+	globalGraph.AddMeeting(Meeting{
+		Summary:   fmt.Sprintf("Drafted application for grant: %s", grant.Title),
+		Decisions: []string{fmt.Sprintf("Apply to %s", grant.ID)},
+		ActionItems: []string{fmt.Sprintf("System: Review %s draft", appID)},
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(draft)
@@ -647,6 +952,15 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	systemPrompt := "You are Koola10, an autonomous AI agent for Spiral Grant Services. You are an expert in federal grants and help users find, analyze, and apply for funding."
+
+	// Add graph context
+	if strings.Contains(req.Prompt, "influence") || strings.Contains(req.Prompt, "path") || strings.Contains(req.Prompt, "decision") {
+		globalGraph.mu.RLock()
+		graphData, _ := json.Marshal(globalGraph)
+		systemPrompt += "\n\nCurrent Memory Graph Data: " + string(graphData)
+		globalGraph.mu.RUnlock()
+	}
+
 	if req.Context != "" {
 		systemPrompt += "\n\nContext Memory: " + req.Context
 	}
@@ -822,8 +1136,19 @@ Extract structured data as JSON with the following keys:
 		return
 	}
 
+	analysisJSON := dsRes.Choices[0].Message.Content
+	var analysis AnalyzeGrantResponse
+	json.Unmarshal([]byte(analysisJSON), &analysis)
+
+	// Record in graph
+	globalGraph.AddMeeting(Meeting{
+		Summary:   fmt.Sprintf("Analyzed grant: %s", analysis.Summary),
+		Decisions: []string{fmt.Sprintf("Grant fit score: %d", analysis.EligibilityScore)},
+		ActionItems: analysis.RequiredDocuments,
+	})
+
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(dsRes.Choices[0].Message.Content))
+	w.Write([]byte(analysisJSON))
 }
 
 func generateID() string {
