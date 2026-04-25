@@ -1,0 +1,38 @@
+name: Grant Application Monitor
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Monitor Endpoint
+        id: monitor
+        run: |
+          RESPONSE=$(curl -s "https://koola10.fly.dev/grants/monitor")
+          # Using a temporary file to store JSON safely
+          echo "$RESPONSE" > monitor_response.json
+          echo "Full Response: $RESPONSE"
+
+      - name: Create Issue if Follow-ups Generated
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Use jq to extract and format follow-ups from the file
+          FOLLOW_UPS_JSON=$(jq -c '.follow_ups' monitor_response.json)
+
+          if [ "$FOLLOW_UPS_JSON" != "null" ] && [ "$FOLLOW_UPS_JSON" != "[]" ]; then
+            # Create a body for the issue
+            BODY="The following applications have overdue deadlines and follow-up drafts have been generated:
+
+            "
+            # Append each follow-up to the body
+            jq -r '.follow_ups[] | "### Application ID: \(.application_id)\n**Grant:** \(.grant_title)\n\n#### Follow-up Draft:\n\(.follow_up_email)\n\n---"' monitor_response.json >> issue_body.md
+
+            gh issue create --title "Grant Follow-ups Generated" --body-file issue_body.md
+          else
+            echo "No follow-ups generated."
+          fi
