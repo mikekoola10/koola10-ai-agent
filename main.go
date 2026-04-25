@@ -146,16 +146,40 @@ type MemoryGraph struct {
 	mu       sync.RWMutex
 }
 
+// Semantic Memory Structs
+type SemanticItem struct {
+	Text   string    `json:"text"`
+	RefID  string    `json:"ref_id"`
+	Vector []float64 `json:"vector"`
+}
+
+type SemanticIndex struct {
+	Items []SemanticItem `json:"items"`
+	mu    sync.RWMutex
+}
+
+type SemanticSearchResult struct {
+	RefID string  `json:"ref_id"`
+	Score float64 `json:"score"`
+	Text  string  `json:"text"`
+}
+
 var (
 	cacheMutex sync.Mutex
 	cachePath  = "/data/grants_cache.json"
 	appsDir    = "/data/applications"
 	memoryPath = "/data/memory.json"
 	graphPath  = "/data/memory_graph.json"
+	semanticPath = "/data/semantic_index.json"
+
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
 		Entities: make(map[string]Entity),
 		Edges:    []Edge{},
+	}
+
+	globalSemantic = &SemanticIndex{
+		Items: []SemanticItem{},
 	}
 )
 
@@ -173,8 +197,9 @@ func main() {
 		log.Printf("failed to create apps dir: %v", err)
 	}
 
-	// Load graph if exists
+	// Load data
 	globalGraph.Load()
+	globalSemantic.Load()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
@@ -201,6 +226,10 @@ func main() {
 	http.HandleFunc("/memory/influence/", handleMemoryInfluence)
 	http.HandleFunc("/memory/path", handleMemoryPath)
 	http.HandleFunc("/memory/decisions/ranked", handleMemoryDecisionsRanked)
+
+	// Semantic Endpoints
+	http.HandleFunc("/semantic/index", handleSemanticIndex)
+	http.HandleFunc("/semantic/search", handleSemanticSearch)
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 
@@ -388,6 +417,96 @@ func (g *MemoryGraph) RankDecisionsByImpact() []string {
 	return decisions
 }
 
+// Semantic methods
+func (s *SemanticIndex) Save() {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	data, _ := json.Marshal(s)
+	os.WriteFile(semanticPath, data, 0644)
+}
+
+func (s *SemanticIndex) Load() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := os.ReadFile(semanticPath)
+	if err == nil {
+		json.Unmarshal(data, s)
+	}
+	if s.Items == nil { s.Items = []SemanticItem{} }
+}
+
+func (s *SemanticIndex) AddItem(text, refID string) error {
+	semanticAgentURL := os.Getenv("SEMANTIC_AGENT_URL")
+	if semanticAgentURL == "" {
+		semanticAgentURL = "https://koola10-semantic.fly.dev"
+	}
+
+	reqBody, _ := json.Marshal(map[string]string{"text": text})
+	resp, err := http.Post(semanticAgentURL+"/generate", "application/json", bytes.NewBuffer(reqBody))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var res struct {
+		Vector []float64 `json:"vector"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.Items = append(s.Items, SemanticItem{
+		Text:   text,
+		RefID:  refID,
+		Vector: res.Vector,
+	})
+	s.mu.Unlock()
+	s.Save()
+	return nil
+}
+
+func (s *SemanticIndex) Search(query string, topK int) ([]SemanticSearchResult, error) {
+	semanticAgentURL := os.Getenv("SEMANTIC_AGENT_URL")
+	if semanticAgentURL == "" {
+		semanticAgentURL = "https://koola10-semantic.fly.dev"
+	}
+
+	s.mu.RLock()
+	searchReq := map[string]interface{}{
+		"query":      query,
+		"embeddings": s.Items,
+		"top_k":      topK,
+	}
+	s.mu.RUnlock()
+
+	reqBody, _ := json.Marshal(searchReq)
+	resp, err := http.Post(semanticAgentURL+"/search", "application/json", bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var results []SemanticSearchResult
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return nil, err
+	}
+
+	// Attach text back to results
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i, res := range results {
+		for _, item := range s.Items {
+			if item.RefID == res.RefID {
+				results[i].Text = item.Text
+				break
+			}
+		}
+	}
+
+	return results, nil
+}
+
 // Handler Implementations
 func handleMemoryMeetings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
@@ -459,7 +578,45 @@ func handleMemoryDecisionsRanked(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ranked)
 }
 
-// Rest of the grant handlers... (keep them as they were, but I'll integrate them in next steps)
+func handleSemanticIndex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Text  string `json:"text"`
+		RefID string `json:"ref_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if err := globalSemantic.AddItem(req.Text, req.RefID); err != nil {
+		http.Error(w, "failed to index: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "indexed"})
+}
+
+func handleSemanticSearch(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	topKStr := r.URL.Query().Get("top_k")
+	topK := 5
+	if topKStr != "" {
+		fmt.Sscanf(topKStr, "%d", &topK)
+	}
+
+	results, err := globalSemantic.Search(query, topK)
+	if err != nil {
+		http.Error(w, "failed to search: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
+// Rest of the grant handlers...
 func handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("query")
 	category := r.URL.Query().Get("category")
@@ -665,6 +822,9 @@ Provide the response in JSON format with the following keys: executive_summary, 
 		Decisions: []string{fmt.Sprintf("Apply to %s", grant.ID)},
 		ActionItems: []string{fmt.Sprintf("System: Review %s draft", appID)},
 	})
+
+	// Index narrative
+	globalSemantic.AddItem(dsRes.Choices[0].Message.Content, appID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(draft)
@@ -953,6 +1113,17 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 
 	systemPrompt := "You are Koola10, an autonomous AI agent for Spiral Grant Services. You are an expert in federal grants and help users find, analyze, and apply for funding."
 
+	// RAG: Perform semantic search
+	results, err := globalSemantic.Search(req.Prompt, 3)
+	if err == nil && len(results) > 0 {
+		systemPrompt += "\n\nRelevant Context from Memory:"
+		for _, res := range results {
+			if res.Score > 0.5 { // Threshold
+				systemPrompt += fmt.Sprintf("\n- [Ref: %s] %s", res.RefID, res.Text)
+			}
+		}
+	}
+
 	// Add graph context
 	if strings.Contains(req.Prompt, "influence") || strings.Contains(req.Prompt, "path") || strings.Contains(req.Prompt, "decision") {
 		globalGraph.mu.RLock()
@@ -1142,10 +1313,13 @@ Extract structured data as JSON with the following keys:
 
 	// Record in graph
 	globalGraph.AddMeeting(Meeting{
-		Summary:   fmt.Sprintf("Analyzed grant: %s", analysis.Summary),
-		Decisions: []string{fmt.Sprintf("Grant fit score: %d", analysis.EligibilityScore)},
+		Summary:     fmt.Sprintf("Analyzed grant: %s", analysis.Summary),
+		Decisions:   []string{fmt.Sprintf("Grant fit score: %d", analysis.EligibilityScore)},
 		ActionItems: analysis.RequiredDocuments,
 	})
+
+	// Index grant text
+	globalSemantic.AddItem(req.GrantText, "grant_analysis_"+generateID())
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(analysisJSON))
