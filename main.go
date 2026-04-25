@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	_ "embed"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -237,15 +238,15 @@ var (
 	approvalMu   sync.Mutex
 	killSwitchMu sync.Mutex
 
-	cachePath      = /data/grants_cache.json"
-	appsDir        = /data/applications"
-	memoryPath     = /data/memory.json"
-	graphPath      = /data/memory_graph.json"
-	semanticPath   = /data/semantic_index.json"
-	auditPath      = /data/audit_chain.jsonl"
-	usagePath      = /data/usage.jsonl"
-	killSwitchPath = /data/kill_switch"
-	ledgerPath     = /data/economic_ledger.json"
+	cachePath      = "/data/grants_cache.json"
+	appsDir        = "/data/applications"
+	memoryPath     = "/data/memory.json"
+	graphPath      = "/data/memory_graph.json"
+	semanticPath   = "/data/semantic_index.json"
+	auditPath      = "/data/audit_chain.jsonl"
+	usagePath      = "/data/usage.jsonl"
+	killSwitchPath = "/data/kill_switch"
+	ledgerPath     = "/data/economic_ledger.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -272,6 +273,9 @@ var (
 	redisClient *redis.Client
 	nodeID      string
 	region      string
+
+	//go:embed dashboard.html
+	dashboardHTML string
 )
 
 // --- Main ---
@@ -299,7 +303,10 @@ func main() {
 		}
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(dashboardHTML))
+	})
 	http.HandleFunc("/grants/search", handleSearch)
 	http.HandleFunc("/grants/apply", handleApply)
 	http.HandleFunc("/grants/status", handleStatus)
@@ -752,8 +759,65 @@ func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(res)
 }
 func handleMonitor(w http.ResponseWriter, r *http.Request) {
-	if checkKillSwitch() { http.Error(w, "kill-switch", 503); return }
-	w.Write([]byte(`{"status": "complete", "follow_ups": []}`))
+	if checkKillSwitch() {
+		http.Error(w, "kill-switch", 503)
+		return
+	}
+	files, err := os.ReadDir(appsDir)
+	if err != nil {
+		http.Error(w, "failed to read applications", 500)
+		return
+	}
+	var results []MonitorResult
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(appsDir, f.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var d ApplicationDraft
+		json.Unmarshal(data, &d)
+		info, _ := f.Info()
+		// Check for submitted applications older than 7 days without a follow-up
+		if d.Status == "submitted" && d.FollowUpDraft == "" && time.Since(info.ModTime()) > 7*24*time.Hour {
+			if apiKey != "" && rateLimit() {
+				prompt := fmt.Sprintf("Draft a polite follow-up email for grant application %s. The original grant was %s.", d.ApplicationID, d.GrantID)
+				dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
+				dsBody, _ := json.Marshal(dsReq)
+				hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+				hReq.Header.Set("Authorization", "Bearer "+apiKey)
+				hReq.Header.Set("Content-Type", "application/json")
+				resp, err := (&http.Client{}).Do(hReq)
+				if err == nil {
+					var dsRes struct {
+						Choices []struct {
+							Message struct {
+								Content string
+							}
+						}
+						Usage struct {
+							TotalTokens int
+						}
+					}
+					if json.NewDecoder(resp.Body).Decode(&dsRes) == nil {
+						d.FollowUpDraft = dsRes.Choices[0].Message.Content
+						updated, _ := json.Marshal(d)
+						os.WriteFile(path, updated, 0644)
+						results = append(results, MonitorResult{ApplicationID: d.ApplicationID, FollowUpEmail: d.FollowUpDraft})
+						LogUsage(dsRes.Usage.TotalTokens)
+						globalLedger.RecordCost("ai_monitor", float64(dsRes.Usage.TotalTokens)*0.000002, "Monitor follow-up")
+					}
+					resp.Body.Close()
+				}
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "complete", "follow_ups": results})
 }
 func handleApplyAuto(w http.ResponseWriter, r *http.Request) {
 	if checkKillSwitch() { http.Error(w, "kill-switch", 503); return }
@@ -769,9 +833,58 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"data": "pending"}`))
 }
 func handleAIChat(w http.ResponseWriter, r *http.Request) {
-	var req ChatRequest; json.NewDecoder(r.Body).Decode(&req); apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	if apiKey == "" { http.Error(w, "no key", 500); return }; if !rateLimit() { http.Error(w, "limited", 429); return }
-	w.Write([]byte(`{"response": "I am Koola10, your autonomous grant agent."}`))
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		http.Error(w, "no key", 500)
+		return
+	}
+	if !rateLimit() {
+		http.Error(w, "limited", 429)
+		return
+	}
+	dsReq := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{
+			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
+			{"role": "user", "content": req.Prompt},
+		},
+	}
+	dsBody, _ := json.Marshal(dsReq)
+	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	hReq.Header.Set("Authorization", "Bearer "+apiKey)
+	hReq.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{}).Do(hReq)
+	if err != nil {
+		http.Error(w, "api failed", 500)
+		return
+	}
+	defer resp.Body.Close()
+	var dsRes struct {
+		Choices []struct {
+			Message struct {
+				Content string
+			}
+		}
+		Usage struct {
+			TotalTokens int
+		}
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
+		http.Error(w, "parse failed", 500)
+		return
+	}
+	LogUsage(dsRes.Usage.TotalTokens)
+	globalLedger.RecordCost("ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ChatResponse{
+		Response:   dsRes.Choices[0].Message.Content,
+		TokensUsed: dsRes.Usage.TotalTokens,
+	})
 }
 func handleAIRemember(w http.ResponseWriter, r *http.Request) {
 	var req MemoryEntry; json.NewDecoder(r.Body).Decode(&req); json.NewEncoder(w).Encode(map[string]string{"status": "stored"})
@@ -805,7 +918,25 @@ func handleSemanticSearch(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode([]SemanticSearchResult{})
 }
 func handleComplianceAudit(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode([]AuditEntry{})
+	f, err := os.Open(auditPath)
+	if err != nil {
+		json.NewEncoder(w).Encode([]AuditEntry{})
+		return
+	}
+	defer f.Close()
+	var entries []AuditEntry
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var e AuditEntry
+		if err := json.Unmarshal([]byte(scanner.Text()), &e); err == nil {
+			entries = append(entries, e)
+		}
+	}
+	if len(entries) > 50 {
+		entries = entries[len(entries)-50:]
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entries)
 }
 func handleComplianceAuditVerify(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"valid": true})
@@ -835,7 +966,18 @@ func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(EconomicSummary{Balance: 100.0})
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+	roi := 0.0
+	if globalLedger.TotalCosts > 0 {
+		roi = globalLedger.TotalRevenue / globalLedger.TotalCosts
+	}
+	json.NewEncoder(w).Encode(EconomicSummary{
+		Balance:      globalLedger.Balance,
+		TotalCosts:   globalLedger.TotalCosts,
+		TotalRevenue: globalLedger.TotalRevenue,
+		ROI:          roi,
+	})
 }
 func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
