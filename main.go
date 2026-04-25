@@ -86,10 +86,39 @@ type MonitorResult struct {
 	FollowUpEmail string `json:"follow_up_email"`
 }
 
+// AI structs
+type ChatRequest struct {
+	Prompt  string `json:"prompt"`
+	Context string `json:"context,omitempty"`
+}
+
+type ChatResponse struct {
+	Response   string `json:"response"`
+	TokensUsed int    `json:"tokens_used"`
+}
+
+type MemoryEntry struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type AnalyzeGrantRequest struct {
+	GrantText  string                 `json:"grant_text"`
+	OrgProfile map[string]interface{} `json:"org_profile"`
+}
+
+type AnalyzeGrantResponse struct {
+	EligibilityScore  int      `json:"eligibility_score"`
+	KeyDeadlines      []string `json:"key_deadlines"`
+	RequiredDocuments []string `json:"required_documents"`
+	Summary           string   `json:"summary"`
+}
+
 var (
 	cacheMutex sync.Mutex
 	cachePath  = "/data/grants_cache.json"
 	appsDir    = "/data/applications"
+	memoryPath = "/data/memory.json"
 )
 
 func main() {
@@ -118,6 +147,12 @@ func main() {
 	http.HandleFunc("/grants/update-status", handleUpdateStatus)
 	http.HandleFunc("/grants/apply-auto", handleApplyAuto)
 	http.HandleFunc("/grants/check-status", handleCheckStatus)
+
+	// AI Endpoints
+	http.HandleFunc("/ai/chat", handleAIChat)
+	http.HandleFunc("/ai/remember", handleAIRemember)
+	http.HandleFunc("/ai/recall", handleAIRecall)
+	http.HandleFunc("/ai/analyze-grant", handleAIAnalyzeGrant)
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 
@@ -591,6 +626,204 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	io.Copy(w, resp.Body)
+}
+
+func handleAIChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		http.Error(w, "DEEPSEEK_API_KEY not set", http.StatusInternalServerError)
+		return
+	}
+
+	systemPrompt := "You are Koola10, an autonomous AI agent for Spiral Grant Services. You are an expert in federal grants and help users find, analyze, and apply for funding."
+	if req.Context != "" {
+		systemPrompt += "\n\nContext Memory: " + req.Context
+	}
+
+	dsReq := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": req.Prompt},
+		},
+	}
+
+	dsBody, _ := json.Marshal(dsReq)
+	client := &http.Client{}
+	httpReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		http.Error(w, "failed to call DeepSeek API", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	var dsRes struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			TotalTokens int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
+		http.Error(w, "failed to parse DeepSeek response", http.StatusInternalServerError)
+		return
+	}
+
+	if len(dsRes.Choices) == 0 {
+		http.Error(w, "no response from DeepSeek", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ChatResponse{
+		Response:   dsRes.Choices[0].Message.Content,
+		TokensUsed: dsRes.Usage.TotalTokens,
+	})
+}
+
+func handleAIRemember(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req MemoryEntry
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+
+	memory := make(map[string]string)
+	if data, err := os.ReadFile(memoryPath); err == nil {
+		json.Unmarshal(data, &memory)
+	}
+
+	memory[req.Key] = req.Value
+	memoryData, _ := json.Marshal(memory)
+	os.WriteFile(memoryPath, memoryData, 0644)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "stored"})
+}
+
+func handleAIRecall(w http.ResponseWriter, r *http.Request) {
+	key := r.URL.Query().Get("key")
+	if key == "" {
+		http.Error(w, "key is required", http.StatusBadRequest)
+		return
+	}
+
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+
+	memory := make(map[string]string)
+	if data, err := os.ReadFile(memoryPath); err == nil {
+		json.Unmarshal(data, &memory)
+	}
+
+	val, ok := memory[key]
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"key": key, "value": val})
+}
+
+func handleAIAnalyzeGrant(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req AnalyzeGrantRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		http.Error(w, "DEEPSEEK_API_KEY not set", http.StatusInternalServerError)
+		return
+	}
+
+	orgProfile, _ := json.Marshal(req.OrgProfile)
+	prompt := fmt.Sprintf(`Analyze the following grant text relative to the provided organizational profile.
+Grant Text: %s
+Org Profile: %s
+
+Extract structured data as JSON with the following keys:
+- eligibility_score: a number from 1 to 100 indicating fit.
+- key_deadlines: a list of important dates found in the text.
+- required_documents: a list of documents needed for application.
+- summary: a one-paragraph professional summary of the opportunity.`, req.GrantText, string(orgProfile))
+
+	dsReq := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{
+			{"role": "system", "content": "You are an expert grant analyst. Return ONLY JSON."},
+			{"role": "user", "content": prompt},
+		},
+		"response_format": map[string]string{"type": "json_object"},
+	}
+
+	dsBody, _ := json.Marshal(dsReq)
+	client := &http.Client{}
+	httpReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		http.Error(w, "failed to call DeepSeek API", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	var dsRes struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
+		http.Error(w, "failed to parse DeepSeek response", http.StatusInternalServerError)
+		return
+	}
+
+	if len(dsRes.Choices) == 0 {
+		http.Error(w, "no response from DeepSeek", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(dsRes.Choices[0].Message.Content))
 }
 
 func generateID() string {
