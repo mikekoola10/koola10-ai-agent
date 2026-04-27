@@ -191,6 +191,7 @@ type Transaction struct {
 	Timestamp   string  `json:"timestamp"`
 	Type        string  `json:"type"`
 	Category    string  `json:"category"`
+	Vertical    string  `json:"vertical,omitempty"`
 	Amount      float64 `json:"amount"`
 	Description string  `json:"description"`
 }
@@ -414,14 +415,16 @@ func main() {
 	http.HandleFunc("/economic/evaluate", corsMiddleware(handleEconomicEvaluate))
 
 	http.HandleFunc("/swarm/start", corsMiddleware(handleSwarmStart))
-	http.HandleFunc("/swarm/status", corsMiddleware(handleSwarmStatus))
+	http.HandleFunc("/swarm/task-status", corsMiddleware(handleSwarmStatus))
 	http.HandleFunc("/swarm/agents", corsMiddleware(handleSwarmAgents))
 	http.HandleFunc("/swarm/nodes", corsMiddleware(handleSwarmNodes))
 
 	// Specialist Swarm Endpoints
-	http.HandleFunc("/swarm/", corsMiddleware(handleSpecialistSwarm))
 	http.HandleFunc("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
 	http.HandleFunc("/swarm/report", corsMiddleware(handleSwarmReport))
+	http.HandleFunc("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
+	http.HandleFunc("/swarm/status", corsMiddleware(handleSwarmStatusAll))
+	http.HandleFunc("/swarm/", corsMiddleware(handleSpecialistSwarm))
 
 	// Tool Execution
 	http.HandleFunc("/tools/execute", corsMiddleware(tools.HandleExecute))
@@ -491,7 +494,7 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	LogUsage(dsRes.Usage.TotalTokens)
-	globalLedger.RecordCost("studio_lore", float64(dsRes.Usage.TotalTokens)*0.000002, "Lorekeeper query")
+	globalLedger.RecordCost("", "studio_lore", float64(dsRes.Usage.TotalTokens)*0.000002, "Lorekeeper query")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ChatResponse{
@@ -552,7 +555,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	LogUsage(dsRes.Usage.TotalTokens)
-	globalLedger.RecordCost("studio_style", float64(dsRes.Usage.TotalTokens)*0.000002, "Style generation")
+	globalLedger.RecordCost("", "studio_style", float64(dsRes.Usage.TotalTokens)*0.000002, "Style generation")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(dsRes.Choices[0].Message.Content))
@@ -720,7 +723,7 @@ func startSwarmListeners() {
 
 			b, _ := json.Marshal(t); redisClient.Set(ctx, "task:"+t.TaskID, b, 24*time.Hour)
 			redisClient.Publish(ctx, "tasks:orchestrator", b)
-			globalLedger.RecordCost("swarm_agent", 0.01, "FinderAgent search")
+			globalLedger.RecordCost("swarm", "swarm_agent", 0.01, "FinderAgent search")
 		}
 	}()
 
@@ -751,7 +754,7 @@ func startSwarmListeners() {
 
 			b, _ := json.Marshal(t); redisClient.Set(ctx, "task:"+t.TaskID, b, 24*time.Hour)
 			redisClient.Publish(ctx, "tasks:orchestrator", b)
-			globalLedger.RecordCost("swarm_agent", 0.05, "WriterAgent drafting")
+			globalLedger.RecordCost("swarm", "swarm_agent", 0.05, "WriterAgent drafting")
 		}
 	}()
 
@@ -786,7 +789,7 @@ func startSwarmListeners() {
 
 			b, _ := json.Marshal(t); redisClient.Set(ctx, "task:"+t.TaskID, b, 24*time.Hour)
 			redisClient.Publish(ctx, "tasks:orchestrator", b)
-			globalLedger.RecordCost("swarm_agent", 0.01, "ReviewerAgent review")
+			globalLedger.RecordCost("swarm", "swarm_agent", 0.01, "ReviewerAgent review")
 		}
 	}()
 
@@ -820,7 +823,7 @@ func startSwarmListeners() {
 
 			b, _ := json.Marshal(t); redisClient.Set(ctx, "task:"+t.TaskID, b, 24*time.Hour)
 			redisClient.Publish(ctx, "tasks:orchestrator", b)
-			globalLedger.RecordCost("swarm_agent", 0.02, "SubmitterAgent browser action")
+			globalLedger.RecordCost("swarm", "swarm_agent", 0.02, "SubmitterAgent browser action")
 		}
 	}()
 }
@@ -951,15 +954,15 @@ func (l *EconomicLedger) Load() {
 	l.mu.Lock(); defer l.mu.Unlock(); data, err := os.ReadFile(ledgerPath)
 	if err == nil { json.Unmarshal(data, l) }; if l.Transactions == nil { l.Transactions = []Transaction{} }
 }
-func (l *EconomicLedger) RecordCost(category string, amount float64, description string) {
+func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
 	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, amount, description})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category})
+	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
+	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
 }
-func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
+func (l *EconomicLedger) RecordRevenue(vertical string, amount float64, source string) {
 	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "grant_success", amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source})
+	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "grant_success", vertical, amount, "Revenue: " + source})
+	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
 }
 func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {
 	roiThreshold := 2.0; projectedRevenue := 0.0; if actionType == "grant_submit" { projectedRevenue = 500.0 }
@@ -1008,7 +1011,7 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 	hReq.Header.Set("Authorization", "Bearer "+apiKey); hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq); if err != nil { http.Error(w, "api failed", 500); return }; defer resp.Body.Close()
 	var dsRes struct { Choices []struct { Message struct { Content string } }; Usage struct { TotalTokens int } }
-	json.NewDecoder(resp.Body).Decode(&dsRes); LogUsage(dsRes.Usage.TotalTokens); globalLedger.RecordCost("ai_inference", float64(dsRes.Usage.TotalTokens)*0.000002, "Draft")
+	json.NewDecoder(resp.Body).Decode(&dsRes); LogUsage(dsRes.Usage.TotalTokens); globalLedger.RecordCost("", "ai_inference", float64(dsRes.Usage.TotalTokens)*0.000002, "Draft")
 	var draft ApplicationDraft; json.Unmarshal([]byte(dsRes.Choices[0].Message.Content), &draft); appID := generateID(); draft.ApplicationID = appID; draft.GrantID = req.GrantID; draft.Status = "draft_generated"
 	appData, _ := json.Marshal(draft); os.WriteFile(filepath.Join(appsDir, appID+".json"), appData, 0644)
 	globalGraph.AddMeeting(Meeting{Summary: "Drafted application", Decisions: []string{"Apply to " + grant.ID}})
@@ -1023,7 +1026,7 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var req struct { ApplicationID string; Status string }; json.NewDecoder(r.Body).Decode(&req)
 	id := filepath.Base(req.ApplicationID); data, _ := os.ReadFile(filepath.Join(appsDir, id+".json")); var d ApplicationDraft; json.Unmarshal(data, &d)
 	prev := d.Status; d.Status = req.Status; updated, _ := json.Marshal(d); os.WriteFile(filepath.Join(appsDir, id+".json"), updated, 0644)
-	if req.Status == "approved" && prev != "approved" { globalLedger.RecordRevenue(500.0, "Grant success: "+id) }
+	if req.Status == "approved" && prev != "approved" { globalLedger.RecordRevenue("", 500.0, "Grant success: "+id) }
 	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(d)
 }
 func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
@@ -1085,7 +1088,7 @@ func handleMonitor(w http.ResponseWriter, r *http.Request) {
 						os.WriteFile(path, updated, 0644)
 						results = append(results, MonitorResult{ApplicationID: d.ApplicationID, FollowUpEmail: d.FollowUpDraft})
 						LogUsage(dsRes.Usage.TotalTokens)
-						globalLedger.RecordCost("ai_monitor", float64(dsRes.Usage.TotalTokens)*0.000002, "Monitor follow-up")
+						globalLedger.RecordCost("", "ai_monitor", float64(dsRes.Usage.TotalTokens)*0.000002, "Monitor follow-up")
 					}
 					resp.Body.Close()
 				}
@@ -1100,12 +1103,12 @@ func handleApplyAuto(w http.ResponseWriter, r *http.Request) {
 	var req struct { URL string; FormData map[string]string; ApprovalID string }; json.NewDecoder(r.Body).Decode(&req)
 	approvalMu.Lock(); ap, ok := approvalStore[req.ApprovalID]; approvalMu.Unlock()
 	if !ok || ap.Status != "approved" { http.Error(w, "unauthorized", 403); return }
-	globalLedger.RecordCost("browser_automation", 0.02, "Form submission")
+	globalLedger.RecordCost("", "browser_automation", 0.02, "Form submission")
 	w.Write([]byte(`{"status": "success"}`))
 }
 func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	if checkKillSwitch() { http.Error(w, "kill-switch", 503); return }
-	globalLedger.RecordCost("browser_automation", 0.02, "Status check")
+	globalLedger.RecordCost("", "browser_automation", 0.02, "Status check")
 	w.Write([]byte(`{"data": "pending"}`))
 }
 func handleAIChat(w http.ResponseWriter, r *http.Request) {
@@ -1155,7 +1158,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	LogUsage(dsRes.Usage.TotalTokens)
-	globalLedger.RecordCost("ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
+	globalLedger.RecordCost("", "ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ChatResponse{
 		Response:   dsRes.Choices[0].Message.Content,
@@ -1259,9 +1262,54 @@ func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
 }
 
+func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
+	globalSwarmManager.Mu.RLock()
+	defer globalSwarmManager.Mu.RUnlock()
+	res := make(map[string]interface{})
+	for v := range globalSwarmManager.Swarms {
+		res[v] = globalSwarmManager.GetSwarmStatus(v)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+	revenueByVertical := make(map[string]float64)
+	costByVertical := make(map[string]float64)
+	for _, t := range globalLedger.Transactions {
+		if t.Vertical == "" {
+			continue
+		}
+		if t.Type == "revenue" {
+			revenueByVertical[t.Vertical] += t.Amount
+		} else if t.Type == "cost" {
+			costByVertical[t.Vertical] += t.Amount
+		}
+	}
+	res := make(map[string]interface{})
+	for v := range globalSwarmManager.Factories {
+		rev := revenueByVertical[v]
+		cost := costByVertical[v]
+		res[v] = map[string]interface{}{
+			"revenue": rev,
+			"cost":    cost,
+			"profit":   rev - cost,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
 func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/swarm/"), "/")
 	if len(parts) < 2 {
+		if len(parts) == 1 && parts[0] == "" {
+			// Redirect to status all
+			handleSwarmStatusAll(w, r)
+			return
+		}
 		http.Error(w, "invalid path", 400)
 		return
 	}

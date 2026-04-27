@@ -22,11 +22,11 @@ type SpecialistAgent interface {
 
 type SwarmManager struct {
 	Swarms map[string][]SpecialistAgent
-	mu     sync.RWMutex
+	Mu     sync.RWMutex
 
 	// Callbacks for logging to economic ledger and compliance audit
 	AuditLogger func(action string, details map[string]interface{})
-	LedgerLogger func(category string, amount float64, description string)
+	LedgerLogger func(vertical, category string, amount float64, description string)
 
 	// Factory for creating agents for a vertical
 	Factories map[string]func() []SpecialistAgent
@@ -40,8 +40,8 @@ func NewSwarmManager() *SwarmManager {
 }
 
 func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+	sm.Mu.Lock()
+	defer sm.Mu.Unlock()
 
 	factory, ok := sm.Factories[vertical]
 	if !ok {
@@ -65,28 +65,29 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 }
 
 func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{}, error) {
-	sm.mu.Lock()
+	sm.Mu.Lock()
 	agents, ok := sm.Swarms[vertical]
 
 	if !ok || len(agents) == 0 {
-		sm.mu.Unlock()
+		sm.Mu.Unlock()
 		return nil, fmt.Errorf("no swarm deployed for vertical: %s", vertical)
 	}
 
-	// Simple dispatch logic: find the first idle agent
+	// Simple dispatch logic: find the first available agent
 	var target SpecialistAgent
 	for _, a := range agents {
-		if a.Status() == StatusIdle {
+		status := a.Status()
+		if status == StatusIdle || status == StatusCompleted {
 			target = a
 			break
 		}
 	}
 
 	if target == nil {
-		sm.mu.Unlock()
+		sm.Mu.Unlock()
 		return nil, fmt.Errorf("all agents in %s swarm are busy", vertical)
 	}
-	sm.mu.Unlock()
+	sm.Mu.Unlock()
 
 	result, err := target.Run(task)
 
@@ -101,15 +102,15 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 
 	if sm.LedgerLogger != nil {
 		// Log a nominal cost for agent execution
-		sm.LedgerLogger("swarm_execution", 0.05, fmt.Sprintf("Executed task in %s: %s", vertical, target.Specialty()))
+		sm.LedgerLogger(vertical, "swarm_execution", 0.05, fmt.Sprintf("Executed task in %s: %s", vertical, target.Specialty()))
 	}
 
 	return result, err
 }
 
 func (sm *SwarmManager) GetSwarmStatus(vertical string) []map[string]string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.Mu.RLock()
+	defer sm.Mu.RUnlock()
 	agents := sm.Swarms[vertical]
 	res := make([]map[string]string, 0, len(agents))
 	for _, a := range agents {
@@ -122,8 +123,8 @@ func (sm *SwarmManager) GetSwarmStatus(vertical string) []map[string]string {
 }
 
 func (sm *SwarmManager) GetAllSwarmMetrics() map[string]interface{} {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.Mu.RLock()
+	defer sm.Mu.RUnlock()
 
 	metrics := make(map[string]interface{})
 	for vertical, agents := range sm.Swarms {
