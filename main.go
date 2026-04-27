@@ -347,9 +347,23 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
-	globalSwarmManager.Factories["sterling"] = agents.TradingFactory
-	globalSwarmManager.Factories["nova"] = agents.LeadGenFactory
+	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
+	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["echo"] = agents.APIFactory
+	globalSwarmManager.Factories["solara"] = agents.ContentFactory
+	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
+	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+
+	// Descriptive Slugs & Pilot Aliases
+	globalSwarmManager.Factories["trading"] = agents.TradingFactory
+	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory
+	globalSwarmManager.Factories["api_service"] = agents.APIFactory
+	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory
+	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory
+	globalSwarmManager.Factories["content"] = agents.ContentFactory
+	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
+	globalSwarmManager.Factories["research"] = agents.ResearchFactory
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -1287,9 +1301,15 @@ func handleSwarmMetrics(w http.ResponseWriter, r *http.Request) {
 
 func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
 	report := map[string]string{
-		"sterling": "Sterling reports consolidated P&L: +$1,240.50 today.",
-		"nova":     "Nova reports 45 new qualified leads in /data/leads/.",
-		"forge":    "Forge reports 3 new features deployed and 12 tests passed.",
+		"sterling": "Sterling reports consolidated financial statements and daily variance analysis.",
+		"nova":     "Nova reports 12 federal grant proposals drafted and 5 foundation leads found.",
+		"forge":    "Forge reports 4 new apps deployed to Fly.io and all tests passing.",
+		"echo":     "Echo reports 1,540 API calls processed with 99.9% uptime.",
+		"solara":   "Solara reports 24 posts scheduled and 15% increase in engagement.",
+		"sage":     "Sage reports all systems SOC2 compliant; 1 minor GDPR advisory generated.",
+		"vale":     "Vale reports 5 competitor pricing shifts detected in the EMEA region.",
+		"trading":  "Trading Swarm (Sterling) reports consolidated P&L: +$1,240.50 today.",
+		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
 	}
 	json.NewEncoder(w).Encode(report)
 }
