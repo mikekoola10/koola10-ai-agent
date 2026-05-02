@@ -1,0 +1,59 @@
+name: Night Shift Autonomous Developer
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Every night at 2:00 AM UTC
+  workflow_dispatch:       # Manual trigger
+
+jobs:
+  night-shift:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout Koola10 Agent
+        uses: actions/checkout@v4
+
+      - name: Setup Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy Night Shift Agent
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          fly deploy --app koola10 --dockerfile ./Dockerfile
+
+      - name: Deploy Night Shift Swarm
+        run: |
+          curl -X POST https://koola10.fly.dev/swarm/night-shift/deploy \
+            -H "Content-Type: application/json" \
+            -d '{"count": 10}'
+
+      - name: Trigger Autonomous Project Work
+        run: |
+          curl -X POST https://koola10.fly.dev/swarm/night-shift/dispatch \
+            -H "Content-Type: application/json" \
+            -d '{
+              "repositories": ["Koola10", "koola10-fundraiser", "Spiral-Academy", "auraa-ai"],
+              "tasks": ["fix-open-issues", "update-dependencies", "improve-readme", "merge-stale-prs", "run-tests"],
+              "auto_merge": true,
+              "report_to": "mikekoola6@gmail.com"
+            }'
+
+      - name: Send Daily Report
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          REPORT=$(curl -s https://koola10.fly.dev/daily-report)
+          curl -X POST "https://koola10.fly.dev/tools/execute?tool_name=email" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Token: $ADMIN_TOKEN" \
+            -d "{
+              \"action\": \"send\",
+              \"to\": \"spiralcontrolhq@gmail.com\",
+              \"subject\": \"Koola10 Daily Autonomous Report - $(date +'%Y-%m-%d')\",
+              \"body\": $(echo "$REPORT" | jq -Rs .)
+            }"
