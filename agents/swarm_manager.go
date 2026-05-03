@@ -27,6 +27,7 @@ type SwarmManager struct {
 	// Callbacks for logging to economic ledger and compliance audit
 	AuditLogger func(action string, details map[string]interface{})
 	LedgerLogger func(vertical, category string, amount float64, description string)
+	StatusLogger func(vertical, agent string, status string)
 
 	// Factory for creating agents for a vertical
 	Factories map[string]func() []SpecialistAgent
@@ -89,7 +90,17 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 	}
 	sm.Mu.Unlock()
 
+	if sm.StatusLogger != nil {
+		sm.StatusLogger(vertical, target.Specialty(), string(StatusWorking))
+	}
 	result, err := target.Run(task)
+	if sm.StatusLogger != nil {
+		status := string(StatusCompleted)
+		if err != nil {
+			status = string(StatusError)
+		}
+		sm.StatusLogger(vertical, target.Specialty(), status)
+	}
 
 	if sm.AuditLogger != nil {
 		sm.AuditLogger("task_executed", map[string]interface{}{

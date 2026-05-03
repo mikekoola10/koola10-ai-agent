@@ -18,15 +18,25 @@ func RegisterTool(name string, fn ToolFunc) {
 	registry[name] = fn
 }
 
+var ToolCallback func(name string, payload map[string]interface{}, result ToolResult)
+
 func RunTool(name string, payload map[string]interface{}) ToolResult {
 	regMu.RLock()
 	fn, ok := registry[name]
 	regMu.RUnlock()
 
 	if !ok {
-		return ToolResult{Success: false, Error: "Tool not found"}
+		res := ToolResult{Success: false, Error: "Tool not found"}
+		if ToolCallback != nil {
+			ToolCallback(name, payload, res)
+		}
+		return res
 	}
-	return fn(payload)
+	res := fn(payload)
+	if ToolCallback != nil {
+		ToolCallback(name, payload, res)
+	}
+	return res
 }
 
 func HandleExecute(w http.ResponseWriter, r *http.Request) {

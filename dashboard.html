@@ -56,12 +56,49 @@
         </div>
     </div>
 
-    <div class="card" style="margin-top: 15px;">
-        <h2>SYSTEM_LOGS</h2>
-        <pre id="logs">Initializing telemetry...</pre>
+    <div class="grid" style="margin-top: 15px;">
+        <div class="card">
+            <h2>SYSTEM_LOGS</h2>
+            <pre id="logs" style="height: 200px; overflow-y: auto;">Initializing telemetry...</pre>
+        </div>
+        <div class="card">
+            <h2>LIVE_EVENTS</h2>
+            <div id="events" style="height: 200px; overflow-y: auto; font-size: 12px; color: #0af;">
+                Waiting for events...
+            </div>
+        </div>
     </div>
 
     <script>
+        // SSE Listener
+        const eventSource = new EventSource('/events/stream');
+        const eventsDiv = document.getElementById('events');
+
+        eventSource.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            const el = document.createElement('div');
+            el.style.borderBottom = '1px solid #222';
+            el.style.padding = '2px 0';
+
+            let color = '#0af';
+            if (data.type === 'error') color = '#f00';
+            if (data.type === 'compliance_check') color = '#f0f';
+            if (data.type === 'agent_activity') color = '#ff0';
+            if (data.type === 'tool_called') color = '#0f0';
+
+            el.style.color = color;
+            el.innerHTML = `[${new Date().toLocaleTimeString()}] <b>${data.type.toUpperCase()}</b>: ${JSON.stringify(data.data)}`;
+
+            eventsDiv.prepend(el);
+            if (eventsDiv.childNodes.length > 50) {
+                eventsDiv.removeChild(eventsDiv.lastChild);
+            }
+        };
+
+        eventSource.onerror = function(e) {
+            console.error("SSE Error:", e);
+        };
+
         async function update() {
             try {
                 // Ledger

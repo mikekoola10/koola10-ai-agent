@@ -273,6 +273,12 @@ type VideoJob struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type SSEEvent struct {
+	Type      string                 `json:"type"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp string                 `json:"timestamp"`
+}
+
 // --- Global States ---
 
 var (
@@ -283,6 +289,9 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	sseMu        sync.Mutex
+
+	sseClients     = make(map[chan SSEEvent]bool)
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -374,6 +383,13 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
+	globalSwarmManager.StatusLogger = func(vertical, agent, status string) {
+		BroadcastSSEEvent("agent_activity", map[string]interface{}{
+			"vertical": vertical,
+			"agent":    agent,
+			"status":   status,
+		})
+	}
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
 	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
@@ -404,6 +420,11 @@ func main() {
 	}
 
 	http.HandleFunc("/", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Root request received: %s", r.URL.Path)
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(dashboardHTML))
 	}))
@@ -465,8 +486,18 @@ func main() {
 	http.HandleFunc("/financial/history", corsMiddleware(handleFinancialHistory))
 	http.HandleFunc("/trading/profit", corsMiddleware(handleTradingProfit))
 
+	tools.ToolCallback = func(name string, payload map[string]interface{}, result tools.ToolResult) {
+		BroadcastSSEEvent("tool_called", map[string]interface{}{
+			"tool":    name,
+			"payload": payload,
+			"success": result.Success,
+			"error":   result.Error,
+		})
+	}
+
 	// Tool Execution
 	http.HandleFunc("/tools/execute", corsMiddleware(tools.HandleExecute))
+	http.HandleFunc("/events/stream", corsMiddleware(handleEventsStream))
 
 	// Studio Endpoints
 	http.HandleFunc("/studio/lore", corsMiddleware(handleStudioLore))
@@ -485,16 +516,16 @@ func main() {
 func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 	var req LoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "no key", 500)
+		ReportError(w, "no key", 500)
 		return
 	}
 	if !rateLimit() {
-		http.Error(w, "limited", 429)
+		ReportError(w, "limited", 429)
 		return
 	}
 
@@ -513,7 +544,7 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
 	if err != nil {
-		http.Error(w, "api failed", 500)
+		ReportError(w, "api failed", 500)
 		return
 	}
 	defer resp.Body.Close()
@@ -528,7 +559,7 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "parse failed", 500)
+		ReportError(w, "parse failed", 500)
 		return
 	}
 
@@ -545,16 +576,16 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 	var req StyleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "no key", 500)
+		ReportError(w, "no key", 500)
 		return
 	}
 	if !rateLimit() {
-		http.Error(w, "limited", 429)
+		ReportError(w, "limited", 429)
 		return
 	}
 
@@ -574,7 +605,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
 	if err != nil {
-		http.Error(w, "api failed", 500)
+		ReportError(w, "api failed", 500)
 		return
 	}
 	defer resp.Body.Close()
@@ -589,7 +620,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "parse failed", 500)
+		ReportError(w, "parse failed", 500)
 		return
 	}
 
@@ -603,7 +634,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 func handleStudioEpisode(w http.ResponseWriter, r *http.Request) {
 	var ep Episode
 	if err := json.NewDecoder(r.Body).Decode(&ep); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	ep.ID = generateID()
@@ -662,7 +693,7 @@ func handleStudioVideoJobStatus(w http.ResponseWriter, r *http.Request) {
 	videoJobMu.Unlock()
 
 	if !ok {
-		http.Error(w, "not found", 404)
+		ReportError(w, "not found", 404)
 		return
 	}
 
@@ -685,7 +716,7 @@ func startHeartbeat() {
 }
 
 func handleSwarmNodes(w http.ResponseWriter, r *http.Request) {
-	if redisClient == nil { http.Error(w, "no redis", 503); return }
+	if redisClient == nil { ReportError(w, "no redis", 503); return }
 	ctx := context.Background()
 	nodes, _ := redisClient.HGetAll(ctx, "swarm:nodes").Result()
 	var res []SwarmNode
@@ -722,7 +753,7 @@ func handleSwarmStart(w http.ResponseWriter, r *http.Request) {
 
 func handleSwarmStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("task_id")
-	if redisClient == nil { http.Error(w, "no redis", 503); return }
+	if redisClient == nil { ReportError(w, "no redis", 503); return }
 	v, _ := redisClient.Get(context.Background(), "task:"+id).Result()
 	w.Header().Set("Content-Type", "application/json"); w.Write([]byte(v))
 }
@@ -1021,7 +1052,7 @@ func handleFinancialPaySubscription(w http.ResponseWriter, r *http.Request) {
 		Amount  float64 `json:"amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	fundManager.PaySubscription(req.Service, req.Amount)
@@ -1045,7 +1076,7 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 		Profit float64 `json:"profit"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	fundManager.RouteRevenue(req.Profit, "trading")
@@ -1058,6 +1089,15 @@ func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation
 	eval := EconomicEvaluation{"allow", estimatedCost, roi, ""}
 	if roi < roiThreshold { eval.Decision = "warn"; eval.Reason = "low_projected_roi" }
 	if globalLedger.Balance < estimatedCost { eval.Decision = "block"; eval.Reason = "insufficient_funds" }
+
+	BroadcastSSEEvent("compliance_check", map[string]interface{}{
+		"action_type":    actionType,
+		"estimated_cost": estimatedCost,
+		"projected_roi":  roi,
+		"decision":       eval.Decision,
+		"reason":         eval.Reason,
+	})
+
 	return eval
 }
 
@@ -1065,7 +1105,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("query"); cat := r.URL.Query().Get("category")
 	reqBody, _ := json.Marshal(map[string]interface{}{"keyword": q, "fundingCategories": cat})
 	resp, err := http.Post("https://api.grants.gov/v1/api/search2", "application/json", bytes.NewBuffer(reqBody))
-	if err != nil { http.Error(w, "search failed", 500); return }; defer resp.Body.Close()
+	if err != nil { ReportError(w, "search failed", 500); return }; defer resp.Body.Close()
 	var sRes GrantsGovSearchResponse; json.NewDecoder(resp.Body).Decode(&sRes)
 	var grants []Grant; cache := make(map[string]Grant)
 	cacheMutex.Lock(); if d, err := os.ReadFile(cachePath); err == nil { json.Unmarshal(d, &cache) }; cacheMutex.Unlock()
@@ -1087,17 +1127,17 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(grants)
 }
 func handleApply(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" { http.Error(w, "POST required", 405); return }
+	if r.Method != "POST" { ReportError(w, "POST required", 405); return }
 	var req ApplyRequest; json.NewDecoder(r.Body).Decode(&req)
 	cacheMutex.Lock(); cache := make(map[string]Grant); d, _ := os.ReadFile(cachePath); json.Unmarshal(d, &cache); cacheMutex.Unlock()
-	grant, ok := cache[req.GrantID]; if !ok { http.Error(w, "not cached", 404); return }
-	apiKey := os.Getenv("DEEPSEEK_API_KEY"); if apiKey == "" { http.Error(w, "no key", 500); return }
-	if !rateLimit() { http.Error(w, "rate limited", 429); return }
+	grant, ok := cache[req.GrantID]; if !ok { ReportError(w, "not cached", 404); return }
+	apiKey := os.Getenv("DEEPSEEK_API_KEY"); if apiKey == "" { ReportError(w, "no key", 500); return }
+	if !rateLimit() { ReportError(w, "rate limited", 429); return }
 	prompt := fmt.Sprintf("Draft narrative for %s from %s. Mission: %s", grant.Title, req.OrgName, req.OrgMission)
 	dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
 	dsBody, _ := json.Marshal(dsReq); hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
 	hReq.Header.Set("Authorization", "Bearer "+apiKey); hReq.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{}).Do(hReq); if err != nil { http.Error(w, "api failed", 500); return }; defer resp.Body.Close()
+	resp, err := (&http.Client{}).Do(hReq); if err != nil { ReportError(w, "api failed", 500); return }; defer resp.Body.Close()
 	var dsRes struct { Choices []struct { Message struct { Content string } }; Usage struct { TotalTokens int } }
 	json.NewDecoder(resp.Body).Decode(&dsRes); LogUsage(dsRes.Usage.TotalTokens); globalLedger.RecordCost("", "ai_inference", float64(dsRes.Usage.TotalTokens)*0.000002, "Draft")
 	var draft ApplicationDraft; json.Unmarshal([]byte(dsRes.Choices[0].Message.Content), &draft); appID := generateID(); draft.ApplicationID = appID; draft.GrantID = req.GrantID; draft.Status = "draft_generated"
@@ -1108,7 +1148,7 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 }
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	id := filepath.Base(r.URL.Query().Get("application_id")); data, err := os.ReadFile(filepath.Join(appsDir, id+".json"))
-	if err != nil { http.Error(w, "not found", 404); return }; w.Header().Set("Content-Type", "application/json"); w.Write(data)
+	if err != nil { ReportError(w, "not found", 404); return }; w.Header().Set("Content-Type", "application/json"); w.Write(data)
 }
 func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var req struct { ApplicationID string; Status string }; json.NewDecoder(r.Body).Decode(&req)
@@ -1127,12 +1167,12 @@ func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
 }
 func handleMonitor(w http.ResponseWriter, r *http.Request) {
 	if checkKillSwitch() {
-		http.Error(w, "kill-switch", 503)
+		ReportError(w, "kill-switch", 503)
 		return
 	}
 	files, err := os.ReadDir(appsDir)
 	if err != nil {
-		http.Error(w, "failed to read applications", 500)
+		ReportError(w, "failed to read applications", 500)
 		return
 	}
 	var results []MonitorResult
@@ -1187,27 +1227,27 @@ func handleMonitor(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "complete", "follow_ups": results})
 }
 func handleApplyAuto(w http.ResponseWriter, r *http.Request) {
-	if checkKillSwitch() { http.Error(w, "kill-switch", 503); return }
+	if checkKillSwitch() { ReportError(w, "kill-switch", 503); return }
 	var req struct { URL string; FormData map[string]string; ApprovalID string }; json.NewDecoder(r.Body).Decode(&req)
 	approvalMu.Lock(); ap, ok := approvalStore[req.ApprovalID]; approvalMu.Unlock()
-	if !ok || ap.Status != "approved" { http.Error(w, "unauthorized", 403); return }
+	if !ok || ap.Status != "approved" { ReportError(w, "unauthorized", 403); return }
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Form submission")
 	w.Write([]byte(`{"status": "success"}`))
 }
 func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
-	if checkKillSwitch() { http.Error(w, "kill-switch", 503); return }
+	if checkKillSwitch() { ReportError(w, "kill-switch", 503); return }
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Status check")
 	w.Write([]byte(`{"data": "pending"}`))
 }
 func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	res, err := callAIChat(req.Prompt)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		ReportError(w, err.Error(), 500)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1268,13 +1308,13 @@ func callAIChat(prompt string) (*ChatResponse, error) {
 
 func handleVoiceInput(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "POST required", 405)
+		ReportError(w, "POST required", 405)
 		return
 	}
 
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, "missing file", 400)
+		ReportError(w, "missing file", 400)
 		return
 	}
 	defer file.Close()
@@ -1289,11 +1329,11 @@ func handleVoiceInput(w http.ResponseWriter, r *http.Request) {
 	writer := multipart.NewWriter(body)
 	part, err := writer.CreateFormFile("file", "input.wav")
 	if err != nil {
-		http.Error(w, "failed to create form file", 500)
+		ReportError(w, "failed to create form file", 500)
 		return
 	}
 	if _, err := io.Copy(part, file); err != nil {
-		http.Error(w, "failed to copy file", 500)
+		ReportError(w, "failed to copy file", 500)
 		return
 	}
 	writer.Close()
@@ -1302,13 +1342,13 @@ func handleVoiceInput(w http.ResponseWriter, r *http.Request) {
 	hReq.Header.Set("Content-Type", writer.FormDataContentType())
 	hRes, err := http.DefaultClient.Do(hReq)
 	if err != nil {
-		http.Error(w, "whisper failed: "+err.Error(), 500)
+		ReportError(w, "whisper failed: "+err.Error(), 500)
 		return
 	}
 	defer hRes.Body.Close()
 
 	if hRes.StatusCode != http.StatusOK {
-		http.Error(w, fmt.Sprintf("whisper service returned error: %d", hRes.StatusCode), 500)
+		ReportError(w, fmt.Sprintf("whisper service returned error: %d", hRes.StatusCode), 500)
 		return
 	}
 
@@ -1316,14 +1356,14 @@ func handleVoiceInput(w http.ResponseWriter, r *http.Request) {
 		Text string `json:"text"`
 	}
 	if err := json.NewDecoder(hRes.Body).Decode(&whisperRes); err != nil {
-		http.Error(w, "failed to decode whisper response", 500)
+		ReportError(w, "failed to decode whisper response", 500)
 		return
 	}
 
 	// Call AI Chat
 	aiRes, err := callAIChat(whisperRes.Text)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		ReportError(w, err.Error(), 500)
 		return
 	}
 
@@ -1500,7 +1540,7 @@ func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
 			handleSwarmStatusAll(w, r)
 			return
 		}
-		http.Error(w, "invalid path", 400)
+		ReportError(w, "invalid path", 400)
 		return
 	}
 	vertical := parts[0]
@@ -1512,19 +1552,19 @@ func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
 			var req struct{ Count int }
 			json.NewDecoder(r.Body).Decode(&req)
 			if err := globalSwarmManager.DeploySwarms(vertical, req.Count); err != nil {
-				http.Error(w, err.Error(), 500)
+				ReportError(w, err.Error(), 500)
 				return
 			}
 			w.Write([]byte(`{"status": "deployed"}`))
 		} else if action == "dispatch" {
 			var reqBody json.RawMessage
 			if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-				http.Error(w, "invalid request body", 400)
+				ReportError(w, "invalid request body", 400)
 				return
 			}
 			res, err := globalSwarmManager.DispatchTask(vertical, string(reqBody))
 			if err != nil {
-				http.Error(w, err.Error(), 500)
+				ReportError(w, err.Error(), 500)
 				return
 			}
 			json.NewEncoder(w).Encode(res)
@@ -1561,7 +1601,7 @@ func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 		CustomerEmail string `json:"customer_email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 
@@ -1575,12 +1615,12 @@ func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 		priceID = os.Getenv("STRIPE_ECHO_PRICE_ID")
 		mode = "payment"
 	default:
-		http.Error(w, "unknown product", 400)
+		ReportError(w, "unknown product", 400)
 		return
 	}
 
 	if priceID == "" {
-		http.Error(w, "price not configured", 500)
+		ReportError(w, "price not configured", 500)
 		return
 	}
 
@@ -1594,7 +1634,7 @@ func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if !res.Success {
-		http.Error(w, res.Error, 500)
+		ReportError(w, res.Error, 500)
 		return
 	}
 
@@ -1607,7 +1647,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "payload too large", http.StatusServiceUnavailable)
+		ReportError(w, "payload too large", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -1624,7 +1664,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		// In production, you should log this error
-		http.Error(w, fmt.Sprintf("event error: %v", err), 400)
+		ReportError(w, fmt.Sprintf("event error: %v", err), 400)
 		return
 	}
 
@@ -1633,7 +1673,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		var session stripe.CheckoutSession
 		err := json.Unmarshal(event.Data.Raw, &session)
 		if err != nil {
-			http.Error(w, "parse error", 400)
+			ReportError(w, "parse error", 400)
 			return
 		}
 		amount := float64(session.AmountTotal) / 100.0
@@ -1645,7 +1685,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		var invoice stripe.Invoice
 		err := json.Unmarshal(event.Data.Raw, &invoice)
 		if err != nil {
-			http.Error(w, "parse error", 400)
+			ReportError(w, "parse error", 400)
 			return
 		}
 		// Update subscription status in store
@@ -1669,6 +1709,69 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func BroadcastSSEEvent(eventType string, data map[string]interface{}) {
+	event := SSEEvent{
+		Type:      eventType,
+		Data:      data,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	for clientChan := range sseClients {
+		clientChan <- event
+	}
+}
+
+func ReportError(w http.ResponseWriter, msg string, code int) {
+	BroadcastSSEEvent("error", map[string]interface{}{
+		"message": msg,
+		"code":    code,
+	})
+	http.Error(w, msg, code)
+}
+
+func handleEventsStream(w http.ResponseWriter, r *http.Request) {
+	log.Printf("SSE request received: %s", r.URL.Path)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		ReportError(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	eventChan := make(chan SSEEvent, 10)
+	sseMu.Lock()
+	sseClients[eventChan] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, eventChan)
+		sseMu.Unlock()
+		close(eventChan)
+	}()
+
+	// Send initial event
+	fmt.Fprintf(w, "data: %s\n\n", `{"type": "connected", "message": "SSE connection established"}`)
+	flusher.Flush()
+
+	ctx := r.Context()
+	for {
+		select {
+		case event := <-eventChan:
+			eventJSON, _ := json.Marshal(event)
+			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
+			flusher.Flush()
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func generateID() string {
