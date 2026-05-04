@@ -1850,6 +1850,7 @@ func handleSwarmMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(swarmReport)
 }
 
@@ -1982,12 +1983,18 @@ func BroadcastSSEEvent(eventType string, data map[string]interface{}) {
 	}
 }
 
+func sendJSONError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
 func ReportError(w http.ResponseWriter, msg string, code int) {
 	BroadcastSSEEvent("error", map[string]interface{}{
 		"message": msg,
 		"code":    code,
 	})
-	http.Error(w, msg, code)
+	sendJSONError(w, msg, code)
 }
 
 func handleEventsStream(w http.ResponseWriter, r *http.Request) {
