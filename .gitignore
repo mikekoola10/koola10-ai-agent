@@ -1,2 +1,9 @@
-app
+/app
 app.log
+koola10
+agent.log
+/data/
+node_modules/
+.next/
+dist/
+build/
