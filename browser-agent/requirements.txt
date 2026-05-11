@@ -5,3 +5,4 @@ browser-use
 langchain-openai
 pydantic
 python-dotenv
+httpx

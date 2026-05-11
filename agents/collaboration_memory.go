@@ -76,31 +76,55 @@ func (cm *CollaborationMemory) GetTimeline(limit int) []CollaborationEvent {
 	return res
 }
 
+func (cm *CollaborationMemory) GetTimelineByType(eventType string, limit int) []CollaborationEvent {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	var res []CollaborationEvent
+	for i := len(cm.Events) - 1; i >= 0 && len(res) < limit; i-- {
+		if cm.Events[i].Type == eventType {
+			res = append(res, cm.Events[i])
+		}
+	}
+	return res
+}
+
 func (cm *CollaborationMemory) GetContextDigest() string {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
 	// Get last 5 decisions
 	var decisions []string
-	count := 0
-	for i := len(cm.Events) - 1; i >= 0 && count < 5; i-- {
-		if cm.Events[i].Type == "decision" {
-			dec, _ := json.Marshal(cm.Events[i].Data)
-			decisions = append(decisions, string(dec))
-			count++
-		}
-	}
-
+	decCount := 0
 	// Get recent advisor notes
 	var notes []string
-	count = 0
-	for i := len(cm.Events) - 1; i >= 0 && count < 3; i-- {
-		if cm.Events[i].Type == "advisor_note" {
-			note, _ := json.Marshal(cm.Events[i].Data)
-			notes = append(notes, string(note))
-			count++
+	noteCount := 0
+	// Get recent alerts
+	var alerts []string
+	alertCount := 0
+
+	for i := len(cm.Events) - 1; i >= 0; i-- {
+		e := cm.Events[i]
+		switch e.Type {
+		case "decision":
+			if decCount < 5 {
+				dec, _ := json.Marshal(e.Data)
+				decisions = append(decisions, string(dec))
+				decCount++
+			}
+		case "advisor_note":
+			if noteCount < 3 {
+				note, _ := json.Marshal(e.Data)
+				notes = append(notes, string(note))
+				noteCount++
+			}
+		case "alert":
+			if alertCount < 3 {
+				alert, _ := json.Marshal(e.Data)
+				alerts = append(alerts, string(alert))
+				alertCount++
+			}
 		}
 	}
 
-	return fmt.Sprintf("Recent Decisions: %v\nRecent Advisor Notes: %v", decisions, notes)
+	return fmt.Sprintf("Recent Decisions: %v\nRecent Advisor Notes: %v\nRecent Alerts: %v", decisions, notes, alerts)
 }

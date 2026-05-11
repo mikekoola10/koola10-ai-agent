@@ -123,7 +123,7 @@ func (pa *ProactiveAgent) GenerateAlert(systemState string) {
 		return
 	}
 
-	prompt := fmt.Sprintf("Analyze the following system state and generate a proactive alert if any critical thresholds are crossed (drawdown > 5%%, overdue follow-ups, high-ROI grants, compliance issues). System State: %s. Return a JSON object for the alert with fields: type, title, message, severity (low|medium|high), recommendation.", systemState)
+	prompt := fmt.Sprintf("Analyze the following system state and generate a proactive alert if any critical thresholds are crossed (drawdown > 5%%, overdue follow-ups, high-ROI grants, compliance issues). System State: %s. Return a JSON object for the alert with fields: type, title, message, severity (low|medium|high), recommendation. The 'message' MUST explain 'what happened' and 'why it matters'. The 'recommendation' MUST explain 'what action is recommended'.", systemState)
 
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",

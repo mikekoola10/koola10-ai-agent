@@ -1,6 +1,9 @@
 import os
 import base64
-from fastapi import FastAPI, HTTPException
+import json
+import asyncio
+import httpx
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from browser_use import Agent, Browser, BrowserConfig
@@ -21,8 +24,22 @@ browser_config = BrowserConfig(
     headless=True,
     disable_security=True,
 )
-# We'll create a new browser instance for each task to ensure clean state and session persistence within task
-# browser = Browser(config=browser_config)
+
+GO_AGENT_URL = os.getenv("GO_AGENT_URL", "https://koola10.fly.dev")
+
+async def emit_event(event_type: str, data: Dict[str, Any]):
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post(
+                f"{GO_AGENT_URL}/events/emit",
+                json={
+                    "type": event_type,
+                    "data": data,
+                    "timestamp": "" # Go agent fills this
+                }
+            )
+        except Exception as e:
+            print(f"Failed to emit event: {e}")
 
 class NavigateRequest(BaseModel):
     url: str
@@ -38,6 +55,45 @@ class ExtractRequest(BaseModel):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+@app.post("/browser/stripe-live-keys")
+async def stripe_live_keys():
+    # This is an async background task because it takes time and requires interaction
+    async def run_task():
+        browser = Browser(config=browser_config)
+        agent = Agent(
+            task="Go to https://dashboard.stripe.com/login. Login with the credentials provided in the environment (STRIPE_EMAIL, STRIPE_PASSWORD). If you encounter a 2FA screen, STOP and wait for further instructions. Periodically take screenshots so the user can see the 2FA screen and provide the code.",
+            llm=llm,
+            browser=browser,
+        )
+
+        # Override browser-use to emit screenshots
+        # This is a bit advanced, for now we will just run a loop and take screenshots manually
+
+        task_future = asyncio.create_task(agent.run())
+
+        while not task_future.done():
+            await asyncio.sleep(5)
+            try:
+                context = await browser.get_context()
+                page = await context.get_current_page()
+                if page:
+                    screenshot = await page.screenshot()
+                    screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
+                    await emit_event("browser_screenshot", {
+                        "screenshot": screenshot_b64,
+                        "url": page.url,
+                        "title": await page.title()
+                    })
+            except Exception as e:
+                print(f"Loop screenshot failed: {e}")
+
+        result = await task_future
+        await emit_event("browser_task_complete", {"result": str(result)})
+        await browser.close()
+
+    asyncio.create_task(run_task())
+    return {"status": "started"}
 
 @app.post("/browser/navigate")
 async def navigate(req: NavigateRequest):
@@ -56,11 +112,8 @@ async def navigate(req: NavigateRequest):
 @app.post("/browser/fill-form")
 async def fill_form(req: FormRequest):
     instructions = [f"Fill the field '{k}' with value '{v}'" for k, v in req.form_data.items()]
-    # Task includes returning a screenshot of the filled form.
-    # browser-use Agent can take screenshots, but to return it via API we need to capture it after the task.
     full_instruction = f"Go to {req.url}, " + ", ".join(instructions) + ". After filling everything, stay on the page so I can take a screenshot."
 
-    # Using a local browser instance to ensure we can capture the final state
     browser = Browser(config=browser_config)
     agent = Agent(
         task=full_instruction,
@@ -69,16 +122,8 @@ async def fill_form(req: FormRequest):
     )
     result = await agent.run()
 
-    # Capture screenshot from the same session
-    # browser-use manages sessions internally. We can access the playwright page via the browser instance.
-    playwright_browser = await browser.get_playwright_browser()
-    # This is slightly tricky as browser-use abstracts the page.
-    # Actually, browser-use Agent has a .run() that returns a result.
-    # Let's try to get the active page.
-
     screenshot_b64 = ""
     try:
-        # Get the underlying playwright page from the browser manager
         context = (await browser.get_context())
         page = await context.get_current_page()
         if page:

@@ -525,9 +525,10 @@ func handleCollabContext(w http.ResponseWriter, r *http.Request) {
 	globalLedger.mu.RUnlock()
 
 	ctx := map[string]interface{}{
-		"last_5_decisions":  globalCollabMemory.GetTimeline(5),
+		"last_5_decisions": globalCollabMemory.GetTimelineByType("decision", 5),
 		"operational_fund": balance,
-		"recent_notes":     globalCollabMemory.GetTimeline(3),
+		"recent_notes":    globalCollabMemory.GetTimelineByType("advisor_note", 3),
+		"open_alerts":     globalCollabMemory.GetTimelineByType("alert", 5),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ctx)
@@ -587,6 +588,27 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
+	globalSwarmManager.GetCollaborationSummary = func() string {
+		events := globalCollabMemory.GetTimeline(20)
+		summary := ""
+		for _, e := range events {
+			ts, _ := time.Parse(time.RFC3339, e.Timestamp)
+			if time.Since(ts) <= 24*time.Hour {
+				switch e.Type {
+				case "decision":
+					summary += fmt.Sprintf("- **Decision:** %v (%s)\n", e.Data["decision"], e.Data["rationale"])
+				case "advisor_note":
+					summary += fmt.Sprintf("- **Advisor Note:** %v\n", e.Data["note"])
+				case "alert":
+					summary += fmt.Sprintf("- **Proactive Alert:** %v\n", e.Data["title"])
+				}
+			}
+		}
+		if summary == "" {
+			summary = "No major collaboration events in the last 24 hours."
+		}
+		return summary
+	}
 	globalSwarmManager.SendEmail = func(to, subject, body string) error {
 		res := tools.RunTool("email", map[string]interface{}{
 			"action":  "send",
@@ -623,6 +645,7 @@ func main() {
 	globalSwarmManager.Factories["content"] = agents.ContentFactory
 	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
+	globalSwarmManager.Factories["browser"] = agents.BrowserFactory
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
@@ -719,6 +742,7 @@ func main() {
 	http.HandleFunc("/tools/execute", corsMiddleware(tools.HandleExecute))
 	http.HandleFunc("/daily-report", corsMiddleware(handleDailyReport))
 	http.HandleFunc("/events/stream", corsMiddleware(handleEventsStream))
+	http.HandleFunc("/events/emit", corsMiddleware(handleEventsEmit))
 
 	// Studio Endpoints
 	http.HandleFunc("/studio/lore", corsMiddleware(handleStudioLore))
@@ -1995,6 +2019,20 @@ func ReportError(w http.ResponseWriter, msg string, code int) {
 		"code":    code,
 	})
 	sendJSONError(w, msg, code)
+}
+
+func handleEventsEmit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		ReportError(w, "POST required", 405)
+		return
+	}
+	var event SSEEvent
+	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		ReportError(w, "bad request", 400)
+		return
+	}
+	BroadcastSSEEvent(event.Type, event.Data)
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleEventsStream(w http.ResponseWriter, r *http.Request) {

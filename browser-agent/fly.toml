@@ -9,6 +9,9 @@ primary_region = "ams"
   min_machines_running = 0
   processes = ["app"]
 
+[env]
+  GO_AGENT_URL = "https://koola10.fly.dev"
+
 [[vm]]
   memory = "2gb"
   cpus = 2

@@ -33,7 +33,8 @@ type SwarmManager struct {
 	Factories map[string]func() []SpecialistAgent
 
 	// Global callbacks for agents
-	SendEmail func(to, subject, body string) error
+	SendEmail               func(to, subject, body string) error
+	GetCollaborationSummary func() string
 }
 
 func NewSwarmManager() *SwarmManager {
@@ -57,6 +58,7 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 	for _, a := range agents {
 		if dev, ok := a.(*DeveloperAgent); ok {
 			dev.SendEmail = sm.SendEmail
+			dev.GetCollaborationSummary = sm.GetCollaborationSummary
 		}
 	}
 
