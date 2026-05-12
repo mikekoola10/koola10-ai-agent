@@ -396,7 +396,15 @@ func main() {
 		}
 	}
 
+	http.HandleFunc("/health", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
 	http.HandleFunc("/", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.Error(w, "Not Found", 404)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(dashboardHTML))
 	}))
