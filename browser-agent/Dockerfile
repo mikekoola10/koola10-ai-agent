@@ -24,14 +24,9 @@ RUN apt-get update && apt-get install -y \
     libpango-1.0-0 \
     libcairo2 \
     curl \
-    xvfb \
-    xauth \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
-# Create /data directory for persistent browser profile
-RUN mkdir -p /data && chmod 777 /data
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -44,4 +39,4 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["xvfb-run", "--server-args=-screen 0 1280x800x24", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
