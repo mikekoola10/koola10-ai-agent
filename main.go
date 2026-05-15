@@ -396,7 +396,15 @@ func main() {
 		}
 	}
 
+	http.HandleFunc("/health", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
 	http.HandleFunc("/", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.Error(w, "Not Found", 404)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(dashboardHTML))
 	}))
@@ -459,6 +467,10 @@ func main() {
 
 	// Tool Execution
 	http.HandleFunc("/tools/execute", corsMiddleware(tools.HandleExecute))
+
+	// Device Control Endpoints
+	http.HandleFunc("/device/phone", corsMiddleware(handleDevicePhone))
+	http.HandleFunc("/device/desktop", corsMiddleware(handleDeviceDesktop))
 
 	// Studio Endpoints
 	http.HandleFunc("/studio/lore", corsMiddleware(handleStudioLore))
@@ -1559,6 +1571,36 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleDevicePhone(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	result := tools.RunTool("droidrun", payload)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func handleDeviceDesktop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	result := tools.RunTool("computeruse", payload)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 func generateID() string {
