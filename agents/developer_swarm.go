@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 )
 
 type DeveloperAgent struct {
-	specialty string
-	status    AgentStatus
+	specialty              string
+	status                 AgentStatus
+	SendEmail              func(to, subject, body string) error
+	GetCollaborationSummary func() string
 }
 
 type NightShiftTask struct {
@@ -25,6 +28,17 @@ func (a *DeveloperAgent) Run(task string) (interface{}, error) {
 	var nsTask NightShiftTask
 	if err := json.Unmarshal([]byte(task), &nsTask); err == nil {
 		log.Printf("[DeveloperAgent] Night Shift started: %v on repos %v", nsTask.Tasks, nsTask.Repositories)
+
+		if nsTask.ReportTo != "" && a.SendEmail != nil {
+			subject := fmt.Sprintf("Koola10 Night Shift Report - %s", time.Now().Format("2006-01-02"))
+			summary := ""
+			if a.GetCollaborationSummary != nil {
+				summary = a.GetCollaborationSummary()
+			}
+			body := fmt.Sprintf("Night Shift completed for repositories: %v\nTasks executed: %v\n\n## 🤝 Collaboration Summary (Last 24h)\n%s\n\nPlease check the dashboard for the full live view.", nsTask.Repositories, nsTask.Tasks, summary)
+			a.SendEmail(nsTask.ReportTo, subject, body)
+		}
+
 		return map[string]interface{}{
 			"status": "success",
 			"message": fmt.Sprintf("Autonomous developer (%s) processed %d tasks across %d repositories", a.specialty, len(nsTask.Tasks), len(nsTask.Repositories)),
@@ -50,7 +64,10 @@ func DeveloperFactory() []SpecialistAgent {
 	}
 	agents := make([]SpecialistAgent, 0, len(specialties))
 	for _, s := range specialties {
-		agents = append(agents, &DeveloperAgent{specialty: s, status: StatusIdle})
+		agents = append(agents, &DeveloperAgent{
+			specialty: s,
+			status:    StatusIdle,
+		})
 	}
 	return agents
 }
