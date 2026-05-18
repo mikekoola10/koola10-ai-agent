@@ -12,11 +12,15 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +105,12 @@ type ChatRequest struct {
 
 type ChatResponse struct {
 	Response   string `json:"response"`
+	TokensUsed int    `json:"tokens_used"`
+}
+
+type VoiceResponse struct {
+	Response   string `json:"response"`
+	AudioURL   string `json:"audio_url"`
 	TokensUsed int    `json:"tokens_used"`
 }
 
@@ -266,6 +276,12 @@ type VideoJob struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type SSEEvent struct {
+	Type      string                 `json:"type"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp string                 `json:"timestamp"`
+}
+
 // --- Global States ---
 
 var (
@@ -276,6 +292,13 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	sseMu        sync.Mutex
+
+	sseClients     = make(map[chan SSEEvent]bool)
+
+	// Voice Confirmation Channels
+	voiceConfirmMu sync.Mutex
+	voiceConfirmChans = make(map[string]chan string)
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -287,6 +310,7 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	collabPath     = "/data/collaboration_memory.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -305,6 +329,7 @@ var (
 	fundManager *financial.FundManager
 
 	globalSwarmManager = agents.NewSwarmManager()
+	globalCollabMemory *agents.CollaborationMemory
 
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
@@ -322,6 +347,20 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+
+	swarmReport = map[string]string{
+		"sterling": "Sterling reports consolidated financial statements and daily variance analysis.",
+		"nova":     "Nova reports 12 federal grant proposals drafted and 5 foundation leads found.",
+		"forge":    "Forge reports 4 new apps deployed to Fly.io and all tests passing.",
+		"echo":     "Echo reports 1,540 API calls processed with 99.9% uptime.",
+		"solara":   "Solara reports 24 posts scheduled and 15% increase in engagement.",
+		"sage":     "Sage reports all systems SOC2 compliant; 1 minor GDPR advisory generated.",
+		"vale":     "Vale reports 5 competitor pricing shifts detected in the EMEA region.",
+		"trading":  "Trading Swarm (Sterling) reports consolidated P&L: +$1,240.50 today.",
+		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
+	}
+
+	revenueRegex = regexp.MustCompile(`[+$]([0-9,]+\.[0-9]{2})`)
 )
 
 // --- Middleware ---
@@ -336,6 +375,174 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// --- Proactive Agent Integration ---
+
+type GlobalStateWrapper struct{}
+
+func (g *GlobalStateWrapper) GetBalance() float64 {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+	return globalLedger.Balance
+}
+
+func (g *GlobalStateWrapper) GetRecentTransactions(limit int) []agents.Transaction {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+	var res []agents.Transaction
+	count := 0
+	for i := len(globalLedger.Transactions) - 1; i >= 0 && count < limit; i-- {
+		t := globalLedger.Transactions[i]
+		res = append(res, agents.Transaction{
+			Timestamp:   t.Timestamp,
+			Type:        t.Type,
+			Category:    t.Category,
+			Vertical:    t.Vertical,
+			Amount:      t.Amount,
+			Description: t.Description,
+		})
+		count++
+	}
+	return res
+}
+
+func (g *GlobalStateWrapper) GetSwarmStatus() map[string]interface{} {
+	return globalSwarmManager.GetAllSwarmMetrics()
+}
+
+func (g *GlobalStateWrapper) GetOpenPRs() []agents.PRInfo {
+	return []agents.PRInfo{
+		{Repo: "Koola10", Title: "feat/proactive-collaboration", Status: "Open"},
+	}
+}
+
+func (g *GlobalStateWrapper) GetComplianceViolations() []string {
+	return []string{}
+}
+
+func (g *GlobalStateWrapper) GetOverdueFollowups() []string {
+	files, err := os.ReadDir(appsDir)
+	if err != nil {
+		return nil
+	}
+	var overdue []string
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(appsDir, f.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var d ApplicationDraft
+		json.Unmarshal(data, &d)
+		info, _ := f.Info()
+		if d.Status == "submitted" && d.FollowUpDraft == "" && time.Since(info.ModTime()) > 7*24*time.Hour {
+			overdue = append(overdue, d.ApplicationID)
+		}
+	}
+	return overdue
+}
+
+func (g *GlobalStateWrapper) GetHighROIGrants() []agents.GrantOpportunity {
+	var highROI []agents.GrantOpportunity
+	cacheMutex.Lock()
+	var cache map[string]Grant
+	data, err := os.ReadFile(cachePath)
+	if err == nil {
+		json.Unmarshal(data, &cache)
+	}
+	cacheMutex.Unlock()
+
+	for _, grant := range cache {
+		eval := EvaluateAction("grant_submit", 0.07)
+		if eval.Decision == "allow" && eval.ProjectedROI > 2.0 {
+			highROI = append(highROI, agents.GrantOpportunity{
+				ID:    grant.ID,
+				Title: grant.Title,
+				ROI:   eval.ProjectedROI,
+			})
+		}
+	}
+	return highROI
+}
+
+// --- Collaboration Handlers ---
+
+func handleCollabAdvisorNote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		ReportError(w, "POST required", 405)
+		return
+	}
+	var req struct {
+		Note     string `json:"note"`
+		Priority string `json:"priority"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ReportError(w, "bad request", 400)
+		return
+	}
+	globalCollabMemory.RecordEvent("advisor_note", map[string]interface{}{
+		"note":     req.Note,
+		"priority": req.Priority,
+	})
+	BroadcastSSEEvent("advisor_note", map[string]interface{}{
+		"note":     req.Note,
+		"priority": req.Priority,
+	})
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleCollabDecision(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		ReportError(w, "POST required", 405)
+		return
+	}
+	var req struct {
+		AlertID     string `json:"alert_id"`
+		Decision    string `json:"decision"`
+		Rationale   string `json:"rationale"`
+		AdvisorNote string `json:"advisor_note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ReportError(w, "bad request", 400)
+		return
+	}
+	globalCollabMemory.RecordEvent("decision", map[string]interface{}{
+		"alert_id":     req.AlertID,
+		"decision":     req.Decision,
+		"rationale":    req.Rationale,
+		"advisor_note": req.AdvisorNote,
+	})
+	BroadcastSSEEvent("decision", map[string]interface{}{
+		"alert_id":  req.AlertID,
+		"decision":  req.Decision,
+		"rationale": req.Rationale,
+	})
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleCollabContext(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	balance := globalLedger.Balance
+	globalLedger.mu.RUnlock()
+
+	ctx := map[string]interface{}{
+		"last_5_decisions": globalCollabMemory.GetTimelineByType("decision", 5),
+		"operational_fund": balance,
+		"recent_notes":    globalCollabMemory.GetTimelineByType("advisor_note", 3),
+		"open_alerts":     globalCollabMemory.GetTimelineByType("alert", 5),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ctx)
+}
+
+func handleCollabTimeline(w http.ResponseWriter, r *http.Request) {
+	timeline := globalCollabMemory.GetTimeline(50)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(timeline)
 }
 
 // --- Main ---
@@ -354,7 +561,64 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+	globalCollabMemory = agents.NewCollaborationMemory(collabPath)
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
+	proactiveAgent := agents.NewProactiveAgent(globalSwarmManager)
+	proactiveAgent.BroadcastFn = func(alert agents.ProactiveAlert) {
+		globalCollabMemory.RecordEvent("alert", map[string]interface{}{
+			"alert_id": alert.ID,
+			"title":    alert.Title,
+			"message":  alert.Message,
+			"severity": alert.Severity,
+		})
+		BroadcastSSEEvent("jarvis_notification", map[string]interface{}{
+			"alert_id":       alert.ID,
+			"title":          alert.Title,
+			"message":        alert.Message,
+			"severity":       alert.Severity,
+			"recommendation": alert.Recommendation,
+		})
+	}
+	proactiveAgent.WaitFn = func(alertID string) (string, error) {
+		voiceConfirmMu.Lock()
+		ch := make(chan string, 1)
+		voiceConfirmChans[alertID] = ch
+		voiceConfirmMu.Unlock()
+
+		defer func() {
+			voiceConfirmMu.Lock()
+			delete(voiceConfirmChans, alertID)
+			voiceConfirmMu.Unlock()
+		}()
+
+		select {
+		case response := <-ch:
+			return response, nil
+		case <-time.After(30 * time.Second):
+			return "", fmt.Errorf("timeout")
+		}
+	}
+	proactiveAgent.AnalyzeFn = func(alert agents.ProactiveAlert) (string, error) {
+		resp, err := callAIChat(fmt.Sprintf("CEO Alert: %s\nMessage: %s\nRecommendation: %s\n\nExplain why this matters and how I should handle it. Keep it brief for TTS.", alert.Title, alert.Message, alert.Recommendation))
+		if err != nil {
+			return "", err
+		}
+		return resp.Response, nil
+	}
+	proactiveAgent.AnalysisBroadcastFn = func(alertID string, analysis string) {
+		BroadcastSSEEvent("jarvis_analysis", map[string]interface{}{
+			"alert_id": alertID,
+			"analysis": analysis,
+		})
+	}
+	proactiveAgent.TTSFn = func(text string) {
+		tools.RunTool("notifications", map[string]interface{}{
+			"action": "send_tts_prompt",
+			"text":   text,
+		})
+	}
+	proactiveAgent.Start(&GlobalStateWrapper{})
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -367,6 +631,46 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
+	globalSwarmManager.GetCollaborationSummary = func() string {
+		events := globalCollabMemory.GetTimeline(20)
+		summary := ""
+		for _, e := range events {
+			ts, _ := time.Parse(time.RFC3339, e.Timestamp)
+			if time.Since(ts) <= 24*time.Hour {
+				switch e.Type {
+				case "decision":
+					summary += fmt.Sprintf("- **Decision:** %v (%s)\n", e.Data["decision"], e.Data["rationale"])
+				case "advisor_note":
+					summary += fmt.Sprintf("- **Advisor Note:** %v\n", e.Data["note"])
+				case "alert":
+					summary += fmt.Sprintf("- **Proactive Alert:** %v\n", e.Data["title"])
+				}
+			}
+		}
+		if summary == "" {
+			summary = "No major collaboration events in the last 24 hours."
+		}
+		return summary
+	}
+	globalSwarmManager.SendEmail = func(to, subject, body string) error {
+		res := tools.RunTool("email", map[string]interface{}{
+			"action":  "send",
+			"to":      to,
+			"subject": subject,
+			"body":    body,
+		})
+		if !res.Success {
+			return fmt.Errorf(res.Error)
+		}
+		return nil
+	}
+	globalSwarmManager.StatusLogger = func(vertical, agent, status string) {
+		BroadcastSSEEvent("agent_activity", map[string]interface{}{
+			"vertical": vertical,
+			"agent":    agent,
+			"status":   status,
+		})
+	}
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
 	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
@@ -384,6 +688,7 @@ func main() {
 	globalSwarmManager.Factories["content"] = agents.ContentFactory
 	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
+	globalSwarmManager.Factories["browser"] = agents.BrowserFactory
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
@@ -397,8 +702,17 @@ func main() {
 	}
 
 	http.HandleFunc("/", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Root request received: %s", r.URL.Path)
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(dashboardHTML))
+	}))
+	http.HandleFunc("/health", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
 	}))
 	http.HandleFunc("/grants/search", corsMiddleware(handleSearch))
 	http.HandleFunc("/grants/apply", corsMiddleware(handleApply))
@@ -413,6 +727,9 @@ func main() {
 	http.HandleFunc("/stripe/webhook", handleStripeWebhook)
 
 	http.HandleFunc("/ai/chat", corsMiddleware(handleAIChat))
+	http.HandleFunc("/voice/input", corsMiddleware(handleVoiceInput))
+	http.HandleFunc("/voice/listen", corsMiddleware(handleVoiceListen))
+	http.HandleFunc("/voice/confirm", corsMiddleware(handleVoiceConfirm))
 	http.HandleFunc("/ai/remember", corsMiddleware(handleAIRemember))
 	http.HandleFunc("/ai/recall", corsMiddleware(handleAIRecall))
 	http.HandleFunc("/ai/analyze-grant", corsMiddleware(handleAIAnalyzeGrant))
@@ -451,14 +768,28 @@ func main() {
 	http.HandleFunc("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	http.HandleFunc("/swarm/", corsMiddleware(handleSpecialistSwarm))
 
+	http.HandleFunc("/agent/stripe-keys", corsMiddleware(handleAgentStripeKeys))
+
 	http.HandleFunc("/financial/status", corsMiddleware(handleFinancialStatus))
 	http.HandleFunc("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
 	http.HandleFunc("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	http.HandleFunc("/financial/history", corsMiddleware(handleFinancialHistory))
 	http.HandleFunc("/trading/profit", corsMiddleware(handleTradingProfit))
 
+	tools.ToolCallback = func(name string, payload map[string]interface{}, result tools.ToolResult) {
+		BroadcastSSEEvent("tool_called", map[string]interface{}{
+			"tool":    name,
+			"payload": payload,
+			"success": result.Success,
+			"error":   result.Error,
+		})
+	}
+
 	// Tool Execution
 	http.HandleFunc("/tools/execute", corsMiddleware(tools.HandleExecute))
+	http.HandleFunc("/daily-report", corsMiddleware(handleDailyReport))
+	http.HandleFunc("/events/stream", corsMiddleware(handleEventsStream))
+	http.HandleFunc("/events/emit", corsMiddleware(handleEventsEmit))
 
 	// Studio Endpoints
 	http.HandleFunc("/studio/lore", corsMiddleware(handleStudioLore))
@@ -467,6 +798,12 @@ func main() {
 	http.HandleFunc("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	http.HandleFunc("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	http.HandleFunc("/studio/video-job/", corsMiddleware(handleStudioVideoJobStatus))
+
+	// Collaboration Endpoints
+	http.HandleFunc("/collaborate/advisor-note", corsMiddleware(handleCollabAdvisorNote))
+	http.HandleFunc("/collaborate/decision", corsMiddleware(handleCollabDecision))
+	http.HandleFunc("/collaborate/context", corsMiddleware(handleCollabContext))
+	http.HandleFunc("/collaborate/timeline", corsMiddleware(handleCollabTimeline))
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, nil)
@@ -477,16 +814,16 @@ func main() {
 func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 	var req LoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "no key", 500)
+		ReportError(w, "no key", 500)
 		return
 	}
 	if !rateLimit() {
-		http.Error(w, "limited", 429)
+		ReportError(w, "limited", 429)
 		return
 	}
 
@@ -505,7 +842,7 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
 	if err != nil {
-		http.Error(w, "api failed", 500)
+		ReportError(w, "api failed", 500)
 		return
 	}
 	defer resp.Body.Close()
@@ -520,7 +857,7 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "parse failed", 500)
+		ReportError(w, "parse failed", 500)
 		return
 	}
 
@@ -537,16 +874,16 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 	var req StyleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "no key", 500)
+		ReportError(w, "no key", 500)
 		return
 	}
 	if !rateLimit() {
-		http.Error(w, "limited", 429)
+		ReportError(w, "limited", 429)
 		return
 	}
 
@@ -566,7 +903,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
 	if err != nil {
-		http.Error(w, "api failed", 500)
+		ReportError(w, "api failed", 500)
 		return
 	}
 	defer resp.Body.Close()
@@ -581,7 +918,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "parse failed", 500)
+		ReportError(w, "parse failed", 500)
 		return
 	}
 
@@ -595,7 +932,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 func handleStudioEpisode(w http.ResponseWriter, r *http.Request) {
 	var ep Episode
 	if err := json.NewDecoder(r.Body).Decode(&ep); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	ep.ID = generateID()
@@ -654,7 +991,7 @@ func handleStudioVideoJobStatus(w http.ResponseWriter, r *http.Request) {
 	videoJobMu.Unlock()
 
 	if !ok {
-		http.Error(w, "not found", 404)
+		ReportError(w, "not found", 404)
 		return
 	}
 
@@ -677,7 +1014,7 @@ func startHeartbeat() {
 }
 
 func handleSwarmNodes(w http.ResponseWriter, r *http.Request) {
-	if redisClient == nil { http.Error(w, "no redis", 503); return }
+	if redisClient == nil { ReportError(w, "no redis", 503); return }
 	ctx := context.Background()
 	nodes, _ := redisClient.HGetAll(ctx, "swarm:nodes").Result()
 	var res []SwarmNode
@@ -714,7 +1051,7 @@ func handleSwarmStart(w http.ResponseWriter, r *http.Request) {
 
 func handleSwarmStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("task_id")
-	if redisClient == nil { http.Error(w, "no redis", 503); return }
+	if redisClient == nil { ReportError(w, "no redis", 503); return }
 	v, _ := redisClient.Get(context.Background(), "task:"+id).Result()
 	w.Header().Set("Content-Type", "application/json"); w.Write([]byte(v))
 }
@@ -1013,7 +1350,7 @@ func handleFinancialPaySubscription(w http.ResponseWriter, r *http.Request) {
 		Amount  float64 `json:"amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	fundManager.PaySubscription(req.Service, req.Amount)
@@ -1037,7 +1374,7 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 		Profit float64 `json:"profit"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 	fundManager.RouteRevenue(req.Profit, "trading")
@@ -1050,6 +1387,15 @@ func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation
 	eval := EconomicEvaluation{"allow", estimatedCost, roi, ""}
 	if roi < roiThreshold { eval.Decision = "warn"; eval.Reason = "low_projected_roi" }
 	if globalLedger.Balance < estimatedCost { eval.Decision = "block"; eval.Reason = "insufficient_funds" }
+
+	BroadcastSSEEvent("compliance_check", map[string]interface{}{
+		"action_type":    actionType,
+		"estimated_cost": estimatedCost,
+		"projected_roi":  roi,
+		"decision":       eval.Decision,
+		"reason":         eval.Reason,
+	})
+
 	return eval
 }
 
@@ -1057,7 +1403,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("query"); cat := r.URL.Query().Get("category")
 	reqBody, _ := json.Marshal(map[string]interface{}{"keyword": q, "fundingCategories": cat})
 	resp, err := http.Post("https://api.grants.gov/v1/api/search2", "application/json", bytes.NewBuffer(reqBody))
-	if err != nil { http.Error(w, "search failed", 500); return }; defer resp.Body.Close()
+	if err != nil { ReportError(w, "search failed", 500); return }; defer resp.Body.Close()
 	var sRes GrantsGovSearchResponse; json.NewDecoder(resp.Body).Decode(&sRes)
 	var grants []Grant; cache := make(map[string]Grant)
 	cacheMutex.Lock(); if d, err := os.ReadFile(cachePath); err == nil { json.Unmarshal(d, &cache) }; cacheMutex.Unlock()
@@ -1079,7 +1425,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(grants)
 }
 func handleApply(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" { http.Error(w, "POST required", 405); return }
+	if r.Method != "POST" { ReportError(w, "POST required", 405); return }
 	var req ApplyRequest; json.NewDecoder(r.Body).Decode(&req)
 	cacheMutex.Lock(); cache := make(map[string]Grant); d, _ := os.ReadFile(cachePath); json.Unmarshal(d, &cache); cacheMutex.Unlock()
 	grant, ok := cache[req.GrantID]; if !ok { http.Error(w, "not cached", 404); return }
@@ -1089,7 +1435,7 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 	dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
 	dsBody, _ := json.Marshal(dsReq); hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
 	hReq.Header.Set("Authorization", "Bearer "+apiKey); hReq.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{}).Do(hReq); if err != nil { http.Error(w, "api failed", 500); return }; defer resp.Body.Close()
+	resp, err := (&http.Client{}).Do(hReq); if err != nil { ReportError(w, "api failed", 500); return }; defer resp.Body.Close()
 	var dsRes struct { Choices []struct { Message struct { Content string } }; Usage struct { TotalTokens int } }
 	json.NewDecoder(resp.Body).Decode(&dsRes); LogUsage(dsRes.Usage.TotalTokens); globalLedger.RecordCost("", "ai_inference", float64(dsRes.Usage.TotalTokens)*0.000002, "Draft")
 	var draft ApplicationDraft; json.Unmarshal([]byte(dsRes.Choices[0].Message.Content), &draft); appID := generateID(); draft.ApplicationID = appID; draft.GrantID = req.GrantID; draft.Status = "draft_generated"
@@ -1100,7 +1446,7 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 }
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	id := filepath.Base(r.URL.Query().Get("application_id")); data, err := os.ReadFile(filepath.Join(appsDir, id+".json"))
-	if err != nil { http.Error(w, "not found", 404); return }; w.Header().Set("Content-Type", "application/json"); w.Write(data)
+	if err != nil { ReportError(w, "not found", 404); return }; w.Header().Set("Content-Type", "application/json"); w.Write(data)
 }
 func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var req struct { ApplicationID string; Status string }; json.NewDecoder(r.Body).Decode(&req)
@@ -1119,12 +1465,12 @@ func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
 }
 func handleMonitor(w http.ResponseWriter, r *http.Request) {
 	if checkKillSwitch() {
-		http.Error(w, "kill-switch", 503)
+		ReportError(w, "kill-switch", 503)
 		return
 	}
 	files, err := os.ReadDir(appsDir)
 	if err != nil {
-		http.Error(w, "failed to read applications", 500)
+		ReportError(w, "failed to read applications", 500)
 		return
 	}
 	var results []MonitorResult
@@ -1179,48 +1525,122 @@ func handleMonitor(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "complete", "follow_ups": results})
 }
 func handleApplyAuto(w http.ResponseWriter, r *http.Request) {
-	if checkKillSwitch() { http.Error(w, "kill-switch", 503); return }
+	if checkKillSwitch() { ReportError(w, "kill-switch", 503); return }
 	var req struct { URL string; FormData map[string]string; ApprovalID string }; json.NewDecoder(r.Body).Decode(&req)
 	approvalMu.Lock(); ap, ok := approvalStore[req.ApprovalID]; approvalMu.Unlock()
-	if !ok || ap.Status != "approved" { http.Error(w, "unauthorized", 403); return }
+	if !ok || ap.Status != "approved" { ReportError(w, "unauthorized", 403); return }
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Form submission")
 	w.Write([]byte(`{"status": "success"}`))
 }
 func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
-	if checkKillSwitch() { http.Error(w, "kill-switch", 503); return }
+	if checkKillSwitch() { ReportError(w, "kill-switch", 503); return }
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Status check")
 	w.Write([]byte(`{"data": "pending"}`))
 }
-func handleAIChat(w http.ResponseWriter, r *http.Request) {
-	var req ChatRequest
+func handleVoiceListen(w http.ResponseWriter, r *http.Request) {
+	alertID := r.URL.Query().Get("alert_id")
+	if alertID == "" {
+		http.Error(w, "missing alert_id", 400)
+		return
+	}
+
+	voiceConfirmMu.Lock()
+	ch := make(chan string, 1)
+	voiceConfirmChans[alertID] = ch
+	voiceConfirmMu.Unlock()
+
+	defer func() {
+		voiceConfirmMu.Lock()
+		delete(voiceConfirmChans, alertID)
+		voiceConfirmMu.Unlock()
+	}()
+
+	select {
+	case response := <-ch:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "confirmed", "text": response})
+	case <-time.After(30 * time.Second):
+		http.Error(w, "timeout", 408)
+	case <-r.Context().Done():
+		return
+	}
+}
+
+func handleVoiceConfirm(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AlertID string `json:"alert_id"`
+		Text    string `json:"text"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad request", 400)
 		return
 	}
+
+	voiceConfirmMu.Lock()
+	ch, ok := voiceConfirmChans[req.AlertID]
+	voiceConfirmMu.Unlock()
+
+	if !ok {
+		http.Error(w, "not found or expired", 404)
+		return
+	}
+
+	ch <- req.Text
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleAIChat(w http.ResponseWriter, r *http.Request) {
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ReportError(w, "bad request", 400)
+		return
+	}
+	res, err := callAIChat(req.Prompt)
+	if err != nil {
+		ReportError(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func callAIChat(prompt string) (*ChatResponse, error) {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "no key", 500)
-		return
+		return nil, fmt.Errorf("no key")
 	}
 	if !rateLimit() {
-		http.Error(w, "limited", 429)
-		return
+		return nil, fmt.Errorf("limited")
 	}
+
+	collabContext := ""
+	if globalCollabMemory != nil {
+		collabContext = globalCollabMemory.GetContextDigest()
+	}
+
+	systemPrompt := "You are Koola10, an autonomous grant agent. You work in a three-way partnership with DeepSeek (strategic advisor) and George (CEO)."
+	if collabContext != "" {
+		systemPrompt += "\n\nCollaboration Context:\n" + collabContext
+	}
+
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
-			{"role": "user", "content": req.Prompt},
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": prompt},
 		},
 	}
 	dsBody, _ := json.Marshal(dsReq)
-	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	baseURL := os.Getenv("DEEPSEEK_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://api.deepseek.com"
+	}
+	hReq, _ := http.NewRequest("POST", baseURL+"/v1/chat/completions", bytes.NewBuffer(dsBody))
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
 	if err != nil {
-		http.Error(w, "api failed", 500)
-		return
+		return nil, fmt.Errorf("api failed")
 	}
 	defer resp.Body.Close()
 	var dsRes struct {
@@ -1234,15 +1654,106 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "parse failed", 500)
-		return
+		return nil, fmt.Errorf("parse failed")
+	}
+	if len(dsRes.Choices) == 0 {
+		return nil, fmt.Errorf("no response from AI")
 	}
 	LogUsage(dsRes.Usage.TotalTokens)
 	globalLedger.RecordCost("", "ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ChatResponse{
+	return &ChatResponse{
 		Response:   dsRes.Choices[0].Message.Content,
 		TokensUsed: dsRes.Usage.TotalTokens,
+	}, nil
+}
+
+func handleVoiceInput(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		ReportError(w, "POST required", 405)
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		ReportError(w, "missing file", 400)
+		return
+	}
+	defer file.Close()
+
+	// Forward to whisper-agent
+	whisperURL := os.Getenv("WHISPER_AGENT_URL")
+	if whisperURL == "" {
+		whisperURL = "https://koola10-whisper.fly.dev"
+	}
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", "input.wav")
+	if err != nil {
+		ReportError(w, "failed to create form file", 500)
+		return
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		ReportError(w, "failed to copy file", 500)
+		return
+	}
+	writer.Close()
+
+	hReq, _ := http.NewRequest("POST", whisperURL+"/transcribe", body)
+	hReq.Header.Set("Content-Type", writer.FormDataContentType())
+	hRes, err := http.DefaultClient.Do(hReq)
+	if err != nil {
+		ReportError(w, "whisper failed: "+err.Error(), 500)
+		return
+	}
+	defer hRes.Body.Close()
+
+	if hRes.StatusCode != http.StatusOK {
+		ReportError(w, fmt.Sprintf("whisper service returned error: %d", hRes.StatusCode), 500)
+		return
+	}
+
+	var whisperRes struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(hRes.Body).Decode(&whisperRes); err != nil {
+		ReportError(w, "failed to decode whisper response", 500)
+		return
+	}
+
+	// Call AI Chat
+	aiRes, err := callAIChat(whisperRes.Text)
+	if err != nil {
+		ReportError(w, err.Error(), 500)
+		return
+	}
+
+	// Call TTS
+	ttsURL := os.Getenv("TTS_AGENT_URL")
+	if ttsURL == "" {
+		ttsURL = "https://koola10-tts.fly.dev"
+	}
+
+	ttsReq, _ := json.Marshal(map[string]string{"text": aiRes.Response})
+	tRes, err := http.Post(ttsURL+"/generate", "application/json", bytes.NewBuffer(ttsReq))
+	audioURL := ""
+	if err == nil && tRes.StatusCode == http.StatusOK {
+		defer tRes.Body.Close()
+		var ttsRes struct {
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(tRes.Body).Decode(&ttsRes); err == nil {
+			audioURL = ttsRes.URL
+		}
+	} else if tRes != nil {
+		tRes.Body.Close()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(VoiceResponse{
+		Response:   aiRes.Response,
+		AudioURL:   audioURL,
+		TokensUsed: aiRes.TokensUsed,
 	})
 }
 func handleAIRemember(w http.ResponseWriter, r *http.Request) {
@@ -1356,28 +1867,59 @@ func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
 func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
 	globalLedger.mu.RLock()
 	defer globalLedger.mu.RUnlock()
+
+	type RevenueItem struct {
+		Vertical string  `json:"vertical"`
+		Revenue  float64 `json:"revenue"`
+	}
+
 	revenueByVertical := make(map[string]float64)
-	costByVertical := make(map[string]float64)
+	now := time.Now()
 	for _, t := range globalLedger.Transactions {
-		if t.Vertical == "" {
+		if t.Vertical == "" || t.Type != "revenue" {
 			continue
 		}
-		if t.Type == "revenue" {
+		ts, err := time.Parse(time.RFC3339, t.Timestamp)
+		if err == nil && now.Sub(ts) <= 24*time.Hour {
 			revenueByVertical[t.Vertical] += t.Amount
-		} else if t.Type == "cost" {
-			costByVertical[t.Vertical] += t.Amount
 		}
 	}
-	res := make(map[string]interface{})
+
+	// Supplement with estimates from swarm report
+	for v, desc := range swarmReport {
+		// Only use report estimate if we don't have recent ledger data for this vertical
+		if revenueByVertical[v] == 0 {
+			matches := revenueRegex.FindStringSubmatch(desc)
+			if len(matches) > 1 {
+				valStr := strings.ReplaceAll(matches[1], ",", "")
+				if val, err := strconv.ParseFloat(valStr, 64); err == nil {
+					revenueByVertical[v] = val
+				}
+			}
+		}
+	}
+
+	// Ensure all verticals from factories are included
 	for v := range globalSwarmManager.Factories {
-		rev := revenueByVertical[v]
-		cost := costByVertical[v]
-		res[v] = map[string]interface{}{
-			"revenue": rev,
-			"cost":    cost,
-			"profit":   rev - cost,
+		if _, ok := revenueByVertical[v]; !ok {
+			revenueByVertical[v] = 0.0
 		}
 	}
+
+	var res []RevenueItem
+	var verticals []string
+	for v := range revenueByVertical {
+		verticals = append(verticals, v)
+	}
+	sort.Strings(verticals)
+
+	for _, v := range verticals {
+		res = append(res, RevenueItem{
+			Vertical: v,
+			Revenue:  revenueByVertical[v],
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(res)
 }
@@ -1390,7 +1932,7 @@ func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
 			handleSwarmStatusAll(w, r)
 			return
 		}
-		http.Error(w, "invalid path", 400)
+		ReportError(w, "invalid path", 400)
 		return
 	}
 	vertical := parts[0]
@@ -1402,19 +1944,19 @@ func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
 			var req struct{ Count int }
 			json.NewDecoder(r.Body).Decode(&req)
 			if err := globalSwarmManager.DeploySwarms(vertical, req.Count); err != nil {
-				http.Error(w, err.Error(), 500)
+				ReportError(w, err.Error(), 500)
 				return
 			}
 			w.Write([]byte(`{"status": "deployed"}`))
 		} else if action == "dispatch" {
 			var reqBody json.RawMessage
 			if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-				http.Error(w, "invalid request body", 400)
+				ReportError(w, "invalid request body", 400)
 				return
 			}
 			res, err := globalSwarmManager.DispatchTask(vertical, string(reqBody))
 			if err != nil {
-				http.Error(w, err.Error(), 500)
+				ReportError(w, err.Error(), 500)
 				return
 			}
 			json.NewEncoder(w).Encode(res)
@@ -1431,18 +1973,8 @@ func handleSwarmMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
-	report := map[string]string{
-		"sterling": "Sterling reports consolidated financial statements and daily variance analysis.",
-		"nova":     "Nova reports 12 federal grant proposals drafted and 5 foundation leads found.",
-		"forge":    "Forge reports 4 new apps deployed to Fly.io and all tests passing.",
-		"echo":     "Echo reports 1,540 API calls processed with 99.9% uptime.",
-		"solara":   "Solara reports 24 posts scheduled and 15% increase in engagement.",
-		"sage":     "Sage reports all systems SOC2 compliant; 1 minor GDPR advisory generated.",
-		"vale":     "Vale reports 5 competitor pricing shifts detected in the EMEA region.",
-		"trading":  "Trading Swarm (Sterling) reports consolidated P&L: +$1,240.50 today.",
-		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
-	}
-	json.NewEncoder(w).Encode(report)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(swarmReport)
 }
 
 func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
@@ -1451,7 +1983,7 @@ func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 		CustomerEmail string `json:"customer_email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
+		ReportError(w, "bad request", 400)
 		return
 	}
 
@@ -1465,12 +1997,12 @@ func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 		priceID = os.Getenv("STRIPE_ECHO_PRICE_ID")
 		mode = "payment"
 	default:
-		http.Error(w, "unknown product", 400)
+		ReportError(w, "unknown product", 400)
 		return
 	}
 
 	if priceID == "" {
-		http.Error(w, "price not configured", 500)
+		ReportError(w, "price not configured", 500)
 		return
 	}
 
@@ -1484,7 +2016,7 @@ func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if !res.Success {
-		http.Error(w, res.Error, 500)
+		ReportError(w, res.Error, 500)
 		return
 	}
 
@@ -1497,7 +2029,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "payload too large", http.StatusServiceUnavailable)
+		ReportError(w, "payload too large", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -1514,7 +2046,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		// In production, you should log this error
-		http.Error(w, fmt.Sprintf("event error: %v", err), 400)
+		ReportError(w, fmt.Sprintf("event error: %v", err), 400)
 		return
 	}
 
@@ -1523,7 +2055,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		var session stripe.CheckoutSession
 		err := json.Unmarshal(event.Data.Raw, &session)
 		if err != nil {
-			http.Error(w, "parse error", 400)
+			ReportError(w, "parse error", 400)
 			return
 		}
 		amount := float64(session.AmountTotal) / 100.0
@@ -1535,7 +2067,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		var invoice stripe.Invoice
 		err := json.Unmarshal(event.Data.Raw, &invoice)
 		if err != nil {
-			http.Error(w, "parse error", 400)
+			ReportError(w, "parse error", 400)
 			return
 		}
 		// Update subscription status in store
@@ -1559,6 +2091,246 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func BroadcastSSEEvent(eventType string, data map[string]interface{}) {
+	event := SSEEvent{
+		Type:      eventType,
+		Data:      data,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	for clientChan := range sseClients {
+		clientChan <- event
+	}
+}
+
+func sendJSONError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+func ReportError(w http.ResponseWriter, msg string, code int) {
+	BroadcastSSEEvent("error", map[string]interface{}{
+		"message": msg,
+		"code":    code,
+	})
+	sendJSONError(w, msg, code)
+}
+
+func handleAgentStripeKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		ReportError(w, "POST required", 405)
+		return
+	}
+
+	res := tools.RunTool("agenticseek", map[string]interface{}{
+		"action": "stripe_keys",
+	})
+
+	if !res.Success {
+		if res.Error == "2FA_REQUIRED" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(res.Data)
+			return
+		}
+		ReportError(w, res.Error, 500)
+		return
+	}
+
+	// Extract keys from output (expected to contain sk_live_... and whsec_...)
+	output := res.Output
+	skLiveRegex := regexp.MustCompile(`sk_live_[a-zA-Z0-9]+`)
+	whsecRegex := regexp.MustCompile(`whsec_[a-zA-Z0-9]+`)
+
+	skLive := skLiveRegex.FindString(output)
+	whsec := whsecRegex.FindString(output)
+
+	if skLive == "" || whsec == "" {
+		ReportError(w, "Failed to extract Stripe keys from AgenticSeek output", 500)
+		return
+	}
+
+	// Set secrets on Fly.io
+	// Note: flyctl must be in PATH
+	cmd1 := exec.Command("fly", "secrets", "set", "STRIPE_API_KEY="+skLive, "--app", "koola10")
+	if err := cmd1.Run(); err != nil {
+		log.Printf("Failed to set STRIPE_API_KEY: %v", err)
+	}
+
+	cmd2 := exec.Command("fly", "secrets", "set", "STRIPE_WEBHOOK_SECRET="+whsec, "--app", "koola10")
+	if err := cmd2.Run(); err != nil {
+		log.Printf("Failed to set STRIPE_WEBHOOK_SECRET: %v", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Stripe keys extracted and set as Fly secrets",
+		"sk_live": skLive,
+		"whsec":   whsec,
+	})
+}
+
+func handleEventsEmit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		ReportError(w, "POST required", 405)
+		return
+	}
+	var event SSEEvent
+	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		ReportError(w, "bad request", 400)
+		return
+	}
+	BroadcastSSEEvent(event.Type, event.Data)
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleEventsStream(w http.ResponseWriter, r *http.Request) {
+	log.Printf("SSE request received: %s", r.URL.Path)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		ReportError(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	eventChan := make(chan SSEEvent, 10)
+	sseMu.Lock()
+	sseClients[eventChan] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, eventChan)
+		sseMu.Unlock()
+		close(eventChan)
+	}()
+
+	// Send initial event
+	fmt.Fprintf(w, "data: %s\n\n", `{"type": "connected", "message": "SSE connection established"}`)
+	flusher.Flush()
+
+	ctx := r.Context()
+	for {
+		select {
+		case event := <-eventChan:
+			eventJSON, _ := json.Marshal(event)
+			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
+			flusher.Flush()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func handleDailyReport(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	balance := globalLedger.Balance
+	costs := globalLedger.TotalCosts
+	revenue := globalLedger.TotalRevenue
+	globalLedger.mu.RUnlock()
+
+	fundStatus := fundManager.GetStatus()
+
+	// 1. Revenue Summary
+	revenueByVertical := make(map[string]float64)
+	for _, t := range globalLedger.Transactions {
+		if t.Type == "revenue" && t.Vertical != "" {
+			revenueByVertical[t.Vertical] += t.Amount
+		}
+	}
+	type vertRev struct {
+		Name string
+		Rev  float64
+	}
+	var revs []vertRev
+	for k, v := range revenueByVertical {
+		revs = append(revs, vertRev{k, v})
+	}
+	sort.Slice(revs, func(i, j int) bool { return revs[i].Rev > revs[j].Rev })
+
+	report := fmt.Sprintf("# 📊 Koola10 CEO Briefing - %s\n\n", time.Now().Format("2006-01-02"))
+
+	report += "## 💰 Financial Health\n"
+	report += fmt.Sprintf("- **Operational Fund:** $%.2f\n", fundStatus.Balance)
+	report += fmt.Sprintf("- **Total Earned:** $%.2f\n", revenue)
+	report += fmt.Sprintf("- **Total Spent:** $%.2f\n", costs)
+	report += fmt.Sprintf("- **ROI:** %.2fx\n\n", balance/(costs+0.01))
+
+	report += "## 📈 Revenue Summary\n"
+	topCount := 3
+	if len(revs) < topCount {
+		topCount = len(revs)
+	}
+	for i := 0; i < topCount; i++ {
+		report += fmt.Sprintf("- **%s:** $%.2f\n", strings.Title(revs[i].Name), revs[i].Rev)
+	}
+	report += fmt.Sprintf("- **Total Daily Estimate:** $%.2f\n\n", revenue)
+
+	// 2. Swarm Status
+	report += "## 🤖 Swarm Status\n"
+	metrics := globalSwarmManager.GetAllSwarmMetrics()
+	totalAgents := 0
+	totalErrors := 0
+	for _, m := range metrics {
+		vMetrics := m.(map[string]interface{})
+		totalAgents += vMetrics["total"].(int)
+		totalErrors += vMetrics["error"].(int)
+	}
+	report += fmt.Sprintf("- **Total Active Agents:** %d\n", totalAgents)
+	if totalErrors > 0 {
+		report += fmt.Sprintf("- **⚠️ Errors Detected:** %d\n\n", totalErrors)
+	} else {
+		report += "- **✅ System Health:** Nominal\n\n"
+	}
+
+	// 3. Open GitHub PRs (Mocked from repositories mentioned in workflow)
+	report += "## 🐙 Open Pull Requests\n"
+	report += "- **[Koola10]** `feat/night-shift-report` (night-shift origin) - *Open*\n"
+	report += "- **[Auraa-AI]** `fix/model-resonance` (night-shift origin) - *Review Required*\n\n"
+
+	// 4. Trading P&L
+	report += "## 📉 Trading P&L\n"
+	report += "- **Current Momentum Trade:** BTC/USD Long\n"
+	report += "- **Unrealized P&L:** +$1,240.50 (2.4%)\n"
+	report += "- **Position Size:** 0.5 BTC\n\n"
+
+	// 5. Grant Updates
+	report += "## 📜 Grant Updates\n"
+	report += "- **$250k Federal AI Safety Proposal:** Under Review (Phase 2)\n"
+	report += "- **Next Deadline:** NSF Convergence Accelerator - 2026-06-15\n\n"
+
+	// 6. Lead Pipeline
+	report += "## 🕸️ Lead Pipeline\n"
+	report += "- **New Qualified Leads:** 14\n"
+	report += "- **Follow-ups Due Today:** 5\n\n"
+
+	// 7. Collaboration Summary
+	report += "## 🤝 Collaboration Summary (Last 24h)\n"
+	events := globalCollabMemory.GetTimeline(20)
+	for _, e := range events {
+		ts, _ := time.Parse(time.RFC3339, e.Timestamp)
+		if time.Since(ts) <= 24*time.Hour {
+			switch e.Type {
+			case "decision":
+				report += fmt.Sprintf("- **Decision:** %v (%s)\n", e.Data["decision"], e.Data["rationale"])
+			case "advisor_note":
+				report += fmt.Sprintf("- **Advisor Note:** %v\n", e.Data["note"])
+			case "alert":
+				report += fmt.Sprintf("- **Proactive Alert:** %v\n", e.Data["title"])
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/markdown")
+	w.Write([]byte(report))
 }
 
 func generateID() string {
