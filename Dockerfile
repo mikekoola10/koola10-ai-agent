@@ -6,7 +6,7 @@ COPY go.mod ./
 # RUN go mod download
 
 COPY . .
-RUN go build -o agent main.go
+RUN go build -o agent .
 
 # Run stage
 FROM alpine:latest
