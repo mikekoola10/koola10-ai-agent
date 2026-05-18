@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koola10 Nova TV Overlay</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: transparent;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+        }
+
+        #notification-container {
+            position: absolute;
+            top: 50px;
+            right: 50px;
+            width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .notification {
+            background: rgba(20, 20, 30, 0.9);
+            border-left: 5px solid #ffaa00;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            animation: slideIn 0.5s ease-out forwards;
+            opacity: 0;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .notification.fade-out {
+            animation: fadeOut 0.5s ease-in forwards;
+        }
+
+        @keyframes fadeOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+
+        .notification-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .notification-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #ffaa00;
+        }
+
+        .notification-severity {
+            font-size: 12px;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: rgba(255, 170, 0, 0.2);
+        }
+
+        .notification-message {
+            font-size: 16px;
+            line-height: 1.4;
+        }
+
+        .notification-timestamp {
+            font-size: 12px;
+            color: #888;
+            margin-top: 10px;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div id="notification-container"></div>
+
+    <script>
+        const container = document.getElementById('notification-container');
+        const sseUrl = '/events/stream';
+
+        function addNotification(alert) {
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+
+            notification.innerHTML = `
+                <div class="notification-header">
+                    <div class="notification-title">${alert.title || 'Alert'}</div>
+                    <div class="notification-severity">${alert.severity || 'Normal'}</div>
+                </div>
+                <div class="notification-message">${alert.message || ''}</div>
+                <div class="notification-timestamp">${new Date(alert.timestamp).toLocaleTimeString()}</div>
+            `;
+
+            container.appendChild(notification);
+
+            // Auto-remove after 15 seconds
+            setTimeout(() => {
+                notification.classList.add('fade-out');
+                setTimeout(() => {
+                    notification.remove();
+                }, 500);
+            }, 15000);
+        }
+
+        function connectSSE() {
+            const eventSource = new EventSource(sseUrl);
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'jarvis_notification') {
+                        addNotification(data.data);
+                    }
+                } catch (e) {
+                    console.error('Failed to parse SSE event', e);
+                }
+            };
+
+            eventSource.onerror = (error) => {
+                console.error('SSE connection error', error);
+                eventSource.close();
+                // Reconnect after 5 seconds
+                setTimeout(connectSSE, 5000);
+            };
+        }
+
+        connectSSE();
+    </script>
+</body>
+</html>

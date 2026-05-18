@@ -237,6 +237,107 @@ type SwarmNode struct {
 	Status   string `json:"status"`
 }
 
+type K10SystemState struct{}
+
+func (s *K10SystemState) GetBalance() float64 {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+	return globalLedger.Balance
+}
+
+func (s *K10SystemState) GetRecentTransactions(limit int) []agents.Transaction {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+	var txs []agents.Transaction
+	count := 0
+	for i := len(globalLedger.Transactions) - 1; i >= 0 && count < limit; i-- {
+		t := globalLedger.Transactions[i]
+		txs = append(txs, agents.Transaction{
+			Timestamp:   t.Timestamp,
+			Type:        t.Type,
+			Category:    t.Category,
+			Vertical:    t.Vertical,
+			Amount:      t.Amount,
+			Description: t.Description,
+		})
+		count++
+	}
+	return txs
+}
+
+func (s *K10SystemState) GetSwarmStatus() map[string]interface{} {
+	return globalSwarmManager.GetAllSwarmMetrics()
+}
+
+func (s *K10SystemState) GetOpenPRs() []agents.PRInfo {
+	// Mocked for now
+	return []agents.PRInfo{
+		{Repo: "Koola10", Title: "feat/night-shift-report", Author: "night-shift", Status: "Open"},
+	}
+}
+
+func (s *K10SystemState) GetComplianceViolations() []string {
+	// Mocked for now
+	return []string{}
+}
+
+func (s *K10SystemState) GetOverdueFollowups() []string {
+	// Logic to check appsDir for submitted applications > 7 days without follow-up
+	var overdue []string
+	files, _ := os.ReadDir(appsDir)
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name(), ".json") {
+			continue
+		}
+		data, _ := os.ReadFile(filepath.Join(appsDir, f.Name()))
+		var d ApplicationDraft
+		json.Unmarshal(data, &d)
+		info, _ := f.Info()
+		if d.Status == "submitted" && d.FollowUpDraft == "" && time.Since(info.ModTime()) > 7*24*time.Hour {
+			overdue = append(overdue, d.ApplicationID)
+		}
+	}
+	return overdue
+}
+
+func (s *K10SystemState) GetHighROIGrants() []agents.GrantOpportunity {
+	// Logic to check cache for grants with estimated funding > 5000
+	var highROI []agents.GrantOpportunity
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+	data, err := os.ReadFile(cachePath)
+	if err == nil {
+		var cache map[string]Grant
+		json.Unmarshal(data, &cache)
+		for id, g := range cache {
+			amount := parseCurrency(g.Amount)
+			if amount > 5000 {
+				highROI = append(highROI, agents.GrantOpportunity{
+					ID:     id,
+					Title:  g.Title,
+					Amount: amount,
+					ROI:    10.0, // Mocked ROI
+				})
+			}
+		}
+	}
+	return highROI
+}
+
+func parseCurrency(s string) float64 {
+	s = strings.ReplaceAll(s, "$", "")
+	s = strings.ReplaceAll(s, ",", "")
+	var f float64
+	fmt.Sscanf(s, "%f", &f)
+	return f
+}
+
+type SSEEvent struct {
+	Type      string                 `json:"type"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp string                 `json:"timestamp"`
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -276,6 +377,11 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	sseMu        sync.RWMutex
+	voiceMu      sync.Mutex
+
+	sseClients = make(map[chan SSEEvent]bool)
+	voiceResponses = make(map[string]chan string)
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -388,6 +494,75 @@ func main() {
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
 
+	proactive := agents.NewProactiveAgent(globalSwarmManager)
+	proactive.BroadcastFn = func(alert agents.ProactiveAlert) {
+		BroadcastSSEEvent("jarvis_notification", map[string]interface{}{
+			"alert_id":  alert.ID,
+			"title":     alert.Title,
+			"message":   alert.Message,
+			"severity":  alert.Severity,
+			"timestamp": alert.Timestamp,
+		})
+	}
+	proactive.WaitFn = func(alertID string) (string, error) {
+		ch := make(chan string)
+		voiceMu.Lock()
+		voiceResponses[alertID] = ch
+		voiceMu.Unlock()
+		defer func() {
+			voiceMu.Lock()
+			delete(voiceResponses, alertID)
+			voiceMu.Unlock()
+		}()
+		// Wait for 60 seconds for a voice response
+		select {
+		case resp := <-ch:
+			return resp, nil
+		case <-time.After(60 * time.Second):
+			return "", fmt.Errorf("timeout waiting for voice response")
+		}
+	}
+	proactive.AnalyzeFn = func(alert agents.ProactiveAlert) (string, error) {
+		// Call handleAIChat logic internally or similar
+		apiKey := os.Getenv("DEEPSEEK_API_KEY")
+		prompt := fmt.Sprintf("Analyze the following alert and provide a brief verbal summary and recommendation: %s - %s", alert.Title, alert.Message)
+		dsReq := map[string]interface{}{
+			"model": "deepseek-chat",
+			"messages": []map[string]string{
+				{"role": "system", "content": "You are Koola10, the CEO's proactive advisor. Be brief and professional for voice output."},
+				{"role": "user", "content": prompt},
+			},
+		}
+		dsBody, _ := json.Marshal(dsReq)
+		hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+		hReq.Header.Set("Authorization", "Bearer "+apiKey)
+		hReq.Header.Set("Content-Type", "application/json")
+		resp, err := (&http.Client{}).Do(hReq)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+		var dsRes struct {
+			Choices []struct {
+				Message struct {
+					Content string
+				}
+			}
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
+			return "", err
+		}
+		return dsRes.Choices[0].Message.Content, nil
+	}
+	proactive.AnalysisBroadcastFn = func(alertID string, analysis string) {
+		BroadcastSSEEvent("jarvis_analysis", map[string]interface{}{
+			"alert_id": alertID,
+			"analysis": analysis,
+		})
+	}
+
+	proactive.Start(&K10SystemState{})
+
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
 			redisClient = redis.NewClient(opt)
@@ -450,6 +625,11 @@ func main() {
 	http.HandleFunc("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	http.HandleFunc("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	http.HandleFunc("/swarm/", corsMiddleware(handleSpecialistSwarm))
+
+	http.HandleFunc("/events/stream", corsMiddleware(handleEventsStream))
+	http.HandleFunc("/events/emit", corsMiddleware(handleEventsEmit))
+	http.HandleFunc("/voice/listen", corsMiddleware(handleVoiceListen))
+	http.Handle("/tv/", http.StripPrefix("/tv/", http.FileServer(http.Dir("src/tv"))))
 
 	http.HandleFunc("/financial/status", corsMiddleware(handleFinancialStatus))
 	http.HandleFunc("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
@@ -1559,6 +1739,99 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func BroadcastSSEEvent(eventType string, data map[string]interface{}) {
+	event := SSEEvent{
+		Type:      eventType,
+		Data:      data,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	for clientChan := range sseClients {
+		// Non-blocking send
+		select {
+		case clientChan <- event:
+		default:
+		}
+	}
+}
+
+func handleEventsEmit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "POST required", 405)
+		return
+	}
+	var event SSEEvent
+	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	BroadcastSSEEvent(event.Type, event.Data)
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleEventsStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	eventChan := make(chan SSEEvent, 10)
+	sseMu.Lock()
+	sseClients[eventChan] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, eventChan)
+		sseMu.Unlock()
+		close(eventChan)
+	}()
+
+	fmt.Fprintf(w, "data: %s\n\n", `{"type": "connected", "message": "SSE connection established"}`)
+	flusher.Flush()
+
+	ctx := r.Context()
+	for {
+		select {
+		case event := <-eventChan:
+			eventJSON, _ := json.Marshal(event)
+			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
+			flusher.Flush()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func handleVoiceListen(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID       string `json:"id"`
+		Response string `json:"response"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	voiceMu.Lock()
+	ch, ok := voiceResponses[req.ID]
+	voiceMu.Unlock()
+
+	if ok {
+		ch <- req.Response
+		w.WriteHeader(http.StatusOK)
+	} else {
+		http.Error(w, "alert not found or already processed", 404)
+	}
 }
 
 func generateID() string {
