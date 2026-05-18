@@ -1,0 +1,12 @@
+{
+  "id": "com.koola10.nova",
+  "version": "1.0.0",
+  "type": "web",
+  "title": "Koola10 Nova",
+  "appDescription": "Voice notification overlay for Koola10",
+  "icon": "icon.png",
+  "main": "https://koola10.fly.dev/tv/index.html",
+  "overlay": true,
+  "transparent": true,
+  "usePrerendering": false
+}
