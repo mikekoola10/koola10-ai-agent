@@ -9,6 +9,10 @@ import (
 type DeveloperAgent struct {
 	specialty string
 	status    AgentStatus
+
+	// Global callbacks
+	SendEmail               func(to, subject, body string) error
+	GetCollaborationSummary func() string
 }
 
 type NightShiftTask struct {

@@ -27,9 +27,14 @@ type SwarmManager struct {
 	// Callbacks for logging to economic ledger and compliance audit
 	AuditLogger func(action string, details map[string]interface{})
 	LedgerLogger func(vertical, category string, amount float64, description string)
+	StatusLogger func(vertical, agent string, status string)
 
 	// Factory for creating agents for a vertical
 	Factories map[string]func() []SpecialistAgent
+
+	// Global callbacks for agents
+	SendEmail               func(to, subject, body string) error
+	GetCollaborationSummary func() string
 }
 
 func NewSwarmManager() *SwarmManager {
@@ -49,6 +54,14 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 	}
 
 	agents := factory()
+	// Inject global callbacks into agents that support them
+	for _, a := range agents {
+		if dev, ok := a.(*DeveloperAgent); ok {
+			dev.SendEmail = sm.SendEmail
+			dev.GetCollaborationSummary = sm.GetCollaborationSummary
+		}
+	}
+
 	// If count is different from what factory produces, we might need to adjust,
 	// but for now we assume factory produces the right set or we scale it.
 	// The requirement says 10 agents for each.
@@ -89,7 +102,17 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 	}
 	sm.Mu.Unlock()
 
+	if sm.StatusLogger != nil {
+		sm.StatusLogger(vertical, target.Specialty(), string(StatusWorking))
+	}
 	result, err := target.Run(task)
+	if sm.StatusLogger != nil {
+		status := string(StatusCompleted)
+		if err != nil {
+			status = string(StatusError)
+		}
+		sm.StatusLogger(vertical, target.Specialty(), status)
+	}
 
 	if sm.AuditLogger != nil {
 		sm.AuditLogger("task_executed", map[string]interface{}{
