@@ -52,7 +52,11 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 	// If count is different from what factory produces, we might need to adjust,
 	// but for now we assume factory produces the right set or we scale it.
 	// The requirement says 10 agents for each.
-	sm.Swarms[vertical] = agents
+	if existing, ok := sm.Swarms[vertical]; ok {
+		sm.Swarms[vertical] = append(existing, agents...)
+	} else {
+		sm.Swarms[vertical] = agents
+	}
 
 	if sm.AuditLogger != nil {
 		sm.AuditLogger("swarm_deployed", map[string]interface{}{
