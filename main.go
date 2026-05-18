@@ -444,6 +444,9 @@ func main() {
 	http.HandleFunc("/swarm/agents", corsMiddleware(handleSwarmAgents))
 	http.HandleFunc("/swarm/nodes", corsMiddleware(handleSwarmNodes))
 
+	http.HandleFunc("/agent/watch-and-paste", corsMiddleware(handleWatchAndPaste))
+	http.HandleFunc("/agent/create-vercel-token", corsMiddleware(handleCreateVercelToken))
+
 	// Specialist Swarm Endpoints
 	http.HandleFunc("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
 	http.HandleFunc("/swarm/report", corsMiddleware(handleSwarmReport))
@@ -1559,6 +1562,143 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleWatchAndPaste(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		SourceWindow string `json:"source_window"`
+		TargetWindow string `json:"target_window"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.SourceWindow == "" {
+		http.Error(w, "source_window is required", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Switch to target window FIRST (Jules) to monitor for requests
+	// The requirement is "automatically detects Jules requesting a token"
+	tools.RunTool("uiax", map[string]interface{}{
+		"action":      "focus_window",
+		"window_name": req.TargetWindow,
+	})
+
+	// 2. Read target window to check if Jules is already asking for something
+	targetContentRes := tools.RunTool("uiax", map[string]interface{}{
+		"action":      "read_window",
+		"window_name": req.TargetWindow,
+	})
+
+	targetText := targetContentRes.Output
+	if strings.Contains(strings.ToLower(targetText), "token") {
+		handleAutonomousToken(req.TargetWindow)
+	}
+
+	// 3. Watch source conversation (e.g., DeepSeek)
+	watchRes := tools.RunTool("uiax", map[string]interface{}{
+		"action":      "watch_conversation",
+		"window_name": req.SourceWindow,
+	})
+
+	if !watchRes.Success {
+		http.Error(w, "Failed to watch conversation: "+watchRes.Error, http.StatusInternalServerError)
+		return
+	}
+
+	// 4. Switch to target and paste original message
+	pasteRes := tools.RunTool("uiax", map[string]interface{}{
+		"action":        "switch_to_jules",
+		"target_window": req.TargetWindow,
+	})
+
+	if !pasteRes.Success {
+		http.Error(w, "Failed to switch and paste: "+pasteRes.Error, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": "Content watched from " + req.SourceWindow + " and pasted to " + req.TargetWindow,
+		"data":    watchRes.Data,
+	})
+
+	// 5. Autonomous Loop: check for post-paste requests from Jules
+	go func() {
+		time.Sleep(5 * time.Second)
+		res := tools.RunTool("uiax", map[string]interface{}{"action": "read_window", "window_name": req.TargetWindow})
+		txt := res.Output
+		if strings.Contains(strings.ToLower(txt), "token") {
+			handleAutonomousToken(req.TargetWindow)
+		}
+		if strings.Contains(strings.ToLower(txt), "deploy") {
+			handleAutonomousDeploy(txt)
+		}
+	}()
+}
+
+func handleAutonomousToken(targetWindow string) {
+	log.Println("Autonomous Logic: Token request detected")
+	tokenRes := tools.RunTool("vercel_token", map[string]interface{}{"token_name": "Jules Auto Token"})
+	if tokenRes.Success {
+		data := tokenRes.Data.(map[string]string)
+		bearer := data["bearer_token"]
+
+		// Ensure window is focused
+		tools.RunTool("uiax", map[string]interface{}{"action": "focus_window", "window_name": targetWindow})
+		// Type the token
+		tools.RunTool("uiax", map[string]interface{}{"action": "type_text", "text": bearer + "\n"})
+		AddAuditEntry("autonomous_token_generated", map[string]interface{}{"token_name": "Jules Auto Token"})
+	}
+}
+
+func handleAutonomousDeploy(text string) {
+	log.Println("Autonomous Logic: Deploy request detected")
+	if strings.Contains(strings.ToLower(text), "vercel") {
+		tools.RunTool("uiax", map[string]interface{}{"action": "vercel_deploy_via_terminal"})
+	} else {
+		tools.RunTool("uiax", map[string]interface{}{"action": "deploy_via_terminal"})
+	}
+	AddAuditEntry("autonomous_deployment_triggered", map[string]interface{}{"text": text})
+}
+
+func handleCreateVercelToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		TokenName string `json:"token_name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	res := tools.RunTool("vercel_token", map[string]interface{}{
+		"token_name": req.TokenName,
+	})
+
+	if !res.Success {
+		http.Error(w, res.Error, http.StatusInternalServerError)
+		return
+	}
+
+	AddAuditEntry("vercel_token_created", map[string]interface{}{"token_name": req.TokenName})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res.Data)
 }
 
 func generateID() string {
