@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"koola10/agents"
 	"koola10/financial"
 	"koola10/tools"
@@ -396,80 +398,89 @@ func main() {
 		}
 	}
 
-	http.HandleFunc("/", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(dashboardHTML))
-	}))
-	http.HandleFunc("/grants/search", corsMiddleware(handleSearch))
-	http.HandleFunc("/grants/apply", corsMiddleware(handleApply))
-	http.HandleFunc("/grants/status", corsMiddleware(handleStatus))
-	http.HandleFunc("/grants/applications", corsMiddleware(handleApplicationsList))
-	http.HandleFunc("/grants/monitor", corsMiddleware(handleMonitor))
-	http.HandleFunc("/grants/update-status", corsMiddleware(handleUpdateStatus))
-	http.HandleFunc("/grants/apply-auto", corsMiddleware(handleApplyAuto))
-	http.HandleFunc("/grants/check-status", corsMiddleware(handleCheckStatus))
+	r := chi.NewRouter()
 
-	http.HandleFunc("/payment/create-checkout", corsMiddleware(handleCreateCheckout))
-	http.HandleFunc("/stripe/webhook", handleStripeWebhook)
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"not found"}`))
+	})
 
-	http.HandleFunc("/ai/chat", corsMiddleware(handleAIChat))
-	http.HandleFunc("/ai/remember", corsMiddleware(handleAIRemember))
-	http.HandleFunc("/ai/recall", corsMiddleware(handleAIRecall))
-	http.HandleFunc("/ai/analyze-grant", corsMiddleware(handleAIAnalyzeGrant))
+	r.Get("/", corsMiddleware(handleRoot))
 
-	http.HandleFunc("/memory/meetings", corsMiddleware(handleMemoryMeetings))
-	http.HandleFunc("/memory/entity/", corsMiddleware(handleMemoryEntity))
-	http.HandleFunc("/memory/influence/", corsMiddleware(handleMemoryInfluence))
-	http.HandleFunc("/memory/path", corsMiddleware(handleMemoryPath))
-	http.HandleFunc("/memory/decisions/ranked", corsMiddleware(handleMemoryDecisionsRanked))
+	r.Get("/health", corsMiddleware(handleHealth))
+	r.Get("/daily-report", corsMiddleware(handleDailyReport))
+	r.Get("/events/stream", handleEventsStream)
+	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
 
-	http.HandleFunc("/semantic/index", corsMiddleware(handleSemanticIndex))
-	http.HandleFunc("/semantic/search", corsMiddleware(handleSemanticSearch))
+	r.Get("/grants/search", corsMiddleware(handleSearch))
+	r.Post("/grants/apply", corsMiddleware(handleApply))
+	r.Get("/grants/status", corsMiddleware(handleStatus))
+	r.Get("/grants/applications", corsMiddleware(handleApplicationsList))
+	r.Post("/grants/monitor", corsMiddleware(handleMonitor))
+	r.Post("/grants/update-status", corsMiddleware(handleUpdateStatus))
+	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
+	r.Post("/grants/check-status", corsMiddleware(handleCheckStatus))
 
-	http.HandleFunc("/compliance/audit", corsMiddleware(handleComplianceAudit))
-	http.HandleFunc("/compliance/audit/verify", corsMiddleware(handleComplianceAuditVerify))
-	http.HandleFunc("/compliance/approval", corsMiddleware(handleComplianceApproval))
-	http.HandleFunc("/compliance/approve", corsMiddleware(handleComplianceApprove))
-	http.HandleFunc("/compliance/kill-switch", corsMiddleware(handleComplianceKillSwitch))
-	http.HandleFunc("/compliance/kill-switch/reset", corsMiddleware(handleComplianceKillSwitchReset))
-	http.HandleFunc("/compliance/usage", corsMiddleware(handleComplianceUsage))
+	r.Post("/payment/create-checkout", corsMiddleware(handleCreateCheckout))
+	r.Post("/stripe/webhook", handleStripeWebhook)
 
-	http.HandleFunc("/economic/ledger/cost", corsMiddleware(handleEconomicLedgerCost))
-	http.HandleFunc("/economic/ledger/revenue", corsMiddleware(handleEconomicLedgerRevenue))
-	http.HandleFunc("/economic/ledger/summary", corsMiddleware(handleEconomicLedgerSummary))
-	http.HandleFunc("/economic/evaluate", corsMiddleware(handleEconomicEvaluate))
+	r.Post("/ai/chat", corsMiddleware(handleAIChat))
+	r.Post("/ai/remember", corsMiddleware(handleAIRemember))
+	r.Get("/ai/recall", corsMiddleware(handleAIRecall))
+	r.Post("/ai/analyze-grant", corsMiddleware(handleAIAnalyzeGrant))
 
-	http.HandleFunc("/swarm/start", corsMiddleware(handleSwarmStart))
-	http.HandleFunc("/swarm/task-status", corsMiddleware(handleSwarmStatus))
-	http.HandleFunc("/swarm/agents", corsMiddleware(handleSwarmAgents))
-	http.HandleFunc("/swarm/nodes", corsMiddleware(handleSwarmNodes))
+	r.Get("/memory/meetings", corsMiddleware(handleMemoryMeetings))
+	r.Post("/memory/meetings", corsMiddleware(handleMemoryMeetings))
+	r.Get("/memory/entity/*", corsMiddleware(handleMemoryEntity))
+	r.Get("/memory/influence/*", corsMiddleware(handleMemoryInfluence))
+	r.Get("/memory/path", corsMiddleware(handleMemoryPath))
+	r.Get("/memory/decisions/ranked", corsMiddleware(handleMemoryDecisionsRanked))
 
-	// Specialist Swarm Endpoints
-	http.HandleFunc("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
-	http.HandleFunc("/swarm/report", corsMiddleware(handleSwarmReport))
-	http.HandleFunc("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
-	http.HandleFunc("/swarm/status", corsMiddleware(handleSwarmStatusAll))
-	http.HandleFunc("/swarm/", corsMiddleware(handleSpecialistSwarm))
+	r.Post("/semantic/index", corsMiddleware(handleSemanticIndex))
+	r.Get("/semantic/search", corsMiddleware(handleSemanticSearch))
 
-	http.HandleFunc("/financial/status", corsMiddleware(handleFinancialStatus))
-	http.HandleFunc("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
-	http.HandleFunc("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
-	http.HandleFunc("/financial/history", corsMiddleware(handleFinancialHistory))
-	http.HandleFunc("/trading/profit", corsMiddleware(handleTradingProfit))
+	r.Get("/compliance/audit", corsMiddleware(handleComplianceAudit))
+	r.Get("/compliance/audit/verify", corsMiddleware(handleComplianceAuditVerify))
+	r.Post("/compliance/approval", corsMiddleware(handleComplianceApproval))
+	r.Post("/compliance/approve", corsMiddleware(handleComplianceApprove))
+	r.Post("/compliance/kill-switch", corsMiddleware(handleComplianceKillSwitch))
+	r.Post("/compliance/kill-switch/reset", corsMiddleware(handleComplianceKillSwitchReset))
+	r.Get("/compliance/usage", corsMiddleware(handleComplianceUsage))
 
-	// Tool Execution
-	http.HandleFunc("/tools/execute", corsMiddleware(tools.HandleExecute))
+	r.Post("/economic/ledger/cost", corsMiddleware(handleEconomicLedgerCost))
+	r.Post("/economic/ledger/revenue", corsMiddleware(handleEconomicLedgerRevenue))
+	r.Get("/economic/ledger/summary", corsMiddleware(handleEconomicLedgerSummary))
+	r.Post("/economic/evaluate", corsMiddleware(handleEconomicEvaluate))
 
-	// Studio Endpoints
-	http.HandleFunc("/studio/lore", corsMiddleware(handleStudioLore))
-	http.HandleFunc("/studio/style", corsMiddleware(handleStudioStyle))
-	http.HandleFunc("/studio/episode", corsMiddleware(handleStudioEpisode))
-	http.HandleFunc("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
-	http.HandleFunc("/studio/video-job", corsMiddleware(handleStudioVideoJob))
-	http.HandleFunc("/studio/video-job/", corsMiddleware(handleStudioVideoJobStatus))
+	r.Post("/swarm/start", corsMiddleware(handleSwarmStart))
+	r.Get("/swarm/task-status", corsMiddleware(handleSwarmStatus))
+	r.Get("/swarm/agents", corsMiddleware(handleSwarmAgents))
+	r.Get("/swarm/nodes", corsMiddleware(handleSwarmNodes))
+
+	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
+	r.Get("/swarm/report", corsMiddleware(handleSwarmReport))
+	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
+	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
+	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+
+	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
+	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
+	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
+	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
+	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
+
+	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
+
+	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
+	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
+	r.Post("/studio/episode", corsMiddleware(handleStudioEpisode))
+	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
+	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
+	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
-	http.ListenAndServe("0.0.0.0:"+port, nil)
+	http.ListenAndServe("0.0.0.0:"+port, r)
 }
 
 // --- Studio Handlers ---
@@ -1559,6 +1570,33 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"ok"}`))
+}
+
+func handleDailyReport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/markdown")
+	w.Write([]byte("# Daily Report\n\nAll systems operational."))
+}
+
+func handleCollaborate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"collaborate endpoint"}`))
+}
+
+func handleEventsStream(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Write([]byte("event: connected\ndata: {}\n\n"))
+}
+
+func handleRoot(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(dashboardHTML))
 }
 
 func generateID() string {
