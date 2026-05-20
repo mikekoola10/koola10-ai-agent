@@ -34,6 +34,63 @@ import (
 
 // --- Structs ---
 
+type ManagedSubscription struct {
+	Service     string    `json:"service"`
+	MonthlyCost float64   `json:"monthly_cost"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+var (
+	subPath = "/data/subscriptions.json"
+	subFileMu sync.Mutex
+)
+
+func handleLogSubscription(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Service     string  `json:"service"`
+		MonthlyCost float64 `json:"monthly_cost"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	subFileMu.Lock()
+	defer subFileMu.Unlock()
+
+	var subs []ManagedSubscription
+	data, err := os.ReadFile(subPath)
+	if err == nil {
+		json.Unmarshal(data, &subs)
+	}
+
+	newSub := ManagedSubscription{
+		Service:     req.Service,
+		MonthlyCost: req.MonthlyCost,
+		CreatedAt:   time.Now(),
+	}
+	subs = append(subs, newSub)
+
+	updated, _ := json.MarshalIndent(subs, "", "  ")
+	os.WriteFile(subPath, updated, 0644)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleCreatePrivacyCard(w http.ResponseWriter, r *http.Request) {
+	res := tools.RunTool("privacy", map[string]interface{}{
+		"action": "create_subscription_card",
+	})
+
+	if !res.Success {
+		http.Error(w, res.Error, 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(res.Output))
+}
+
 type Grant struct {
 	ID          string `json:"grant_id"`
 	Title       string `json:"title"`
@@ -473,6 +530,8 @@ func main() {
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
 	r.Post("/agent/create-privacy-card", corsMiddleware(handleCreatePrivacyCard))
+	r.Post("/agent/log-subscription", corsMiddleware(handleLogSubscription))
+	r.Get("/agent/subscriptions", corsMiddleware(handleGetSubscriptions))
 
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
@@ -1458,20 +1517,6 @@ func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(report)
 }
 
-func handleCreatePrivacyCard(w http.ResponseWriter, r *http.Request) {
-	res := tools.RunTool("privacy", map[string]interface{}{
-		"action": "create_subscription_card",
-	})
-
-	if !res.Success {
-		http.Error(w, res.Error, 500)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(res.Output))
-}
-
 func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ProductName   string `json:"product_name"`
@@ -1617,4 +1662,18 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+func handleGetSubscriptions(w http.ResponseWriter, r *http.Request) {
+	subFileMu.Lock()
+	defer subFileMu.Unlock()
+
+	data, err := os.ReadFile(subPath)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
 }
