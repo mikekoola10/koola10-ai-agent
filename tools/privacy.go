@@ -15,6 +15,14 @@ func privacyTool(payload map[string]interface{}) ToolResult {
 		return ToolResult{Success: false, Error: "PRIVACY_API_KEY not set"}
 	}
 
+	// Mock response for demonstration when using the placeholder key
+	if apiKey == "your_key" {
+		return ToolResult{
+			Success: true,
+			Output:  "Card Created: Koola10 Subscription\nPAN: 4111-1111-1111-1111\nExpiry: 01/2028\nCVV: 123",
+			Data:    map[string]interface{}{"pan": "4111-1111-1111-1111", "exp_month": "01", "exp_year": "2028", "cvv": "123"},
+		}
+	}
 
 	action, ok := payload["action"].(string)
 	if !ok {

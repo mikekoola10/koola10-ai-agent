@@ -74,6 +74,8 @@ func handleLogSubscription(w http.ResponseWriter, r *http.Request) {
 	updated, _ := json.MarshalIndent(subs, "", "  ")
 	os.WriteFile(subPath, updated, 0644)
 
+	globalLedger.RecordCost("subscription", "monthly_recurring", req.MonthlyCost, "Managed subscription for "+req.Service)
+
 	w.WriteHeader(http.StatusOK)
 }
 
