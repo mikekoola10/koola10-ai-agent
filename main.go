@@ -472,6 +472,8 @@ func main() {
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
+	r.Post("/agent/create-privacy-card", corsMiddleware(handleCreatePrivacyCard))
+
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
 	r.Post("/studio/episode", corsMiddleware(handleStudioEpisode))
@@ -1454,6 +1456,20 @@ func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
 		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
 	}
 	json.NewEncoder(w).Encode(report)
+}
+
+func handleCreatePrivacyCard(w http.ResponseWriter, r *http.Request) {
+	res := tools.RunTool("privacy", map[string]interface{}{
+		"action": "create_subscription_card",
+	})
+
+	if !res.Success {
+		http.Error(w, res.Error, 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(res.Output))
 }
 
 func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
