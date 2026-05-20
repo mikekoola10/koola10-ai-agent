@@ -45,6 +45,9 @@ class ExtractRequest(BaseModel):
     url: str
     instruction: str
 
+class TaskRequest(BaseModel):
+    task: str
+
 class StripeKeysRequest(BaseModel):
     otp: Optional[str] = None
 
@@ -158,6 +161,33 @@ async def extract(req: ExtractRequest):
     result = await agent.run()
     await browser.close()
     return {"data": str(result)}
+
+@app.post("/browser/task")
+async def run_task(req: TaskRequest):
+    browser = Browser(profile=browser_profile)
+    agent = Agent(
+        task=req.task,
+        llm=llm,
+        browser=browser,
+    )
+    result = await agent.run()
+
+    screenshot_b64 = ""
+    try:
+        context = (await browser.get_context())
+        page = await context.get_current_page()
+        if page:
+            screenshot = await page.screenshot()
+            screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Screenshot failed: {e}")
+
+    await browser.close()
+    return {
+        "status": "success",
+        "result": str(result),
+        "screenshot": screenshot_b64
+    }
 
 @app.post("/browser/stripe-live-keys")
 async def get_stripe_keys(req: StripeKeysRequest):
