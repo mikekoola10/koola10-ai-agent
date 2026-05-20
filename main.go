@@ -239,6 +239,13 @@ type SwarmNode struct {
 	Status   string `json:"status"`
 }
 
+type ManagedSubscription struct {
+	CardID      string  `json:"card_id"`
+	Service     string  `json:"service"`
+	MonthlyCost float64 `json:"monthly_cost"`
+	Status      string  `json:"status"`
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -275,11 +282,13 @@ var (
 	auditMutex   sync.Mutex
 	usageMutex   sync.Mutex
 	approvalMu   sync.Mutex
-	subMu        sync.Mutex
-	killSwitchMu sync.Mutex
-	videoJobMu   sync.Mutex
+	subMu         sync.Mutex
+	managedSubsMu sync.Mutex
+	killSwitchMu  sync.Mutex
+	videoJobMu    sync.Mutex
 
-	cachePath      = "/data/grants_cache.json"
+	cachePath       = "/data/grants_cache.json"
+	managedSubsPath = "/data/subscriptions.json"
 	appsDir        = "/data/applications"
 	memoryPath     = "/data/memory.json"
 	graphPath      = "/data/memory_graph.json"
@@ -471,6 +480,9 @@ func main() {
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
+
+	r.Post("/agent/create-subscription-card", corsMiddleware(handleCreateSubscriptionCard))
+	r.Post("/agent/log-subscription", corsMiddleware(handleLogSubscription))
 
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
@@ -1053,6 +1065,83 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	}
 	fundManager.RouteRevenue(req.Profit, "trading")
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleCreateSubscriptionCard(w http.ResponseWriter, r *http.Request) {
+	res := tools.RunTool("stripe_issuing", map[string]interface{}{
+		"action": "create_subscription_card",
+	})
+	if !res.Success {
+		http.Error(w, res.Error, 500)
+		return
+	}
+
+	cardData, ok := res.Data.(map[string]interface{})
+	if !ok {
+		http.Error(w, "invalid tool response data", 500)
+		return
+	}
+	cardID, _ := cardData["id"].(string)
+
+	managedSubsMu.Lock()
+	defer managedSubsMu.Unlock()
+	var subs []ManagedSubscription
+	data, err := os.ReadFile(managedSubsPath)
+	if err == nil {
+		json.Unmarshal(data, &subs)
+	}
+	subs = append(subs, ManagedSubscription{
+		CardID: cardID,
+		Status: "card_created",
+	})
+	newData, _ := json.MarshalIndent(subs, "", "  ")
+	os.WriteFile(managedSubsPath, newData, 0644)
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(res.Output))
+}
+
+func handleLogSubscription(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Service     string  `json:"service"`
+		MonthlyCost float64 `json:"monthly_cost"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	managedSubsMu.Lock()
+	defer managedSubsMu.Unlock()
+	var subs []ManagedSubscription
+	data, err := os.ReadFile(managedSubsPath)
+	if err == nil {
+		json.Unmarshal(data, &subs)
+	}
+
+	found := false
+	for i := len(subs) - 1; i >= 0; i-- {
+		if subs[i].Status == "card_created" && subs[i].Service == "" {
+			subs[i].Service = req.Service
+			subs[i].MonthlyCost = req.MonthlyCost
+			subs[i].Status = "active"
+			found = true
+
+			globalLedger.RecordCost("subscriptions", "issuing_subscription", req.MonthlyCost, fmt.Sprintf("Subscription: %s", req.Service))
+			break
+		}
+	}
+
+	if !found {
+		http.Error(w, "no available card found for logging", 404)
+		return
+	}
+
+	newData, _ := json.MarshalIndent(subs, "", "  ")
+	os.WriteFile(managedSubsPath, newData, 0644)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status": "logged"}`))
 }
 
 func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {
