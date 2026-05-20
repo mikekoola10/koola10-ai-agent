@@ -3,15 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Admin</title>
+    <title>Agent Dual Admin</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; line-height: 1.4; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
-        .card { border: 1px solid #333; padding: 15px; background: #111; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 15px; }
+        .card { border: 1px solid #333; padding: 15px; background: #111; position: relative; }
         .status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
         .online { background: #0f0; box-shadow: 0 0 5px #0f0; }
         .offline { background: #f00; }
         h1, h2 { color: #fff; margin-top: 0; }
+        .label { color: #aaa; font-size: 0.8em; margin-bottom: 5px; }
         button { background: #333; color: #fff; border: 1px solid #555; padding: 8px 12px; cursor: pointer; font-family: monospace; }
         button:hover { background: #444; }
         button:disabled { opacity: 0.5; }
@@ -19,39 +20,69 @@
         .red:hover { background: #300; }
         pre { font-size: 12px; overflow-x: auto; color: #aaa; }
         .node { border-bottom: 1px solid #222; padding: 5px 0; }
+        .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .ecosystem-title { font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #444; padding-bottom: 5px; }
+        .koola { color: #00ffff; }
+        .oracle { color: #ff00ff; }
     </style>
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>AGENT_ADMIN_PANEL v1.0</h1>
+        <h1>AGENT_DUAL_ADMIN_PANEL v2.0</h1>
         <div>
-            <span id="status-dot" class="status online"></span>
-            <span id="status-text">SYSTEM_NOMINAL</span>
+            <span id="status-dot-koola" class="status online"></span> KOOLA
+            <span id="status-dot-oracle" class="status online" style="margin-left: 15px;"></span> ORACLE
         </div>
     </header>
 
     <div class="grid">
         <div class="card">
-            <h2>FINANCIAL_LEDGER</h2>
-            <div>BALANCE: <span id="balance">$0.00</span></div>
-            <div>COSTS:   <span id="costs">$0.00</span></div>
-            <div>REVENUE: <span id="revenue">$0.00</span></div>
-            <div style="margin-top:10px;">ROI_RATIO: <span id="roi">0.00</span>x</div>
+            <h2>FINANCIAL_LEDGER_COMPARISON</h2>
+            <div class="comparison">
+                <div>
+                    <div class="ecosystem-title koola">KOOLA10 (DeepSeek)</div>
+                    <div>BALANCE: <span id="balance-koola">$0.00</span></div>
+                    <div>COSTS:   <span id="costs-koola">$0.00</span></div>
+                    <div>REVENUE: <span id="revenue-koola">$0.00</span></div>
+                    <div>ROI:     <span id="roi-koola">0.00</span>x</div>
+                </div>
+                <div>
+                    <div class="ecosystem-title oracle">ORACLE (OpenAI)</div>
+                    <div>BALANCE: <span id="balance-oracle">$0.00</span></div>
+                    <div>COSTS:   <span id="costs-oracle">$0.00</span></div>
+                    <div>REVENUE: <span id="revenue-oracle">$0.00</span></div>
+                    <div>ROI:     <span id="roi-oracle">0.00</span>x</div>
+                </div>
+            </div>
         </div>
 
         <div class="card">
-            <h2>SWARM_NETWORK</h2>
-            <div id="nodes-list">Scanning for nodes...</div>
+            <h2>SWARM_NETWORK_STATUS</h2>
+            <div class="comparison">
+                <div>
+                    <div class="ecosystem-title koola">KOOLA10_NODES</div>
+                    <div id="nodes-list-koola">Scanning...</div>
+                </div>
+                <div>
+                    <div class="ecosystem-title oracle">ORACLE_NODES</div>
+                    <div id="nodes-list-oracle">Scanning...</div>
+                </div>
+            </div>
         </div>
 
         <div class="card">
             <h2>CONTROL_CENTER</h2>
-            <div style="margin-bottom: 10px;">
-                PENDING_APPROVALS: <span id="approvals-count">0</span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 10px;">
-                <button onclick="triggerMonitor()">RUN_DAILY_MONITOR</button>
-                <button id="kill-btn" class="red" onclick="toggleKillSwitch()">ACTIVATE_KILL_SWITCH</button>
+            <div class="comparison">
+                <div>
+                    <div class="ecosystem-title koola">KOOLA10</div>
+                    <button onclick="triggerMonitor('koola')">RUN_MONITOR</button>
+                    <button id="kill-btn-koola" class="red" onclick="toggleKillSwitch('koola')">KILL_SWITCH</button>
+                </div>
+                <div>
+                    <div class="ecosystem-title oracle">ORACLE</div>
+                    <button onclick="triggerMonitor('oracle')">RUN_MONITOR</button>
+                    <button id="kill-btn-oracle" class="red" onclick="toggleKillSwitch('oracle')">KILL_SWITCH</button>
+                </div>
             </div>
         </div>
     </div>
@@ -62,63 +93,74 @@
     </div>
 
     <script>
-        async function update() {
+        const BACKENDS = {
+            koola: 'https://koola10.fly.dev',
+            oracle: 'https://chatgpt-oracle.fly.dev'
+        };
+
+        async function updateEcosystem(key) {
+            const baseUrl = BACKENDS[key];
             try {
                 // Ledger
-                const ledger = await fetch('/economic/ledger/summary').then(r => r.json());
-                document.getElementById('balance').innerText = `$${ledger.balance.toFixed(2)}`;
-                document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
-                document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
-                document.getElementById('roi').innerText = ledger.roi.toFixed(2);
+                const ledger = await fetch(baseUrl + '/economic/ledger/summary').then(r => r.json());
+                document.getElementById(`balance-${key}`).innerText = `$${ledger.balance.toFixed(2)}`;
+                document.getElementById(`costs-${key}`).innerText = `$${ledger.total_costs.toFixed(2)}`;
+                document.getElementById(`revenue-${key}`).innerText = `$${ledger.total_revenue.toFixed(2)}`;
+                document.getElementById(`roi-${key}`).innerText = ledger.roi.toFixed(2);
 
                 // Nodes
-                const nodes = await fetch('/swarm/nodes').then(r => r.json());
-                const nodesDiv = document.getElementById('nodes-list');
+                const nodes = await fetch(baseUrl + '/swarm/nodes').then(r => r.json());
+                const nodesDiv = document.getElementById(`nodes-list-${key}`);
                 if (nodes.length === 0) {
                     nodesDiv.innerText = "No active nodes.";
                 } else {
                     nodesDiv.innerHTML = nodes.map(n => `
                         <div class="node">
-                            [${n.region}] ${n.node_id} - ${n.status}
+                            [${n.region}] ${n.node_id.substring(0,8)} - ${n.status}
                         </div>
                     `).join('');
                 }
-
-                // Approvals
-                const audit = await fetch('/compliance/audit').then(r => r.json());
-                const pending = audit.filter(e => e.action === 'approval_request_created');
-                document.getElementById('approvals-count').innerText = pending.length;
-
-                // Log a tick
-                const logs = document.getElementById('logs');
-                const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-                logs.innerText = `[${timestamp}] Telemetry update successful\n` + logs.innerText.split('\n').slice(0, 10).join('\n');
-
+                document.getElementById(`status-dot-${key}`).className = 'status online';
             } catch (e) {
-                console.error(e);
-                document.getElementById('status-dot').className = 'status offline';
-                document.getElementById('status-text').innerText = 'CONNECTION_LOST';
+                console.error(`Error updating ${key}:`, e);
+                document.getElementById(`status-dot-${key}`).className = 'status offline';
             }
         }
 
-        async function triggerMonitor() {
+        async function update() {
+            await Promise.all([
+                updateEcosystem('koola'),
+                updateEcosystem('oracle')
+            ]);
+
+            const logs = document.getElementById('logs');
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            logs.innerText = `[${timestamp}] Dual telemetry update successful\n` + logs.innerText.split('\n').slice(0, 10).join('\n');
+        }
+
+        async function triggerMonitor(key) {
             const btn = event.target;
             btn.disabled = true;
             btn.innerText = 'EXECUTING...';
-            await fetch('/grants/monitor');
-            btn.innerText = 'MONITOR_COMPLETE';
-            setTimeout(() => { btn.disabled = false; btn.innerText = 'RUN_DAILY_MONITOR'; }, 2000);
+            try {
+                await fetch(BACKENDS[key] + '/grants/monitor', {method: 'POST'});
+                btn.innerText = 'COMPLETE';
+            } catch (e) {
+                btn.innerText = 'FAILED';
+            }
+            setTimeout(() => { btn.disabled = false; btn.innerText = 'RUN_MONITOR'; }, 2000);
         }
 
-        async function toggleKillSwitch() {
-            const btn = document.getElementById('kill-btn');
-            if (btn.innerText.includes('ACTIVATE')) {
-                await fetch('/compliance/kill-switch', {method: 'POST'});
-                btn.innerText = 'RESET_KILL_SWITCH';
+        async function toggleKillSwitch(key) {
+            const btn = document.getElementById(`kill-btn-${key}`);
+            const baseUrl = BACKENDS[key];
+            if (btn.innerText.includes('KILL')) {
+                await fetch(baseUrl + '/compliance/kill-switch', {method: 'POST'});
+                btn.innerText = 'RESET';
                 btn.className = '';
             } else {
-                await fetch('/compliance/kill-switch/reset', {method: 'POST'});
-                btn.innerText = 'ACTIVATE_KILL_SWITCH';
+                await fetch(baseUrl + '/compliance/kill-switch/reset', {method: 'POST'});
+                btn.innerText = 'KILL_SWITCH';
                 btn.className = 'red';
             }
         }
