@@ -268,6 +268,12 @@ type VideoJob struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type SSEEvent struct {
+	Type      string                 `json:"type"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp string                 `json:"timestamp"`
+}
+
 // --- Global States ---
 
 var (
@@ -278,6 +284,9 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	sseMu        sync.Mutex
+
+	sseClients = make(map[chan SSEEvent]bool)
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -426,6 +435,7 @@ func main() {
 	r.Post("/stripe/webhook", handleStripeWebhook)
 
 	r.Post("/ai/chat", corsMiddleware(handleAIChat))
+	r.Post("/{agent}/chat", corsMiddleware(handleEcosystemAgentChat))
 	r.Post("/ai/remember", corsMiddleware(handleAIRemember))
 	r.Get("/ai/recall", corsMiddleware(handleAIRecall))
 	r.Post("/ai/analyze-grant", corsMiddleware(handleAIAnalyzeGrant))
@@ -463,6 +473,7 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+	r.Post("/{ecosystem}/{vertical}/start", corsMiddleware(handleEcosystemVerticalStart))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
@@ -1202,26 +1213,19 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Status check")
 	w.Write([]byte(`{"data": "pending"}`))
 }
-func handleAIChat(w http.ResponseWriter, r *http.Request) {
-	var req ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
+func performAIChat(systemPrompt, userPrompt string, vertical string) (ChatResponse, error) {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "no key", 500)
-		return
+		return ChatResponse{}, fmt.Errorf("no key")
 	}
 	if !rateLimit() {
-		http.Error(w, "limited", 429)
-		return
+		return ChatResponse{}, fmt.Errorf("rate limited")
 	}
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
-			{"role": "user", "content": req.Prompt},
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userPrompt},
 		},
 	}
 	dsBody, _ := json.Marshal(dsReq)
@@ -1230,8 +1234,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
 	if err != nil {
-		http.Error(w, "api failed", 500)
-		return
+		return ChatResponse{}, err
 	}
 	defer resp.Body.Close()
 	var dsRes struct {
@@ -1245,16 +1248,50 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "parse failed", 500)
-		return
+		return ChatResponse{}, err
 	}
 	LogUsage(dsRes.Usage.TotalTokens)
-	globalLedger.RecordCost("", "ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ChatResponse{
+	cost := float64(dsRes.Usage.TotalTokens) * 0.000002
+	globalLedger.RecordCost(vertical, "ai_chat", cost, "AI Chat interaction")
+
+	return ChatResponse{
 		Response:   dsRes.Choices[0].Message.Content,
 		TokensUsed: dsRes.Usage.TotalTokens,
-	})
+	}, nil
+}
+
+func handleAIChat(w http.ResponseWriter, r *http.Request) {
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	res, err := performAIChat("You are Koola10, an autonomous grant agent.", req.Prompt, "")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleEcosystemAgentChat(w http.ResponseWriter, r *http.Request) {
+	agent := chi.URLParam(r, "agent")
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	systemPrompt := fmt.Sprintf("You are the %s agent of the Koola10 ecosystem. Assist the user with their request.", agent)
+	res, err := performAIChat(systemPrompt, req.Prompt, "ecosystem:"+agent)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
 }
 func handleAIRemember(w http.ResponseWriter, r *http.Request) {
 	var req MemoryEntry; json.NewDecoder(r.Body).Decode(&req); json.NewEncoder(w).Encode(map[string]string{"status": "stored"})
@@ -1391,6 +1428,77 @@ func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(res)
+}
+
+func handleEcosystemVerticalStart(w http.ResponseWriter, r *http.Request) {
+	ecosystem := chi.URLParam(r, "ecosystem")
+	vertical := chi.URLParam(r, "vertical")
+
+	personality := ""
+	switch vertical {
+	case "trading", "api", "compliance":
+		switch ecosystem {
+		case "oracle":
+			personality = "Sable"
+		case "sentinel":
+			personality = "Fiducia"
+		case "nexus":
+			personality = "Quantum"
+		case "rebel":
+			personality = "Maverick"
+		}
+	case "leadgen", "grant", "research":
+		switch ecosystem {
+		case "oracle":
+			personality = "Vega"
+		case "sentinel":
+			personality = "Veritas"
+		case "nexus":
+			personality = "Prism"
+		case "rebel":
+			personality = "Provocateur"
+		}
+	case "saas":
+		switch ecosystem {
+		case "oracle":
+			personality = "Atlas"
+		case "sentinel":
+			personality = "Bastion"
+		case "nexus":
+			personality = "Matrix"
+		case "rebel":
+			personality = "Insurgent"
+		}
+	case "content":
+		switch ecosystem {
+		case "oracle":
+			personality = "Muse"
+		case "sentinel":
+			personality = "Lumina"
+		case "nexus":
+			personality = "Spectrum"
+		case "rebel":
+			personality = "Anarchist"
+		}
+	}
+
+	cost := 0.50
+	globalLedger.RecordCost(ecosystem+":"+vertical, "vertical_start", cost, fmt.Sprintf("Started vertical %s in %s ecosystem with personality %s", vertical, ecosystem, personality))
+
+	broadcastSSE("vertical_started", map[string]interface{}{
+		"ecosystem":   ecosystem,
+		"vertical":    vertical,
+		"personality": personality,
+		"status":      "active",
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "ok",
+		"ecosystem":   ecosystem,
+		"vertical":    vertical,
+		"personality": personality,
+	})
 }
 
 func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
@@ -1587,11 +1695,61 @@ func handleCollaborate(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"collaborate endpoint"}`))
 }
 
+func broadcastSSE(eventType string, data map[string]interface{}) {
+	event := SSEEvent{
+		Type:      eventType,
+		Data:      data,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	for client := range sseClients {
+		select {
+		case client <- event:
+		default:
+			log.Printf("SSE client buffer full, dropping event: %s", eventType)
+		}
+	}
+}
+
 func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Write([]byte("event: connected\ndata: {}\n\n"))
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	clientChan := make(chan SSEEvent, 10)
+	sseMu.Lock()
+	sseClients[clientChan] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, clientChan)
+		sseMu.Unlock()
+		close(clientChan)
+	}()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprintf(w, "event: connected\ndata: {}\n\n")
+	flusher.Flush()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-clientChan:
+			jsonData, _ := json.Marshal(event)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, string(jsonData))
+			flusher.Flush()
+		}
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
