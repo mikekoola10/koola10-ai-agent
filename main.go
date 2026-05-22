@@ -268,6 +268,11 @@ type VideoJob struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type ManagedSubscription struct {
+	Service     string  `json:"service"`
+	MonthlyCost float64 `json:"monthly_cost"`
+}
+
 // --- Global States ---
 
 var (
@@ -289,6 +294,7 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	subPath        = "/data/subscriptions.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -349,6 +355,21 @@ func main() {
 	if region == "" { region = "local" }
 	nodeID = os.Getenv("NODE_ID")
 	if nodeID == "" { h, _ := os.Hostname(); nodeID = h }
+
+	// Ensure local data directory works if /data is not writable
+	if _, err := os.Stat("/data"); os.IsNotExist(err) {
+		cachePath = "data/grants_cache.json"
+		appsDir = "data/applications"
+		memoryPath = "data/memory.json"
+		graphPath = "data/memory_graph.json"
+		semanticPath = "data/semantic_index.json"
+		auditPath = "data/audit_chain.jsonl"
+		usagePath = "data/usage.jsonl"
+		killSwitchPath = "data/kill_switch"
+		ledgerPath = "data/economic_ledger.json"
+		fundPath = "data/operational_fund.json"
+		subPath = "data/subscriptions.json"
+	}
 
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 	os.MkdirAll(appsDir, 0755)
@@ -466,6 +487,7 @@ func main() {
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
+	r.Post("/agent/log-subscription", corsMiddleware(handleLogSubscription))
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
@@ -1029,6 +1051,31 @@ func handleFinancialPaySubscription(w http.ResponseWriter, r *http.Request) {
 	}
 	fundManager.PaySubscription(req.Service, req.Amount)
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleLogSubscription(w http.ResponseWriter, r *http.Request) {
+	var sub ManagedSubscription
+	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	subMu.Lock()
+	defer subMu.Unlock()
+
+	var subs []ManagedSubscription
+	data, err := os.ReadFile(subPath)
+	if err == nil {
+		json.Unmarshal(data, &subs)
+	}
+	subs = append(subs, sub)
+	updated, _ := json.MarshalIndent(subs, "", "  ")
+	os.WriteFile(subPath, updated, 0644)
+
+	globalLedger.RecordCost("subscription", "managed_subscription", sub.MonthlyCost, "Logged subscription: "+sub.Service)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sub)
 }
 
 func handleFinancialReinvest(w http.ResponseWriter, r *http.Request) {
