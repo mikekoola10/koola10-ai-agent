@@ -268,6 +268,22 @@ type VideoJob struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type SSEEvent struct {
+	Type      string                 `json:"type"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp string                 `json:"timestamp"`
+}
+
+type CashAppRequest struct {
+	Cashtag string  `json:"cashtag"`
+	Amount  float64 `json:"amount"`
+}
+
+type PendingCashApp struct {
+	Request CashAppRequest
+	ID      string
+}
+
 type ManagedSubscription struct {
 	Service     string  `json:"service"`
 	MonthlyCost float64 `json:"monthly_cost"`
@@ -317,6 +333,11 @@ var (
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
+
+	sseClients    = make(map[chan SSEEvent]bool)
+	sseMu         sync.Mutex
+	pendingCashMu sync.Mutex
+	pendingCash   *PendingCashApp
 
 	rlBucket     = 15.0
 	rlMaxBucket  = 15.0
@@ -488,6 +509,8 @@ func main() {
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
 	r.Post("/agent/log-subscription", corsMiddleware(handleLogSubscription))
+	r.Post("/agent/send-to-cashapp", corsMiddleware(handleSendToCashApp))
+	r.Post("/voice/confirm", corsMiddleware(handleVoiceConfirm))
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
@@ -1078,6 +1101,87 @@ func handleLogSubscription(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(sub)
 }
 
+func handleSendToCashApp(w http.ResponseWriter, r *http.Request) {
+	var req CashAppRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	if req.Amount > 50.0 {
+		pendingCashMu.Lock()
+		id := generateID()
+		pendingCash = &PendingCashApp{Request: req, ID: id}
+		pendingCashMu.Unlock()
+
+		broadcastSSE(SSEEvent{
+			Type: "jarvis_notification",
+			Data: map[string]interface{}{
+				"message": fmt.Sprintf("Cash App payout of $%.2f to %s requires approval.", req.Amount, req.Cashtag),
+				"speak":   fmt.Sprintf("George, I have a Cash App payout of %.0f dollars to %s that needs your approval. Shall I proceed?", req.Amount, req.Cashtag),
+				"id":      id,
+			},
+			Timestamp: time.Now().Format(time.RFC3339),
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "pending_approval", "approval_id": id})
+		return
+	}
+
+	executeCashAppTransfer(w, req)
+}
+
+func executeCashAppTransfer(w http.ResponseWriter, req CashAppRequest) {
+	res := tools.RunTool("cashapp", map[string]interface{}{
+		"action":  "send_to_cashtag",
+		"cashtag": req.Cashtag,
+		"amount":  req.Amount,
+	})
+
+	if !res.Success {
+		http.Error(w, res.Error, 500)
+		return
+	}
+
+	globalLedger.RecordCost("cashapp", "cashapp_payout", req.Amount, "Cash App transfer to "+req.Cashtag)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res.Data)
+}
+
+func handleVoiceConfirm(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	if strings.ToLower(req.Command) == "proceed" || strings.ToLower(req.Command) == "yes" {
+		pendingCashMu.Lock()
+		if pendingCash == nil {
+			pendingCashMu.Unlock()
+			http.Error(w, "no pending transfer", 404)
+			return
+		}
+		p := *pendingCash
+		pendingCash = nil
+		pendingCashMu.Unlock()
+
+		broadcastSSE(SSEEvent{
+			Type: "jarvis_analysis",
+			Data: map[string]interface{}{"message": "Executing approved Cash App transfer..."},
+			Timestamp: time.Now().Format(time.RFC3339),
+		})
+
+		executeCashAppTransfer(w, p.Request)
+		return
+	}
+
+	http.Error(w, "command not recognized", 400)
+}
+
 func handleFinancialReinvest(w http.ResponseWriter, r *http.Request) {
 	fundManager.ReinvestSurplus(1000.0, 50.0) // Example default parameters
 	w.WriteHeader(http.StatusOK)
@@ -1638,7 +1742,46 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+
+	clientChan := make(chan SSEEvent, 10)
+	sseMu.Lock()
+	sseClients[clientChan] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, clientChan)
+		sseMu.Unlock()
+		close(clientChan)
+	}()
+
+	notify := r.Context().Done()
 	w.Write([]byte("event: connected\ndata: {}\n\n"))
+	f, _ := w.(http.Flusher)
+	f.Flush()
+
+	for {
+		select {
+		case event := <-clientChan:
+			b, _ := json.Marshal(event)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, string(b))
+			f.Flush()
+		case <-notify:
+			return
+		}
+	}
+}
+
+func broadcastSSE(event SSEEvent) {
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	for client := range sseClients {
+		select {
+		case client <- event:
+		default:
+			// Non-blocking send to prevent deadlocks
+		}
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {

@@ -31,8 +31,6 @@ browser_profile = BrowserProfile(
     headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
     disable_security=True,
 )
-# We'll create a new browser instance for each task to ensure clean state and session persistence within task
-# browser = Browser(config=browser_config)
 
 class NavigateRequest(BaseModel):
     url: str
@@ -44,6 +42,9 @@ class FormRequest(BaseModel):
 class ExtractRequest(BaseModel):
     url: str
     instruction: str
+
+class TaskRequest(BaseModel):
+    task: str
 
 class StripeKeysRequest(BaseModel):
     otp: Optional[str] = None
@@ -59,6 +60,35 @@ async def get_screenshot_base64(page):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+@app.post("/browser/task")
+async def execute_task(req: TaskRequest):
+    logger.info(f"Executing task: {req.task}")
+
+    browser = Browser(profile=browser_profile)
+    agent = Agent(
+        task=req.task,
+        llm=llm,
+        browser=browser,
+    )
+    result = await agent.run()
+
+    screenshot_b64 = ""
+    try:
+        context = (await browser.get_context())
+        page = await context.get_current_page()
+        if page:
+            screenshot = await page.screenshot()
+            screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Screenshot failed: {e}")
+
+    await browser.close()
+    return {
+        "status": "success",
+        "agent_result": str(result),
+        "screenshot": screenshot_b64
+    }
 
 @app.post("/browser/navigate")
 async def navigate(req: NavigateRequest):
@@ -77,11 +107,8 @@ async def navigate(req: NavigateRequest):
 @app.post("/browser/fill-form")
 async def fill_form(req: FormRequest):
     instructions = [f"Fill the field '{k}' with value '{v}'" for k, v in req.form_data.items()]
-    # Task includes returning a screenshot of the filled form.
-    # browser-use Agent can take screenshots, but to return it via API we need to capture it after the task.
     full_instruction = f"Go to {req.url}, " + ", ".join(instructions) + ". After filling everything, stay on the page so I can take a screenshot."
 
-    # Using a local browser instance to ensure we can capture the final state
     browser = Browser(profile=browser_profile)
     agent = Agent(
         task=full_instruction,
@@ -90,16 +117,8 @@ async def fill_form(req: FormRequest):
     )
     result = await agent.run()
 
-    # Capture screenshot from the same session
-    # browser-use manages sessions internally. We can access the playwright page via the browser instance.
-    playwright_browser = await browser.get_playwright_browser()
-    # This is slightly tricky as browser-use abstracts the page.
-    # Actually, browser-use Agent has a .run() that returns a result.
-    # Let's try to get the active page.
-
     screenshot_b64 = ""
     try:
-        # Get the underlying playwright page from the browser manager
         context = (await browser.get_context())
         page = await context.get_current_page()
         if page:
@@ -171,10 +190,9 @@ async def get_stripe_keys(req: StripeKeysRequest):
     logger.info(f"Starting Stripe key extraction for {email}")
 
     async with async_playwright() as p:
-        # Launch persistent context — saves cookies, localStorage, session tokens
         context = await p.chromium.launch_persistent_context(
             user_data_dir=PROFILE_DIR,
-            headless=os.getenv("BROWSER_HEADLESS", "false").lower() == "true",  # Default to False for Stripe
+            headless=os.getenv("BROWSER_HEADLESS", "false").lower() == "true",
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"],
             viewport={"width": 1280, "height": 800}
         )
@@ -182,16 +200,13 @@ async def get_stripe_keys(req: StripeKeysRequest):
         page.set_default_timeout(60000)
 
         try:
-            # Step 1: Check if already logged in or need login
             logger.info("Checking Stripe session...")
             await page.goto("https://dashboard.stripe.com/dashboard", wait_until="load")
 
-            # If redirected to login, we need to authenticate
             if "login" in page.url:
                 logger.info("Session expired or not found. Logging in...")
                 await page.goto("https://dashboard.stripe.com/login", wait_until="load")
 
-                # Dismiss cookies
                 try:
                     cookie_button = page.locator('button:has-text("Accept all"), button:has-text("Accept"), button:has-text("Reject non-essential")').first
                     if await cookie_button.is_visible(timeout=3000):
@@ -214,14 +229,12 @@ async def get_stripe_keys(req: StripeKeysRequest):
                 logger.info("Filling password...")
                 await password_field.fill(password)
 
-                # Click Sign in
                 submit_button = page.locator('button[type="submit"], button:has-text("Sign in")').first
                 await submit_button.click()
                 logger.info("Login submitted")
             else:
                 logger.info("Already logged in.")
 
-            # Step 2: Handle 2FA or dashboard redirect
             logger.info("Waiting for dashboard or 2FA...")
             success = False
             for _ in range(30):
@@ -230,7 +243,6 @@ async def get_stripe_keys(req: StripeKeysRequest):
                     success = True
                     break
 
-                # Check for 2FA markers
                 is_2fa = await page.get_by_text("Verification code").is_visible() or \
                          await page.locator('input[name="otp"]').is_visible() or \
                          await page.locator('input[id="otp"]').is_visible() or \
@@ -241,11 +253,10 @@ async def get_stripe_keys(req: StripeKeysRequest):
                         logger.info("OTP provided, filling...")
                         otp_field = page.locator('input[name="otp"], input[id="otp"]').first
                         await otp_field.fill(req.otp)
-                        # Usually it auto-submits, but let's check for a button just in case
                         submit_otp = page.locator('button:has-text("Continue"), button:has-text("Submit")').first
                         if await submit_otp.is_visible(timeout=2000):
                             await submit_otp.click()
-                        req.otp = None # Clear it so we don't try again if it fails
+                        req.otp = None
                         await asyncio.sleep(5)
                         continue
                     else:
@@ -257,7 +268,6 @@ async def get_stripe_keys(req: StripeKeysRequest):
                             "screenshot": screenshot
                         }
 
-                # Handle anti-bot challenge
                 if await page.get_by_text("Please drag the element").is_visible() or \
                    await page.get_by_text("Verify you are human").is_visible():
                     logger.info("Bot challenge detected")
@@ -269,7 +279,6 @@ async def get_stripe_keys(req: StripeKeysRequest):
                         "info": "Anti-bot challenge detected. Manual intervention required."
                     }
 
-                # Handle intermediate pages
                 if "select-account" in page.url:
                     logger.info("Account selection detected, picking first account...")
                     await page.locator('button').first.click()
@@ -289,11 +298,9 @@ async def get_stripe_keys(req: StripeKeysRequest):
                     "info": "Timed out waiting for dashboard. Screenshot attached."
                 }
 
-            # Step 3: Extract Secret Key
             logger.info("Navigating to API keys page...")
             await page.goto("https://dashboard.stripe.com/apikeys", wait_until="load")
 
-            # Look for the Reveal button in the Secret key row
             logger.info("Looking for secret key...")
             secret_key = None
             try:
@@ -313,7 +320,6 @@ async def get_stripe_keys(req: StripeKeysRequest):
             except Exception as e:
                 logger.error(f"Failed to find secret key: {e}")
 
-            # Step 4: Extract Webhook Secret
             logger.info("Navigating to Webhooks page...")
             await page.goto("https://dashboard.stripe.com/webhooks", wait_until="load")
 
