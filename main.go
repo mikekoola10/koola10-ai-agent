@@ -198,6 +198,7 @@ type Transaction struct {
 	Type        string  `json:"type"`
 	Category    string  `json:"category"`
 	Vertical    string  `json:"vertical,omitempty"`
+	Ecosystem   string  `json:"ecosystem,omitempty"`
 	Amount      float64 `json:"amount"`
 	Description string  `json:"description"`
 }
@@ -287,8 +288,10 @@ var (
 	auditPath      = "/data/audit_chain.jsonl"
 	usagePath      = "/data/usage.jsonl"
 	killSwitchPath = "/data/kill_switch"
-	ledgerPath     = "/data/economic_ledger.json"
-	fundPath       = "/data/operational_fund.json"
+	ledgerPath         = "data/economic_ledger.json"
+	fundPath           = "data/operational_fund.json"
+	stackingLedgerPath = "data/stacking_ledger.json"
+	stackingFundPath   = "data/stacking_fund.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -364,6 +367,23 @@ func main() {
 		for {
 			fundManager.PayFlyInvoice()
 			<-ticker.C
+		}
+	}()
+
+	// Activate Stacking Fund Pillars
+	go func() {
+		sl := agents.LoadStackingLedger(stackingLedgerPath)
+		tradingAgent := agents.NewTradingPoolAgent(sl)
+		affiliateAgent := agents.NewAffiliateSwarmAgent(sl)
+
+		tradingAgent.RunMomentumStrategy()
+		affiliateAgent.GenerateArticles()
+
+		ticker := time.NewTicker(1 * time.Hour)
+		for {
+			<-ticker.C
+			tradingAgent.RunMomentumStrategy()
+			affiliateAgent.GenerateArticles()
 		}
 	}()
 
@@ -463,6 +483,11 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+
+	r.Post("/{ecosystem}/{vertical}/start", corsMiddleware(handleEcosystemVerticalStart))
+	r.Post("/compare/ecosystems", corsMiddleware(handleCompareEcosystems))
+
+	r.Get("/stacking/dashboard", corsMiddleware(handleStackingDashboard))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
@@ -997,17 +1022,43 @@ func (l *EconomicLedger) Load() {
 	if err == nil { json.Unmarshal(data, l) }; if l.Transactions == nil { l.Transactions = []Transaction{} }
 }
 func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
-	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
+	l.RecordCostWithEcosystem("", vertical, category, amount, description)
 }
+
+func (l *EconomicLedger) RecordCostWithEcosystem(ecosystem, vertical, category string, amount float64, description string) {
+	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
+	l.Transactions = append(l.Transactions, Transaction{
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Type:        "cost",
+		Category:    category,
+		Vertical:    vertical,
+		Ecosystem:   ecosystem,
+		Amount:      amount,
+		Description: description,
+	})
+	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical, "ecosystem": ecosystem})
+}
+
 func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
 	l.RecordRevenueWithVertical("", amount, source)
 }
+
 func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
+	l.RecordRevenueWithEcosystem("", vertical, amount, source)
+}
+
+func (l *EconomicLedger) RecordRevenueWithEcosystem(ecosystem, vertical string, amount float64, source string) {
 	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+	l.Transactions = append(l.Transactions, Transaction{
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Type:        "revenue",
+		Category:    "revenue_split",
+		Vertical:    vertical,
+		Ecosystem:   ecosystem,
+		Amount:      amount,
+		Description: "Revenue: " + source,
+	})
+	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical, "ecosystem": ecosystem})
 }
 
 // --- Financial Handlers ---
@@ -1454,6 +1505,78 @@ func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
 		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
 	}
 	json.NewEncoder(w).Encode(report)
+}
+
+func handleEcosystemVerticalStart(w http.ResponseWriter, r *http.Request) {
+	ecosystem := chi.URLParam(r, "ecosystem")
+	vertical := chi.URLParam(r, "vertical")
+
+	validEcosystems := map[string]bool{"koola10": true, "oracle": true, "sentinel": true, "nexus": true, "rebel": true}
+	if !validEcosystems[strings.ToLower(ecosystem)] {
+		http.Error(w, "invalid ecosystem", 400)
+		return
+	}
+
+	// Logic to start the vertical in the specific ecosystem
+	// For now, we deploy the swarm if not already deployed
+	if err := globalSwarmManager.DeploySwarms(vertical, 10); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	globalLedger.RecordCostWithEcosystem(ecosystem, vertical, "ecosystem_start", 0.10, "Started vertical in ecosystem")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":    "started",
+		"ecosystem": ecosystem,
+		"vertical":  vertical,
+	})
+}
+
+func handleCompareEcosystems(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	ecosystems := []string{"koola10", "oracle", "sentinel", "nexus", "rebel"}
+	results := make(map[string]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, eco := range ecosystems {
+		wg.Add(1)
+		go func(e string) {
+			defer wg.Done()
+			// Simulate AI response for each ecosystem
+			resp := fmt.Sprintf("Analysis for %s: %s is performing optimally with the current swarm configuration.", e, e)
+			mu.Lock()
+			results[e] = resp
+			mu.Unlock()
+		}(eco)
+	}
+	wg.Wait()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
+func handleStackingDashboard(w http.ResponseWriter, r *http.Request) {
+	sl := agents.LoadStackingLedger(stackingLedgerPath)
+
+	fundData, _ := os.ReadFile(stackingFundPath)
+	var fundStatus interface{}
+	json.Unmarshal(fundData, &fundStatus)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ledger": sl,
+		"fund":   fundStatus,
+	})
 }
 
 func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {

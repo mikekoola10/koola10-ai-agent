@@ -48,16 +48,36 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 		return fmt.Errorf("no factory for vertical: %s", vertical)
 	}
 
-	agents := factory()
-	// If count is different from what factory produces, we might need to adjust,
-	// but for now we assume factory produces the right set or we scale it.
-	// The requirement says 10 agents for each.
-	sm.Swarms[vertical] = agents
+	existingAgents := sm.Swarms[vertical]
+
+	// Scaling logic: if count is more than existing, add more.
+	// For simplicity, if count > len(existingAgents), we add from factory
+	// until we reach count, or just append the whole factory set again if needed.
+	// The request says "add 5 more".
+
+	totalNeeded := count
+	if len(existingAgents) >= totalNeeded {
+		return nil // Already scaled
+	}
+
+	toAdd := totalNeeded - len(existingAgents)
+	for i := 0; i < toAdd; i++ {
+		// Re-run factory to get fresh instances if needed, or if factory returns a slice,
+		// we should ideally have a way to get one fresh agent.
+		// Since factories return []SpecialistAgent, we can just call it again
+		// and take what we need.
+		freshAgents := factory()
+		if len(freshAgents) > 0 {
+			existingAgents = append(existingAgents, freshAgents[i%len(freshAgents)])
+		}
+	}
+
+	sm.Swarms[vertical] = existingAgents
 
 	if sm.AuditLogger != nil {
 		sm.AuditLogger("swarm_deployed", map[string]interface{}{
 			"vertical": vertical,
-			"count":    len(agents),
+			"count":    len(existingAgents),
 		})
 	}
 
