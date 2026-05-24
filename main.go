@@ -422,6 +422,11 @@ func main() {
 	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
 	r.Post("/grants/check-status", corsMiddleware(handleCheckStatus))
 
+	r.Post("/services/grant/apply", corsMiddleware(handleApply))
+	r.Get("/services/leadgen/search", corsMiddleware(handleSearch))
+	r.Post("/services/compliance/check", corsMiddleware(handleAIAnalyzeGrant))
+	r.Post("/services/content/generate", corsMiddleware(handleStudioStyle))
+
 	r.Post("/payment/create-checkout", corsMiddleware(handleCreateCheckout))
 	r.Post("/stripe/webhook", handleStripeWebhook)
 
