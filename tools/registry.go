@@ -29,6 +29,16 @@ func RunTool(name string, payload map[string]interface{}) ToolResult {
 	return fn(payload)
 }
 
+func ListRegisteredTools() []string {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	var list []string
+	for name := range registry {
+		list = append(list, name)
+	}
+	return list
+}
+
 func HandleExecute(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

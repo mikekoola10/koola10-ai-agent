@@ -48,6 +48,9 @@ class ExtractRequest(BaseModel):
 class StripeKeysRequest(BaseModel):
     otp: Optional[str] = None
 
+class AuthImportRequest(BaseModel):
+    storage_state_b64: str
+
 async def get_screenshot_base64(page):
     try:
         screenshot = await page.screenshot()
@@ -144,6 +147,17 @@ async def submit_form(req: FormRequest):
         "confirmation": str(result),
         "screenshot": screenshot_b64
     }
+
+@app.post("/browser/auth/import")
+async def import_auth(req: AuthImportRequest):
+    try:
+        decoded = base64.b64decode(req.storage_state_b64).decode('utf-8')
+        state_path = os.path.join(PROFILE_DIR, "storage-state.json")
+        with open(state_path, "w") as f:
+            f.write(decoded)
+        return {"status": "success", "message": "Auth state imported"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/browser/extract")
 async def extract(req: ExtractRequest):

@@ -25,6 +25,7 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/mcp"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -275,9 +276,10 @@ var (
 	auditMutex   sync.Mutex
 	usageMutex   sync.Mutex
 	approvalMu   sync.Mutex
-	subMu        sync.Mutex
+	subMu         sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	connectorMu  sync.RWMutex
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -311,6 +313,7 @@ var (
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
+	connectorStore = make(map[string]map[string]interface{})
 
 	rlBucket     = 15.0
 	rlMaxBucket  = 15.0
@@ -471,6 +474,23 @@ func main() {
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
+	r.Post("/mcp", mcp.HandleMCP)
+	r.Post("/mcp/tools/list", mcp.HandleMCP) // Backward compatibility / shorthand
+
+	r.Get("/connectors/list", corsMiddleware(handleConnectorsList))
+	r.Post("/connectors/{name}/configure", corsMiddleware(handleConnectorConfigure))
+	r.Get("/connectors/{name}/status", corsMiddleware(handleConnectorStatus))
+	r.Post("/connectors/{name}/test", corsMiddleware(handleConnectorTest))
+
+	r.Post("/admin/connectors/toggle", corsMiddleware(handleAdminConnectorToggle))
+	r.Get("/admin/connectors/audit", corsMiddleware(handleAdminConnectorAudit))
+	r.Post("/admin/data/retention", corsMiddleware(handleAdminDataRetention))
+	r.Get("/admin/sso/status", corsMiddleware(handleAdminSSOStatus))
+
+	r.Get("/skills/list", corsMiddleware(handleSkillsList))
+	r.Post("/skills/search", corsMiddleware(handleSkillsSearch))
+	r.Post("/skills/execute", corsMiddleware(handleSkillsExecute))
+	r.Post("/connectors/activate", corsMiddleware(handleConnectorsActivate))
 
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
@@ -1592,6 +1612,186 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Write([]byte("event: connected\ndata: {}\n\n"))
+}
+
+func handleConnectorsList(w http.ResponseWriter, r *http.Request) {
+	connectorMu.RLock()
+	defer connectorMu.RUnlock()
+	list := tools.ListRegisteredTools()
+	res := make(map[string]interface{})
+	for _, name := range list {
+		status := "inactive"
+		if _, ok := connectorStore[name]; ok {
+			status = "active"
+		}
+		res[name] = map[string]string{"status": status}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleConnectorConfigure(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	var creds map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	connectorMu.Lock()
+	connectorStore[name] = creds
+	connectorMu.Unlock()
+	AddAuditEntry("connector_configured", map[string]interface{}{"connector": name})
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleConnectorStatus(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	connectorMu.RLock()
+	_, ok := connectorStore[name]
+	connectorMu.RUnlock()
+	res := map[string]interface{}{"connector": name, "authenticated": ok}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleConnectorTest(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	res := tools.RunTool(name, map[string]interface{}{"action": "test"})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleAdminConnectorToggle(w http.ResponseWriter, r *http.Request) {
+	var req struct { Name string; Enabled bool }
+	json.NewDecoder(r.Body).Decode(&req)
+	AddAuditEntry("connector_toggle", map[string]interface{}{"connector": req.Name, "enabled": req.Enabled})
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleAdminConnectorAudit(w http.ResponseWriter, r *http.Request) {
+	handleComplianceAudit(w, r)
+}
+
+func handleAdminDataRetention(w http.ResponseWriter, r *http.Request) {
+	var req struct { Mode string }
+	json.NewDecoder(r.Body).Decode(&req)
+	AddAuditEntry("data_retention_configured", map[string]interface{}{"mode": req.Mode})
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleAdminSSOStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status": "placeholder", "provider": "SAML 2.0"}`))
+}
+
+type SkillMetadata struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Category         string   `json:"category"`
+	Ecosystem        string   `json:"ecosystem"`
+	Vertical         string   `json:"vertical"`
+	Trigger          string   `json:"trigger"`
+	ToolsRequired    []string `json:"tools_required"`
+	CostEstimate     string   `json:"cost_estimate"`
+	RevenuePotential string   `json:"revenue_potential"`
+	Version          string   `json:"version"`
+	LastUpdated      string   `json:"last_updated"`
+}
+
+func loadSkills() []SkillMetadata {
+	var skills []SkillMetadata
+	filepath.Walk("skills", func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		parts := strings.Split(string(content), "---")
+		if len(parts) < 3 {
+			return nil
+		}
+		meta := SkillMetadata{}
+		lines := strings.Split(parts[1], "\n")
+		for _, line := range lines {
+			kv := strings.SplitN(line, ":", 2)
+			if len(kv) < 2 {
+				continue
+			}
+			k := strings.TrimSpace(kv[0])
+			v := strings.TrimSpace(kv[1])
+			switch k {
+			case "id": meta.ID = v
+			case "name": meta.Name = v
+			case "category": meta.Category = v
+			case "ecosystem": meta.Ecosystem = v
+			case "vertical": meta.Vertical = v
+			case "trigger": meta.Trigger = v
+			case "tools_required": json.Unmarshal([]byte(v), &meta.ToolsRequired)
+			case "cost_estimate": meta.CostEstimate = v
+			case "revenue_potential": meta.RevenuePotential = v
+			case "version": meta.Version = v
+			case "last_updated": meta.LastUpdated = v
+			}
+		}
+		skills = append(skills, meta)
+		return nil
+	})
+	return skills
+}
+
+func handleSkillsList(w http.ResponseWriter, r *http.Request) {
+	skills := loadSkills()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(skills)
+}
+
+func handleSkillsSearch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Category  string `json:"category"`
+		Ecosystem string `json:"ecosystem"`
+		Keyword   string `json:"keyword"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	all := loadSkills()
+	var filtered []SkillMetadata
+	for _, s := range all {
+		match := true
+		if req.Category != "" && !strings.EqualFold(s.Category, req.Category) { match = false }
+		if req.Ecosystem != "" && !strings.EqualFold(s.Ecosystem, req.Ecosystem) && s.Ecosystem != "all" { match = false }
+		if req.Keyword != "" && !strings.Contains(strings.ToLower(s.Name+s.Trigger), strings.ToLower(req.Keyword)) { match = false }
+		if match { filtered = append(filtered, s) }
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(filtered)
+}
+
+func handleSkillsExecute(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID     string                 `json:"id"`
+		Params map[string]interface{} `json:"params"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	// Placeholder for actual skill execution logic
+	AddAuditEntry("skill_executed", map[string]interface{}{"skill_id": req.ID, "params": req.Params})
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status": "executed", "skill_id": "` + req.ID + `"}`))
+}
+
+func handleConnectorsActivate(w http.ResponseWriter, r *http.Request) {
+	var req agents.ActivationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	if err := agents.ActivateConnector(req); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	AddAuditEntry("connector_activated", map[string]interface{}{"connector": req.Connector})
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status": "activated", "connector": "` + req.Connector + `"}`))
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {

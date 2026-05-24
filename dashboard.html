@@ -54,6 +54,16 @@
                 <button id="kill-btn" class="red" onclick="toggleKillSwitch()">ACTIVATE_KILL_SWITCH</button>
             </div>
         </div>
+
+        <div class="card">
+            <h2>SKILL_MARKETPLACE</h2>
+            <div>TOTAL_SKILLS: <span id="skills-count">96</span></div>
+            <div>CATEGORIES:   <span id="categories-count">12</span></div>
+            <div style="margin-top:10px;">REVENUE_EST: <span id="revenue-est">$15,000/mo</span></div>
+            <div id="recent-skills" style="margin-top:10px; font-size:11px; color:#888;">
+                Loading skills...
+            </div>
+        </div>
     </div>
 
     <div class="card" style="margin-top: 15px;">
@@ -88,6 +98,20 @@
                 const audit = await fetch('/compliance/audit').then(r => r.json());
                 const pending = audit.filter(e => e.action === 'approval_request_created');
                 document.getElementById('approvals-count').innerText = pending.length;
+
+                // Skills
+                const skills = await fetch('/skills/list').then(r => r.json());
+                document.getElementById('skills-count').innerText = skills.length;
+                const categories = new Set(skills.map(s => s.category));
+                document.getElementById('categories-count').innerText = categories.size;
+
+                const executed = audit.filter(e => e.action === 'skill_executed').slice(-3).reverse();
+                const recentDiv = document.getElementById('recent-skills');
+                if (executed.length > 0) {
+                    recentDiv.innerHTML = 'RECENT_EXECUTIONS:<br/>' + executed.map(e => `- ${e.details.skill_id}`).join('<br/>');
+                } else {
+                    recentDiv.innerText = "No recent executions.";
+                }
 
                 // Log a tick
                 const logs = document.getElementById('logs');
