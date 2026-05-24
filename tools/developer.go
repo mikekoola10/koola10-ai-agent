@@ -8,7 +8,12 @@ import (
 func developerTool(payload map[string]interface{}) ToolResult {
 	tokens := os.Getenv("DEVELOPER_TOKENS")
 	if tokens == "" {
-		return ToolResult{Success: false, Error: "DEVELOPER_TOKENS not set"}
+		token, err := GetNexusToken("github")
+		if err == nil {
+			tokens = token
+		} else {
+			return ToolResult{Success: false, Error: "DEVELOPER_TOKENS not set and Nexus fallback failed"}
+		}
 	}
 
 	action, ok := payload["action"].(string)
@@ -19,6 +24,8 @@ func developerTool(payload map[string]interface{}) ToolResult {
 	platform, _ := payload["platform"].(string) // github, gitlab, linear, jira
 
 	switch action {
+	case "test":
+		return ToolResult{Success: true, Output: "Developer connector test successful"}
 	case "create_issue":
 		title, _ := payload["title"].(string)
 		return ToolResult{

@@ -8,7 +8,13 @@ import (
 func communicationTool(payload map[string]interface{}) ToolResult {
 	creds := os.Getenv("COMMUNICATION_CREDENTIALS")
 	if creds == "" {
-		return ToolResult{Success: false, Error: "COMMUNICATION_CREDENTIALS not set"}
+		// Try MachineAuth fallback
+		token, err := GetMachineAuthToken("communication-agent")
+		if err == nil {
+			creds = token
+		} else {
+			return ToolResult{Success: false, Error: "COMMUNICATION_CREDENTIALS not set and MachineAuth failed"}
+		}
 	}
 
 	action, ok := payload["action"].(string)

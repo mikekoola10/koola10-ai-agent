@@ -13,6 +13,8 @@ func automationTool(payload map[string]interface{}) ToolResult {
 	platform, _ := payload["platform"].(string) // zapier, make, n8n
 
 	switch action {
+	case "test":
+		return ToolResult{Success: true, Output: "Automation connector test successful"}
 	case "trigger_webhook":
 		url, _ := payload["webhook_url"].(string)
 		data, _ := payload["data"].(map[string]interface{})

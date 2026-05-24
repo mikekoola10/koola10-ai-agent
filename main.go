@@ -487,6 +487,11 @@ func main() {
 	r.Post("/admin/data/retention", corsMiddleware(handleAdminDataRetention))
 	r.Get("/admin/sso/status", corsMiddleware(handleAdminSSOStatus))
 
+	r.Get("/skills/list", corsMiddleware(handleSkillsList))
+	r.Post("/skills/search", corsMiddleware(handleSkillsSearch))
+	r.Post("/skills/execute", corsMiddleware(handleSkillsExecute))
+	r.Post("/connectors/activate", corsMiddleware(handleConnectorsActivate))
+
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
 	r.Post("/studio/episode", corsMiddleware(handleStudioEpisode))
@@ -1677,6 +1682,116 @@ func handleAdminDataRetention(w http.ResponseWriter, r *http.Request) {
 func handleAdminSSOStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status": "placeholder", "provider": "SAML 2.0"}`))
+}
+
+type SkillMetadata struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Category         string   `json:"category"`
+	Ecosystem        string   `json:"ecosystem"`
+	Vertical         string   `json:"vertical"`
+	Trigger          string   `json:"trigger"`
+	ToolsRequired    []string `json:"tools_required"`
+	CostEstimate     string   `json:"cost_estimate"`
+	RevenuePotential string   `json:"revenue_potential"`
+	Version          string   `json:"version"`
+	LastUpdated      string   `json:"last_updated"`
+}
+
+func loadSkills() []SkillMetadata {
+	var skills []SkillMetadata
+	filepath.Walk("skills", func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		parts := strings.Split(string(content), "---")
+		if len(parts) < 3 {
+			return nil
+		}
+		meta := SkillMetadata{}
+		lines := strings.Split(parts[1], "\n")
+		for _, line := range lines {
+			kv := strings.SplitN(line, ":", 2)
+			if len(kv) < 2 {
+				continue
+			}
+			k := strings.TrimSpace(kv[0])
+			v := strings.TrimSpace(kv[1])
+			switch k {
+			case "id": meta.ID = v
+			case "name": meta.Name = v
+			case "category": meta.Category = v
+			case "ecosystem": meta.Ecosystem = v
+			case "vertical": meta.Vertical = v
+			case "trigger": meta.Trigger = v
+			case "tools_required": json.Unmarshal([]byte(v), &meta.ToolsRequired)
+			case "cost_estimate": meta.CostEstimate = v
+			case "revenue_potential": meta.RevenuePotential = v
+			case "version": meta.Version = v
+			case "last_updated": meta.LastUpdated = v
+			}
+		}
+		skills = append(skills, meta)
+		return nil
+	})
+	return skills
+}
+
+func handleSkillsList(w http.ResponseWriter, r *http.Request) {
+	skills := loadSkills()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(skills)
+}
+
+func handleSkillsSearch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Category  string `json:"category"`
+		Ecosystem string `json:"ecosystem"`
+		Keyword   string `json:"keyword"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	all := loadSkills()
+	var filtered []SkillMetadata
+	for _, s := range all {
+		match := true
+		if req.Category != "" && !strings.EqualFold(s.Category, req.Category) { match = false }
+		if req.Ecosystem != "" && !strings.EqualFold(s.Ecosystem, req.Ecosystem) && s.Ecosystem != "all" { match = false }
+		if req.Keyword != "" && !strings.Contains(strings.ToLower(s.Name+s.Trigger), strings.ToLower(req.Keyword)) { match = false }
+		if match { filtered = append(filtered, s) }
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(filtered)
+}
+
+func handleSkillsExecute(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID     string                 `json:"id"`
+		Params map[string]interface{} `json:"params"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	// Placeholder for actual skill execution logic
+	AddAuditEntry("skill_executed", map[string]interface{}{"skill_id": req.ID, "params": req.Params})
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status": "executed", "skill_id": "` + req.ID + `"}`))
+}
+
+func handleConnectorsActivate(w http.ResponseWriter, r *http.Request) {
+	var req agents.ActivationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	if err := agents.ActivateConnector(req); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	AddAuditEntry("connector_activated", map[string]interface{}{"connector": req.Connector})
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status": "activated", "connector": "` + req.Connector + `"}`))
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {

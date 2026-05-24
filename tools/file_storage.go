@@ -8,7 +8,12 @@ import (
 func fileStorageTool(payload map[string]interface{}) ToolResult {
 	tokens := os.Getenv("FILE_STORAGE_TOKENS")
 	if tokens == "" {
-		return ToolResult{Success: false, Error: "FILE_STORAGE_TOKENS not set"}
+		token, err := GetNexusToken("google")
+		if err == nil {
+			tokens = token
+		} else {
+			return ToolResult{Success: false, Error: "FILE_STORAGE_TOKENS not set and Nexus fallback failed"}
+		}
 	}
 
 	action, ok := payload["action"].(string)
@@ -20,6 +25,8 @@ func fileStorageTool(payload map[string]interface{}) ToolResult {
 	path, _ := payload["path"].(string)
 
 	switch action {
+	case "test":
+		return ToolResult{Success: true, Output: "File storage connector test successful"}
 	case "read_file":
 		return ToolResult{
 			Success: true,

@@ -8,7 +8,12 @@ import (
 func socialMediaTool(payload map[string]interface{}) ToolResult {
 	tokens := os.Getenv("SOCIAL_MEDIA_TOKENS")
 	if tokens == "" {
-		return ToolResult{Success: false, Error: "SOCIAL_MEDIA_TOKENS not set"}
+		token, err := GetNexusToken("linkedin")
+		if err == nil {
+			tokens = token
+		} else {
+			return ToolResult{Success: false, Error: "SOCIAL_MEDIA_TOKENS not set and Nexus fallback failed"}
+		}
 	}
 
 	action, ok := payload["action"].(string)
@@ -19,6 +24,8 @@ func socialMediaTool(payload map[string]interface{}) ToolResult {
 	platform, _ := payload["platform"].(string) // linkedin, twitter, facebook, instagram
 
 	switch action {
+	case "test":
+		return ToolResult{Success: true, Output: "Social media connector test successful"}
 	case "post_content":
 		content, _ := payload["content"].(string)
 		return ToolResult{

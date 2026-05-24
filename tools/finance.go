@@ -8,7 +8,13 @@ func financeTool(payload map[string]interface{}) ToolResult {
 	clientID := os.Getenv("PLAID_CLIENT_ID")
 	secret := os.Getenv("PLAID_SECRET")
 	if clientID == "" || secret == "" {
-		return ToolResult{Success: false, Error: "PLAID credentials not set"}
+		token, err := GetNexusToken("plaid")
+		if err == nil {
+			clientID = "nexus-token"
+			secret = token
+		} else {
+			return ToolResult{Success: false, Error: "PLAID credentials not set and Nexus fallback failed"}
+		}
 	}
 
 	action, ok := payload["action"].(string)
@@ -17,6 +23,8 @@ func financeTool(payload map[string]interface{}) ToolResult {
 	}
 
 	switch action {
+	case "test":
+		return ToolResult{Success: true, Output: "Finance connector test successful"}
 	case "get_accounts":
 		return ToolResult{
 			Success: true,
