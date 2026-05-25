@@ -26,6 +26,8 @@ func binanceTool(payload map[string]interface{}) ToolResult {
 
 	client := &http.Client{}
 
+	// IMPORTANT: This tool is currently locked to Paper Trading mode.
+	// Live trading (real funds) must be manually activated and is not automated.
 	switch action {
 	case "get_price":
 		resp, err := http.Get(fmt.Sprintf("https://api.binance.com/api/v3/ticker/price?symbol=%s", symbol))

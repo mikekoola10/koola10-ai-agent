@@ -1088,6 +1088,8 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleEcosystemTrading(w http.ResponseWriter, r *http.Request, ecosystem string, systemPrompt string, agentName string) {
+	// IMPORTANT: Live trading is NOT automated. This function only executes paper trades.
+	// Manual activation is required for real-fund transactions.
 	// Use the binance tool for paper trading at real market prices
 	res := tools.RunTool("binance", map[string]interface{}{
 		"action": "paper_trade",
