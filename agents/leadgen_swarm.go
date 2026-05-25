@@ -22,7 +22,11 @@ func (a *LeadGenAgent) Run(task string) (interface{}, error) {
 	os.WriteFile(filepath.Join(dir, filename), []byte(content), 0644)
 
 	a.status = StatusCompleted
-	return "Leads generated in " + filename, nil
+	return map[string]interface{}{
+		"status": "success",
+		"message": "Leads generated in " + filename,
+		"value": 450.0, // Estimated value of qualified leads
+	}, nil
 }
 
 func (a *LeadGenAgent) Status() AgentStatus { return a.status }

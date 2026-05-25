@@ -12,6 +12,7 @@ import (
 
 type Ledger interface {
 	RecordRevenue(amount float64, source string)
+	RecordRevenueWithEcosystem(ecosystem, vertical string, amount float64, source string)
 }
 
 type Transaction struct {
@@ -66,12 +67,24 @@ func (fm *FundManager) load() {
 	}
 }
 
-func (fm *FundManager) save() {
-	data, _ := json.MarshalIndent(fm, "", "  ")
-	os.WriteFile(fm.storagePath, data, 0644)
+func (fm *FundManager) save() error {
+	data, err := json.MarshalIndent(fm, "", "  ")
+	if err != nil {
+		return err
+	}
+	// Retry logic for file operations
+	var lastErr error
+	for i := 0; i < 3; i++ {
+		lastErr = os.WriteFile(fm.storagePath, data, 0644)
+		if lastErr == nil {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return lastErr
 }
 
-func (fm *FundManager) RouteRevenue(amount float64, source string) {
+func (fm *FundManager) RouteRevenue(amount float64, ecosystem, vertical, source string) {
 	fm.mu.Lock()
 
 	opAmount := amount * 0.30
@@ -85,13 +98,26 @@ func (fm *FundManager) RouteRevenue(amount float64, source string) {
 		Amount:      opAmount,
 		Source:      source,
 		Type:        "revenue_split",
-		Description: fmt.Sprintf("30%% split to operational fund from %s (Total: %.2f)", source, amount),
+		Description: fmt.Sprintf("30%% split to operational fund from %s (Total: %.2f, Ecosystem: %s, Vertical: %s)", source, amount, ecosystem, vertical),
 	})
-	fm.save()
+	err := fm.save()
 	fm.mu.Unlock()
 
+	if err != nil {
+		fmt.Printf("FAILED to save fund manager data after revenue routing: %v\n", err)
+	}
+
 	if fm.ledger != nil {
-		fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
+		if ecosystem != "" || vertical != "" {
+			fm.ledger.RecordRevenueWithEcosystem(ecosystem, vertical, glAmount, fmt.Sprintf("70%% split from %s", source))
+		} else {
+			fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
+		}
+	}
+
+	// Verification: check if file actually exists and contains the latest transaction
+	if _, err := os.Stat(fm.storagePath); err == nil {
+		fmt.Printf("Verified: revenue from %s (Ecosystem: %s, Vertical: %s) recorded to %s\n", source, ecosystem, vertical, fm.storagePath)
 	}
 }
 

@@ -27,6 +27,7 @@ type SwarmManager struct {
 	// Callbacks for logging to economic ledger and compliance audit
 	AuditLogger func(action string, details map[string]interface{})
 	LedgerLogger func(vertical, category string, amount float64, description string)
+	RevenueLogger func(amount float64, ecosystem, vertical, source string)
 
 	// Factory for creating agents for a vertical
 	Factories map[string]func() []SpecialistAgent
@@ -65,6 +66,10 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 }
 
 func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{}, error) {
+	return sm.DispatchTaskWithEcosystem("", vertical, task)
+}
+
+func (sm *SwarmManager) DispatchTaskWithEcosystem(ecosystem, vertical, task string) (interface{}, error) {
 	sm.Mu.Lock()
 	agents, ok := sm.Swarms[vertical]
 
@@ -93,6 +98,7 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 
 	if sm.AuditLogger != nil {
 		sm.AuditLogger("task_executed", map[string]interface{}{
+			"ecosystem": ecosystem,
 			"vertical":  vertical,
 			"specialty": target.Specialty(),
 			"task":      task,
@@ -103,6 +109,18 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 	if sm.LedgerLogger != nil {
 		// Log a nominal cost for agent execution
 		sm.LedgerLogger(vertical, "swarm_execution", 0.05, fmt.Sprintf("Executed task in %s: %s", vertical, target.Specialty()))
+	}
+
+	// Check for revenue in result
+	if err == nil && sm.RevenueLogger != nil {
+		if resMap, ok := result.(map[string]interface{}); ok {
+			if profit, ok := resMap["profit"].(float64); ok && profit > 0 {
+				sm.RevenueLogger(profit, ecosystem, vertical, fmt.Sprintf("%s agent (%s) success", vertical, target.Specialty()))
+			} else if value, ok := resMap["value"].(float64); ok && value > 0 {
+				// Estimated value for leadgen/grant
+				sm.RevenueLogger(value, ecosystem, vertical, fmt.Sprintf("%s agent (%s) value generation", vertical, target.Specialty()))
+			}
+		}
 	}
 
 	return result, err
