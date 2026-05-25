@@ -470,6 +470,38 @@ func main() {
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
 
+	// --- Ecosystem Trading Endpoints ---
+
+	// Koola10 Trading — Sterling (Aggressive, high-growth)
+	r.Post("/koola10/trading/start", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		systemPrompt := "You are Sterling, the aggressive growth engine of the Koola10 ecosystem. You seek maximum alpha through high-leverage momentum plays and volatility harvesting. You are comfortable with high drawdowns if the expected value is positive. You move fast and break things."
+		handleEcosystemTrading(w, r, "koola10", systemPrompt, "Sterling")
+	}))
+
+	// Oracle Trading — Sable (Conservative, risk-averse)
+	r.Post("/oracle/trading/start", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		systemPrompt := "You are Sable, the conservative wealth-builder of the Oracle ecosystem. You prioritize capital preservation over aggressive growth. You favor low-risk, steady-return strategies. You never chase momentum and always size positions conservatively (max 1% risk per trade)."
+		handleEcosystemTrading(w, r, "oracle", systemPrompt, "Sable")
+	}))
+
+	// Sentinel Trading — Fiducia (Ethical, trust-focused)
+	r.Post("/sentinel/trading/start", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		systemPrompt := "You are Fiducia, the ethical fiduciary of the Sentinel ecosystem. You only trade assets that align with long-term societal value. You avoid meme coins, environmentally harmful projects, and anything with governance red flags. You prioritize transparency and would rather miss a trade than compromise principles."
+		handleEcosystemTrading(w, r, "sentinel", systemPrompt, "Fiducia")
+	}))
+
+	// Nexus Trading — Quantum (Algorithmic, data-driven)
+	r.Post("/nexus/trading/start", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		systemPrompt := "You are Quantum, the algorithmic trader of the Nexus ecosystem. You process every market signal simultaneously, finding patterns invisible to others. You use quantitative models, statistical arbitrage, and multi-timeframe analysis. You think in probabilities, not certainties."
+		handleEcosystemTrading(w, r, "nexus", systemPrompt, "Quantum")
+	}))
+
+	// Rebel Trading — Maverick (Contrarian, high-conviction)
+	r.Post("/rebel/trading/start", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		systemPrompt := "You are Maverick, the contrarian trader of the Rebel ecosystem. You bet against consensus. When everyone's buying, you're selling. When everyone's fleeing, you're buying. You care about being right, not being liked. You run high-conviction, concentrated positions."
+		handleEcosystemTrading(w, r, "rebel", systemPrompt, "Maverick")
+	}))
+
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
@@ -1053,6 +1085,34 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	}
 	fundManager.RouteRevenue(req.Profit, "trading")
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleEcosystemTrading(w http.ResponseWriter, r *http.Request, ecosystem string, systemPrompt string, agentName string) {
+	// Use the binance tool for paper trading at real market prices
+	res := tools.RunTool("binance", map[string]interface{}{
+		"action": "paper_trade",
+		"symbol": "BTCUSDT",
+		"side":   "buy",
+		"amount": 0.01,
+	})
+
+	if !res.Success {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, res.Error), http.StatusInternalServerError)
+		return
+	}
+
+	tradeData := res.Data.(map[string]interface{})
+	tradeData["ecosystem"] = ecosystem
+	tradeData["agent"] = agentName
+	tradeData["mode"] = "paper_trade"
+	tradeData["timestamp"] = time.Now().UTC().Format(time.RFC3339)
+	tradeData["personality"] = systemPrompt
+
+	// Log the trade to the economic ledger
+	fundManager.RouteRevenue(0, "trading") // triggers recording of the trade event
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tradeData)
 }
 
 func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {

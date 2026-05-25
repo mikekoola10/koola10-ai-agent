@@ -11,10 +11,10 @@ type TradingAgent struct {
 
 func (a *TradingAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
-	// Use existing crypto tool for paper trading
-	res := tools.RunTool("crypto", map[string]interface{}{
-		"action": "price",
-		"symbol": "BTC",
+	// Use the new binance tool for real market data in paper trading mode
+	res := tools.RunTool("binance", map[string]interface{}{
+		"action": "get_price",
+		"symbol": "BTCUSDT",
 	})
 
 	a.status = StatusCompleted
