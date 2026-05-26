@@ -1238,7 +1238,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 
 	ecosystem := os.Getenv("ECOSYSTEM")
 	if ecosystem == "" {
-		ecosystem = "KOOLA10"
+		ecosystem = "ORACLE"
 	}
 
 	systemPrompt := "You are Koola10, an autonomous AI agent."
