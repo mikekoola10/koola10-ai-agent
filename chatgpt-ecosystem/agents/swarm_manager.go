@@ -108,8 +108,10 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 		sm.LedgerLogger(vertical, "swarm_execution", 0.05, fmt.Sprintf("Executed task in %s: %s", vertical, target.Specialty()))
 	}
 
-	if err == nil && sm.ProactiveTrigger != nil && vertical == "leadgen" {
-		sm.ProactiveTrigger("lead_found", fmt.Sprintf("Success! My lead generation swarm just identified several high-potential leads for the %s vertical.", vertical), "Nova")
+	if err == nil && sm.ProactiveTrigger != nil && (vertical == "leadgen" || vertical == "leadgen_vega") {
+		agent := "Nova"
+		if vertical == "leadgen_vega" { agent = "Vega" }
+		sm.ProactiveTrigger("lead_found", fmt.Sprintf("Success! My lead generation swarm just identified several high-potential leads for the %s vertical.", vertical), agent)
 	}
 
 	return result, err

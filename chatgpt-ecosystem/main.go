@@ -532,7 +532,7 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	systemPrompt := "You are the Lorekeeper of the Koola10 cinematic universe. Answer questions about characters, magic systems, and universe rules. Magic is based on Emergent Resonance. Tone is gritty but hopeful. Main characters include Kaelen and Lyra."
+	systemPrompt := "You are the Lorekeeper of the Oracle cinematic universe. Answer questions about characters, magic systems, and universe rules. Magic is based on Emergent Resonance. Tone is gritty but hopeful. Main characters include Kaelen and Lyra."
 
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
@@ -592,7 +592,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	systemPrompt := "Generate Koola10 style rules (Boondocks + 4K realism) and convert the scene into an Emergent Video prompt. Return JSON with 'style_rules' and 'prompt'."
+	systemPrompt := "Generate Oracle style rules (Boondocks + 4K realism) and convert the scene into an Emergent Video prompt. Return JSON with 'style_rules' and 'prompt'."
 
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
@@ -1321,7 +1321,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 	globalConvMemory.Save()
 
-	systemPrompt := "You are Koola10, an autonomous grant agent."
+	systemPrompt := "You are Oracle, an autonomous grant agent."
 	if globalConvMemory.State.ConversationHistorySummary != "" {
 		systemPrompt += " Previous conversation summary: " + globalConvMemory.State.ConversationHistorySummary
 	}
@@ -1731,11 +1731,11 @@ func handleGroupChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Orchestrator decides relevant agents
-	orchPrompt := `As the Koola10 Orchestrator, identify the most relevant agents for the following user message: "` + req.Prompt + `".
-	Available agents: Sterling (Finance/Banter), Nova (Networking), Aria (Creative/Lore), Forge (Tech/Infra), Sable (Conservative Finance), Vega (Enterprise Strategy).
+	orchPrompt := `As the Oracle Orchestrator, identify the most relevant agents for the following user message: "` + req.Prompt + `".
+	Available agents: Sable (Finance/Conservative), Vega (Strategy/Business), Aria (Creative/Lore), Forge (Tech/Infra), Muse (Critique/Art), Atlas (Systems/Efficiency).
 	Return a comma-separated list of agent names.`
 
-	agentsStr, _, err := performAIChat("You are the Koola10 Orchestrator.", orchPrompt)
+	agentsStr, _, err := performAIChat("You are the Oracle Orchestrator.", orchPrompt)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -1766,7 +1766,7 @@ func handleGroupChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleIdleChat(w http.ResponseWriter, r *http.Request) {
-	agents := []string{"Sterling", "Nova", "Aria", "Forge", "Sable", "Vega"}
+	agents := []string{"Sable", "Vega", "Aria", "Forge", "Muse", "Atlas"}
 	agentName := agents[time.Now().UnixNano()%int64(len(agents))]
 	personaPrompt := getPersonaPrompt(agentName) + " Engage in casual conversation based on your personality."
 
@@ -1794,15 +1794,19 @@ func getPersonaPrompt(agentName string) string {
 		return "You are Sable, a specialist in conservative finance and long-term wealth building. You emphasize risk management and steady growth."
 	case "Vega":
 		return "You are Vega, a polished, enterprise-grade business persona who focuses on high-level strategy and corporate governance."
+	case "Muse":
+		return "You are Muse, a critical yet inspiring agent focused on artistic refinement and creative critique."
+	case "Atlas":
+		return "You are Atlas, a global scale architect focused on systemic efficiency and resource management."
 	default:
-		return "You are a Koola10 agent."
+		return "You are a Oracle agent."
 	}
 }
 
 func handleVoiceUserSpeaking(w http.ResponseWriter, r *http.Request) {
 	backchannels := []string{"mm-hmm", "I see", "go on", "interesting", "right"}
 	b := backchannels[time.Now().UnixNano()%int64(len(backchannels))]
-	broadcastSSE(SSEEvent{Type: "backchannel", Content: b, Agent: "Sterling"})
+	broadcastSSE(SSEEvent{Type: "backchannel", Content: b, Agent: "Sable"})
 	w.WriteHeader(http.StatusOK)
 }
 
