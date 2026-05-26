@@ -3,7 +3,7 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'koola10-stacking'
+app = "chatgpt-oracle"
 primary_region = 'ams'
 
 [build]
@@ -12,7 +12,7 @@ primary_region = 'ams'
   PORT = '8080'
 
 [processes]
-  app = './agent'
+  app = "chatgpt-oracle"
 
 [[mounts]]
   source = 'metaclaw_data'
