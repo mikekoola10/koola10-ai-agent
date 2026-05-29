@@ -290,6 +290,7 @@ type Transaction struct {
 	Type        string  `json:"type"`
 	Category    string  `json:"category"`
 	Vertical    string  `json:"vertical,omitempty"`
+	Ecosystem   string  `json:"ecosystem,omitempty"`
 	Amount      float64 `json:"amount"`
 	Description string  `json:"description"`
 }
@@ -360,6 +361,12 @@ type VideoJob struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type SSEEvent struct {
+	Type      string                 `json:"type"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp string                 `json:"timestamp"`
+}
+
 // --- Global States ---
 
 var (
@@ -368,8 +375,11 @@ var (
 	usageMutex   sync.Mutex
 	approvalMu   sync.Mutex
 	subMu        sync.Mutex
+	sseMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+
+	sseClients = make(map[chan SSEEvent]bool)
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -436,11 +446,33 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 func main() {
 	port := os.Getenv("PORT")
-	if port == "" { port = "8080" }
+	if port == "" {
+		port = "8080"
+	}
 	region = os.Getenv("FLY_REGION")
-	if region == "" { region = "local" }
+	if region == "" {
+		region = "local"
+	}
 	nodeID = os.Getenv("NODE_ID")
-	if nodeID == "" { h, _ := os.Hostname(); nodeID = h }
+	if nodeID == "" {
+		h, _ := os.Hostname()
+		nodeID = h
+	}
+
+	// Runtime path check for local sandbox
+	if _, err := os.Stat("/data"); os.IsNotExist(err) {
+		log.Println("Global /data not found, falling back to local data/")
+		cachePath = "data/grants_cache.json"
+		appsDir = "data/applications"
+		memoryPath = "data/memory.json"
+		graphPath = "data/memory_graph.json"
+		semanticPath = "data/semantic_index.json"
+		auditPath = "data/audit_chain.jsonl"
+		usagePath = "data/usage.jsonl"
+		killSwitchPath = "data/kill_switch"
+		ledgerPath = "data/economic_ledger.json"
+		fundPath = "data/operational_fund.json"
+	}
 
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 	os.MkdirAll(appsDir, 0755)
@@ -504,6 +536,7 @@ func main() {
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
+	r.Post("/{ecosystem}/{vertical}/start", corsMiddleware(handleEcosystemVerticalStart))
 
 	r.Get("/grants/search", corsMiddleware(handleSearch))
 	r.Post("/grants/apply", corsMiddleware(handleApply))
@@ -1026,17 +1059,43 @@ func (l *EconomicLedger) Load() {
 	if err == nil { json.Unmarshal(data, l) }; if l.Transactions == nil { l.Transactions = []Transaction{} }
 }
 func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
+	l.RecordCostWithEcosystem("", vertical, category, amount, description)
+}
+
+func (l *EconomicLedger) RecordCostWithEcosystem(ecosystem, vertical, category string, amount float64, description string) {
 	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
+	l.Transactions = append(l.Transactions, Transaction{
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Type:        "cost",
+		Category:    category,
+		Vertical:    vertical,
+		Ecosystem:   ecosystem,
+		Amount:      amount,
+		Description: description,
+	})
+	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical, "ecosystem": ecosystem})
 }
+
 func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
-	l.RecordRevenueWithVertical("", amount, source)
+	l.RecordRevenueWithEcosystem("", "", amount, source)
 }
+
 func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
+	l.RecordRevenueWithEcosystem("", vertical, amount, source)
+}
+
+func (l *EconomicLedger) RecordRevenueWithEcosystem(ecosystem, vertical string, amount float64, source string) {
 	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+	l.Transactions = append(l.Transactions, Transaction{
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Type:        "revenue",
+		Category:    "revenue_split",
+		Vertical:    vertical,
+		Ecosystem:   ecosystem,
+		Amount:      amount,
+		Description: "Revenue: " + source,
+	})
+	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical, "ecosystem": ecosystem})
 }
 
 // --- Financial Handlers ---
@@ -1084,6 +1143,121 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleEcosystemVerticalStart(w http.ResponseWriter, r *http.Request) {
+	ecosystem := chi.URLParam(r, "ecosystem")
+	vertical := chi.URLParam(r, "vertical")
+
+	personality := ""
+	switch vertical {
+	case "trading", "api", "compliance":
+		switch ecosystem {
+		case "oracle":
+			personality = "Sable"
+		case "sentinel":
+			personality = "Fiducia"
+		case "nexus":
+			personality = "Quantum"
+		case "rebel":
+			personality = "Maverick"
+		case "koola10":
+			personality = "Sterling"
+		}
+	case "leadgen", "grant", "research":
+		switch ecosystem {
+		case "oracle":
+			personality = "Vega"
+		case "sentinel":
+			personality = "Veritas"
+		case "nexus":
+			personality = "Prism"
+		case "rebel":
+			personality = "Provocateur"
+		case "koola10":
+			personality = "Nova"
+		}
+	case "developer", "saas":
+		switch ecosystem {
+		case "oracle":
+			personality = "Atlas"
+		case "sentinel":
+			personality = "Bastion"
+		case "nexus":
+			personality = "Matrix"
+		case "rebel":
+			personality = "Insurgent"
+		case "koola10":
+			personality = "Forge"
+		}
+	case "content":
+		switch ecosystem {
+		case "oracle":
+			personality = "Muse"
+		case "sentinel":
+			personality = "Lumina"
+		case "nexus":
+			personality = "Spectrum"
+		case "rebel":
+			personality = "Anarchist"
+		case "koola10":
+			personality = "Solara"
+		}
+	}
+
+	cost := 0.50
+	globalLedger.RecordCostWithEcosystem(ecosystem, vertical, "vertical_start", cost, fmt.Sprintf("Started vertical %s in %s ecosystem with personality %s", vertical, ecosystem, personality))
+
+	// Dispatch specific task based on vertical
+	task := ""
+	switch vertical {
+	case "trading":
+		task = "24-hour backtest on momentum and mean reversion strategies"
+	case "leadgen":
+		task = "Generate 50 qualified nonprofit prospects (budgets > $500K)"
+	case "grant":
+		task = "Monitor federal databases and draft one sample proposal with a projected success fee"
+	case "content":
+		task = "Generate first batch of LinkedIn and Reddit posts for Optimizr"
+	case "developer", "saas":
+		task = "Verify all micro-SaaS templates are ready"
+	}
+
+	if task != "" {
+		// Deploy swarms if not already deployed
+		globalSwarmManager.DeploySwarms(vertical, 10)
+		go func() {
+			result, err := globalSwarmManager.DispatchTask(vertical, fmt.Sprintf("[%s] %s", personality, task))
+			if err == nil {
+				// Record successful loop execution
+				revenue := 50.0
+				globalLedger.RecordRevenueWithEcosystem(ecosystem, vertical, revenue, fmt.Sprintf("Initial revenue from %s loop", vertical))
+				fundManager.RouteRevenue(revenue, ecosystem+":"+vertical)
+				AddAuditEntry("vertical_task_completed", map[string]interface{}{
+					"ecosystem": ecosystem,
+					"vertical":  vertical,
+					"task":      task,
+					"result":    result,
+				})
+			}
+		}()
+	}
+
+	broadcastSSE("vertical_started", map[string]interface{}{
+		"ecosystem":   ecosystem,
+		"vertical":    vertical,
+		"personality": personality,
+		"status":      "active",
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "ok",
+		"ecosystem":   ecosystem,
+		"vertical":    vertical,
+		"personality": personality,
+		"task_dispatched": task,
+	})
+}
+
 func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {
 	roiThreshold := 2.0; projectedRevenue := 0.0; if actionType == "grant_submit" { projectedRevenue = 500.0 }
 	roi := 0.0; if estimatedCost > 0 { roi = projectedRevenue / estimatedCost }
@@ -1125,7 +1299,7 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 	grant, ok := cache[req.GrantID]; if !ok { http.Error(w, "not cached", 404); return }
 	if !rateLimit() { http.Error(w, "rate limited", 429); return }
 	prompt := fmt.Sprintf("Draft narrative for %s from %s. Mission: %s", grant.Title, req.OrgName, req.OrgMission)
-	content, tokens, err := performAIChat("You are Koola10, an autonomous grant agent. Output your response as a valid JSON object matching the ApplicationDraft schema.", prompt, true, "deepseek-r1:14b")
+	content, tokens, err := performAIChat("You are Koola10, an autonomous grant agent.", prompt, true, "deepseek-r1:14b")
 	if err != nil { http.Error(w, err.Error(), 500); return }
 	LogUsage(tokens); globalLedger.RecordCost("", "ai_inference", float64(tokens)*0.000002, "Draft")
 	var draft ApplicationDraft; json.Unmarshal([]byte(content), &draft); appID := generateID(); draft.ApplicationID = appID; draft.GrantID = req.GrantID; draft.Status = "draft_generated"
@@ -1564,11 +1738,61 @@ func handleCollaborate(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"collaborate endpoint"}`))
 }
 
+func broadcastSSE(eventType string, data map[string]interface{}) {
+	event := SSEEvent{
+		Type:      eventType,
+		Data:      data,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	for client := range sseClients {
+		select {
+		case client <- event:
+		default:
+			log.Printf("SSE client buffer full, dropping event: %s", eventType)
+		}
+	}
+}
+
 func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	clientChan := make(chan SSEEvent, 10)
+	sseMu.Lock()
+	sseClients[clientChan] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, clientChan)
+		sseMu.Unlock()
+		close(clientChan)
+	}()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
 	w.Write([]byte("event: connected\ndata: {}\n\n"))
+	flusher.Flush()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-clientChan:
+			data, _ := json.Marshal(event.Data)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, string(data))
+			flusher.Flush()
+		}
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {

@@ -109,6 +109,9 @@ type ChatResponse struct {
 
 func performAIChat(systemPrompt, userPrompt string, jsonMode bool, model string) (string, int, error) {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
 	baseURL := os.Getenv("LLM_BASE_URL")
 	if baseURL == "" {
 		baseURL = "http://koola10-llm.fly.dev:11434/v1"
@@ -120,6 +123,8 @@ func performAIChat(systemPrompt, userPrompt string, jsonMode bool, model string)
 
 	if strings.Contains(baseURL, "api.deepseek.com") {
 		model = "deepseek-chat"
+	} else if strings.Contains(baseURL, "api.openai.com") {
+		model = "gpt-4o"
 	}
 
 	messages := []map[string]string{
@@ -150,20 +155,23 @@ func performAIChat(systemPrompt, userPrompt string, jsonMode bool, model string)
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(hReq)
 
-	// Fallback to DeepSeek Cloud if local fails or isn't the cloud already
+	// Fallback to DeepSeek Cloud
 	if (err != nil || resp.StatusCode >= 400) && !strings.Contains(baseURL, "api.deepseek.com") {
 		if resp != nil {
 			resp.Body.Close()
 		}
-		log.Printf("AI Chat: LLM Primary failed, falling back to DeepSeek Cloud: %v", err)
-		dsReq["model"] = "deepseek-chat"
-		dsBody, _ = json.Marshal(dsReq)
-		hReq, _ = http.NewRequest("POST", "https://api.deepseek.com/v1/chat/completions", bytes.NewBuffer(dsBody))
-		hReq.Header.Set("Authorization", "Bearer "+apiKey)
-		hReq.Header.Set("Content-Type", "application/json")
+		dsApiKey := os.Getenv("DEEPSEEK_API_KEY")
+		if dsApiKey != "" {
+			log.Printf("AI Chat: LLM Primary failed, falling back to DeepSeek Cloud: %v", err)
+			dsReq["model"] = "deepseek-chat"
+			dsBody, _ = json.Marshal(dsReq)
+			hReq, _ = http.NewRequest("POST", "https://api.deepseek.com/v1/chat/completions", bytes.NewBuffer(dsBody))
+			hReq.Header.Set("Authorization", "Bearer "+dsApiKey)
+			hReq.Header.Set("Content-Type", "application/json")
 
-		client.Timeout = 30 * time.Second
-		resp, err = client.Do(hReq)
+			client.Timeout = 30 * time.Second
+			resp, err = client.Do(hReq)
+		}
 	} else {
 		log.Printf("AI Chat: Success using model %s", model)
 	}
@@ -461,17 +469,17 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
-	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
-	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
-	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
-	globalSwarmManager.Factories["echo"] = agents.APIFactory
-	globalSwarmManager.Factories["solara"] = agents.ContentFactory
-	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
-	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["sable"] = agents.FinancialFactory
+	globalSwarmManager.Factories["vega"] = agents.GrantSwarmFactory
+	globalSwarmManager.Factories["atlas"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["api_service"] = agents.APIFactory
+	globalSwarmManager.Factories["muse"] = agents.ContentFactory
+	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
+	globalSwarmManager.Factories["research"] = agents.ResearchFactory
 
 	// Descriptive Slugs & Pilot Aliases
-	globalSwarmManager.Factories["trading"] = agents.TradingFactory
-	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory
+	globalSwarmManager.Factories["sable_trading"] = agents.TradingFactory
+	globalSwarmManager.Factories["vega_leadgen"] = agents.LeadGenFactory
 	globalSwarmManager.Factories["api_service"] = agents.APIFactory
 	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory
 	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory
@@ -480,7 +488,7 @@ func main() {
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
 
 	// Register Night Shift vertical
-	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["atlas_engineering"] = agents.DeveloperFactory
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -588,7 +596,7 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	systemPrompt := "You are the Lorekeeper of the Koola10 cinematic universe. Answer questions about characters, magic systems, and universe rules. Magic is based on Emergent Resonance. Tone is gritty but hopeful. Main characters include Kaelen and Lyra."
+	systemPrompt := getSystemPrompt("muse") + " You are the Lorekeeper of the Koola10 cinematic universe. Answer questions about characters, magic systems, and universe rules."
 
 	content, tokens, err := performAIChat(systemPrompt, req.Question, false, "")
 	if err != nil {
@@ -617,7 +625,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	systemPrompt := "Generate Koola10 style rules (Boondocks + 4K realism) and convert the scene into an Emergent Video prompt. Return JSON with 'style_rules' and 'prompt'."
+	systemPrompt := getSystemPrompt("muse") + " Generate Koola10 style rules and convert the scene into an Emergent Video prompt. Return JSON with 'style_rules' and 'prompt'."
 
 	content, tokens, err := performAIChat(systemPrompt, req.Description, true, "")
 	if err != nil {
@@ -707,7 +715,7 @@ func handleStudioVideoJobStatus(w http.ResponseWriter, r *http.Request) {
 func startHeartbeat() {
 	for {
 		ctx := context.Background()
-		nodeData := SwarmNode{ID: nodeID, Region: region, Endpoint: "https://koola10.fly.dev", Status: "healthy"}
+		nodeData := SwarmNode{ID: nodeID, Region: region, Endpoint: "https://chatgpt-oracle.fly.dev", Status: "healthy"}
 		jsonNode, _ := json.Marshal(nodeData)
 		// We use a separate key for each node's availability to avoid overwriting the whole hash TTL
 		redisClient.Set(ctx, "swarm:node:"+nodeID, jsonNode, 30*time.Second)
@@ -1125,7 +1133,7 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 	grant, ok := cache[req.GrantID]; if !ok { http.Error(w, "not cached", 404); return }
 	if !rateLimit() { http.Error(w, "rate limited", 429); return }
 	prompt := fmt.Sprintf("Draft narrative for %s from %s. Mission: %s", grant.Title, req.OrgName, req.OrgMission)
-	content, tokens, err := performAIChat("You are Koola10, an autonomous grant agent. Output your response as a valid JSON object matching the ApplicationDraft schema.", prompt, true, "deepseek-r1:14b")
+	content, tokens, err := performAIChat(getSystemPrompt("vega"), prompt, true, "deepseek-r1:14b")
 	if err != nil { http.Error(w, err.Error(), 500); return }
 	LogUsage(tokens); globalLedger.RecordCost("", "ai_inference", float64(tokens)*0.000002, "Draft")
 	var draft ApplicationDraft; json.Unmarshal([]byte(content), &draft); appID := generateID(); draft.ApplicationID = appID; draft.GrantID = req.GrantID; draft.Status = "draft_generated"
@@ -1180,7 +1188,7 @@ func handleMonitor(w http.ResponseWriter, r *http.Request) {
 		if d.Status == "submitted" && d.FollowUpDraft == "" && time.Since(info.ModTime()) > 7*24*time.Hour {
 			if rateLimit() {
 				prompt := fmt.Sprintf("Draft a polite follow-up email for grant application %s. The original grant was %s.", d.ApplicationID, d.GrantID)
-				content, tokens, err := performAIChat("You are Koola10, an autonomous grant agent.", prompt, false, "")
+				content, tokens, err := performAIChat(getSystemPrompt("vega"), prompt, false, "")
 				if err == nil {
 					d.FollowUpDraft = content
 					updated, _ := json.Marshal(d)
@@ -1208,6 +1216,24 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Status check")
 	w.Write([]byte(`{"data": "pending"}`))
 }
+
+func getSystemPrompt(role string) string {
+	switch role {
+	case "oracle":
+		return "You are Oracle, the Orchestrator. Calm, analytical, methodical. You oversee the entire agent ecosystem."
+	case "sable":
+		return "You are Sable, the Finance expert. Conservative, risk-averse, wealth-building. You manage assets and financial strategy."
+	case "vega":
+		return "You are Vega, the Business lead. Enterprise-grade, polished, relationship-focused. You handle partnerships and growth."
+	case "muse":
+		return "You are Muse, the Creative. Emotional, poetic, watercolor aesthetics. You handle storytelling and style."
+	case "atlas":
+		return "You are Atlas, the Engineering lead. Architectural, robust, enduring. You build and maintain the infrastructure."
+	default:
+		return "You are a helpful autonomous agent."
+	}
+}
+
 func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1219,7 +1245,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, tokens, err := performAIChat("You are Koola10, an autonomous grant agent.", req.Prompt, false, req.Model)
+	content, tokens, err := performAIChat(getSystemPrompt("oracle"), req.Prompt, false, req.Model)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -1420,15 +1446,15 @@ func handleSwarmMetrics(w http.ResponseWriter, r *http.Request) {
 
 func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
 	report := map[string]string{
-		"sterling": "Sterling reports consolidated financial statements and daily variance analysis.",
-		"nova":     "Nova reports 12 federal grant proposals drafted and 5 foundation leads found.",
-		"forge":    "Forge reports 4 new apps deployed to Fly.io and all tests passing.",
+		"sable": "Sterling reports consolidated financial statements and daily variance analysis.",
+		"vega":     "Nova reports 12 federal grant proposals drafted and 5 foundation leads found.",
+		"atlas":    "Forge reports 4 new apps deployed to Fly.io and all tests passing.",
 		"echo":     "Echo reports 1,540 API calls processed with 99.9% uptime.",
-		"solara":   "Solara reports 24 posts scheduled and 15% increase in engagement.",
+		"muse":   "Solara reports 24 posts scheduled and 15% increase in engagement.",
 		"sage":     "Sage reports all systems SOC2 compliant; 1 minor GDPR advisory generated.",
 		"vale":     "Vale reports 5 competitor pricing shifts detected in the EMEA region.",
-		"trading":  "Trading Swarm (Sterling) reports consolidated P&L: +$1,240.50 today.",
-		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
+		"sable_trading":  "Trading Swarm (Sterling) reports consolidated P&L: +$1,240.50 today.",
+		"vega_leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
 	}
 	json.NewEncoder(w).Encode(report)
 }
@@ -1467,8 +1493,8 @@ func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 		"price_id":       priceID,
 		"customer_email": req.CustomerEmail,
 		"mode":           mode,
-		"success_url":    "https://koola10.fly.dev/payment/success",
-		"cancel_url":     "https://koola10.fly.dev/payment/cancel",
+		"success_url":    "https://chatgpt-oracle.fly.dev/payment/success",
+		"cancel_url":     "https://chatgpt-oracle.fly.dev/payment/cancel",
 	})
 
 	if !res.Success {
