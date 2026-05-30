@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koola10 Diner Portal Watch</title>
+    <style>
+        :root {
+            --deep-indigo: #1E1B4B;
+            --cyan: #00F0FF;
+            --purple: #8B5CF6;
+            --red: #EF4444;
+            --amber: #F59E0B;
+            --green: #10B981;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--deep-indigo);
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            animation: breathe 8s infinite ease-in-out;
+        }
+
+        @keyframes breathe {
+            0%, 100% { background-color: #1E1B4B; }
+            50% { background-color: #141135; }
+        }
+
+        /* Neon Grid Floor */
+        .grid-background {
+            position: fixed;
+            bottom: 0;
+            width: 200%;
+            height: 100%;
+            left: -50%;
+            background-image:
+                linear-gradient(rgba(0, 240, 255, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 240, 255, 0.1) 1px, transparent 1px);
+            background-size: 60px 60px;
+            transform: perspective(500px) rotateX(60deg);
+            transform-origin: bottom;
+            animation: grid-move 10s linear infinite;
+            z-index: -1;
+        }
+
+        @keyframes grid-move {
+            0% { transform: perspective(500px) rotateX(60deg) translateY(0); }
+            100% { transform: perspective(500px) rotateX(60deg) translateY(60px); }
+        }
+
+        /* Booths */
+        .booth-container {
+            display: flex;
+            gap: 80px;
+            z-index: 10;
+        }
+
+        .booth {
+            width: 280px;
+            height: 400px;
+            background: rgba(0, 0, 0, 0.6);
+            border: 4px solid white;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            user-select: none;
+        }
+
+        .booth:hover {
+            transform: scale(1.05);
+        }
+
+        .booth-label {
+            position: absolute;
+            top: -40px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            text-shadow: 0 0 10px currentColor;
+        }
+
+        .status-dot {
+            margin-top: 20px;
+            font-size: 0.9em;
+            letter-spacing: 1px;
+        }
+
+        /* Booth 3 - Stable */
+        .booth-3 {
+            border-color: var(--cyan);
+            box-shadow: 0 0 15px var(--cyan), inset 0 0 10px var(--cyan);
+            animation: cyan-pulse 4s infinite ease-in-out;
+        }
+
+        @keyframes cyan-pulse {
+            0%, 100% { box-shadow: 0 0 15px var(--cyan), inset 0 0 10px var(--cyan); border-color: var(--cyan); }
+            50% { box-shadow: 0 0 35px var(--cyan), inset 0 0 20px var(--cyan); border-color: #fff; }
+        }
+
+        /* Booth 7 - Unstable */
+        .booth-7 {
+            border-color: var(--purple);
+            box-shadow: 0 0 15px var(--purple);
+            clip-path: polygon(0% 0%, 100% 0%, 100% 90%, 95% 100%, 5% 100%, 0% 90%);
+            animation: glitch-border 2s infinite step-end;
+        }
+
+        @keyframes glitch-border {
+            0% { border-color: var(--purple); clip-path: polygon(0% 0%, 100% 0%, 100% 90%, 95% 100%, 5% 100%, 0% 90%); }
+            20% { border-color: var(--red); clip-path: polygon(2% 1%, 98% 3%, 100% 95%, 90% 98%, 8% 100%, 0% 85%); }
+            40% { border-color: var(--purple); clip-path: polygon(0% 0%, 100% 0%, 100% 90%, 95% 100%, 5% 100%, 0% 90%); }
+            60% { border-color: var(--red); filter: hue-rotate(90deg); }
+            80% { border-color: var(--purple); clip-path: polygon(0% 2%, 95% 0%, 100% 88%, 98% 100%, 2% 95%, 0% 90%); }
+        }
+
+        /* Portal Ring Animation */
+        .portal-ring {
+            position: absolute;
+            border: 4px solid white;
+            border-radius: 50%;
+            width: 0;
+            height: 0;
+            opacity: 0;
+            pointer-events: none;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .portal-ring.expanding {
+            animation: expand-ring 1s ease-out forwards;
+        }
+
+        @keyframes expand-ring {
+            0% { width: 0; height: 0; opacity: 1; border-width: 10px; }
+            100% { width: 800px; height: 800px; opacity: 0; border-width: 1px; }
+        }
+
+        /* Orbs */
+        .orb {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            cursor: pointer;
+            filter: blur(2px);
+            z-index: 20;
+            transition: all 2s ease-in-out;
+            box-shadow: 0 0 20px currentColor;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 20px;
+        }
+
+        .orb:hover {
+            filter: blur(0);
+            transform: scale(1.2);
+        }
+
+        .orb-1 { background: radial-gradient(circle, var(--amber), var(--green)); color: var(--amber); }
+        .orb-2 { background: radial-gradient(circle, var(--purple), var(--red)); color: var(--red); }
+        .orb-3 { background: radial-gradient(circle, white, #ccc); color: white; display: none; }
+
+        /* Ticker */
+        .ticker-container {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            height: 40px;
+            border-top: 2px solid var(--cyan);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            z-index: 100;
+        }
+
+        .ticker-content {
+            white-space: nowrap;
+            padding-left: 100%;
+            animation: ticker 30s linear infinite;
+        }
+
+        @keyframes ticker {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-100%); }
+        }
+
+        .ticker-msg {
+            display: inline-block;
+            margin-right: 50px;
+            font-weight: bold;
+            font-family: monospace;
+            text-transform: uppercase;
+        }
+
+        /* Nova Chat */
+        #nova-chat-toggle {
+            position: fixed;
+            bottom: 60px;
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: var(--cyan);
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 0 15px var(--cyan);
+            z-index: 200;
+            font-size: 30px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: transform 0.2s;
+        }
+
+        #nova-chat-toggle:hover {
+            transform: scale(1.1);
+        }
+
+        #chat-window {
+            position: fixed;
+            bottom: 130px;
+            right: 20px;
+            width: 320px;
+            height: 450px;
+            background: rgba(15, 23, 42, 0.95);
+            border: 2px solid var(--cyan);
+            border-radius: 12px;
+            display: none;
+            flex-direction: column;
+            z-index: 200;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        #chat-header {
+            background: var(--cyan);
+            color: #000;
+            padding: 10px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        #chat-history {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            font-size: 14px;
+        }
+
+        .msg { padding: 8px 12px; border-radius: 8px; max-width: 80%; }
+        .msg-user { background: var(--purple); align-self: flex-end; }
+        .msg-nova { background: #334155; align-self: flex-start; }
+
+        #chat-input-container {
+            padding: 10px;
+            border-top: 1px solid #334155;
+            display: flex;
+            gap: 8px;
+        }
+
+        #chat-input {
+            flex: 1;
+            background: #000;
+            border: 1px solid #334155;
+            color: white;
+            padding: 8px;
+            border-radius: 4px;
+            outline: none;
+        }
+
+        #chat-input:focus { border-color: var(--cyan); }
+
+        /* Battle Scene Overlay */
+        #battle-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 500;
+            flex-direction: column;
+            padding: 40px;
+            text-align: center;
+        }
+
+        #battle-text {
+            font-size: 24px;
+            max-width: 800px;
+            line-height: 1.6;
+            color: var(--cyan);
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        .close-overlay {
+            margin-top: 40px;
+            padding: 10px 20px;
+            border: 2px solid white;
+            background: transparent;
+            color: white;
+            cursor: pointer;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="grid-background"></div>
+
+    <div class="booth-container">
+        <!-- Booth 3 -->
+        <div class="booth booth-3" id="booth-3" onclick="activateBooth(3)" ondblclick="enterBooth(3)">
+            <div class="booth-label" style="color: var(--cyan)">BOOTH 3 — NEON BATTLE</div>
+            <div id="portal-3" class="portal-ring"></div>
+            <div class="status-dot">🟢 ACTIVE</div>
+        </div>
+
+        <!-- Booth 7 -->
+        <div class="booth booth-7" id="booth-7" onclick="activateBooth(7)" ondblclick="enterBooth(7)">
+            <div class="booth-label" style="color: var(--purple)">BOOTH 7 — UNSTABLE</div>
+            <div id="portal-7" class="portal-ring"></div>
+            <div class="status-dot">🔴 UNSTABLE</div>
+        </div>
+    </div>
+
+    <!-- Orbs -->
+    <div id="orb-1" class="orb orb-1" onclick="interactOrb(1)">✨</div>
+    <div id="orb-2" class="orb orb-2" onclick="interactOrb(2)">👁️</div>
+    <div id="orb-3" class="orb orb-3" onclick="interactOrb(3)">⚛️</div>
+
+    <!-- Ticker -->
+    <div class="ticker-container">
+        <div class="ticker-content" id="ticker-content">
+            <!-- Messages will be injected here -->
+        </div>
+    </div>
+
+    <!-- Nova Chat -->
+    <button id="nova-chat-toggle" onclick="toggleChat()">🎙️</button>
+    <div id="chat-window">
+        <div id="chat-header">
+            <span>NOVA_TERMINAL</span>
+            <span style="cursor:pointer" onclick="toggleChat()">×</span>
+        </div>
+        <div id="chat-history"></div>
+        <div id="chat-input-container">
+            <input type="text" id="chat-input" placeholder="Querying reality..." onkeypress="if(event.key==='Enter') sendChatMessage()">
+            <button onclick="startVoiceRecognition()" style="background:transparent; border:none; cursor:pointer; font-size:20px;">🎤</button>
+        </div>
+    </div>
+
+    <!-- Battle Overlay -->
+    <div id="battle-overlay">
+        <div id="battle-text">RESONANCE ESTABLISHED...</div>
+        <button class="close-overlay" onclick="closeOverlay()">DISCONNECT</button>
+    </div>
+
+    <script>
+        const API_URL = 'https://koola10.fly.dev';
+        const TTS_URL = 'https://koola10-tts.fly.dev';
+
+        // --- Orbs Logic ---
+        const orbMessages = {
+            1: ["Keep going, contestant! The resonance is beautiful.", "Orb 1 senses great potential in you.", "A spark of brilliance detected!"],
+            2: ["Is that all? Booth 7 would eat you alive.", "Orb 2 remains unimpressed.", "Your resonance is... flickering. Disappointing."],
+            3: ["I am the Watcher. I see the threads of your fate.", "Everything is connected. Even the glitches.", "Silence. I am observing the Emergence."]
+        };
+
+        function moveOrbs() {
+            [1, 2, 3].forEach(id => {
+                const orb = document.getElementById(`orb-${id}`);
+                if (id === 3 && orb.style.display === 'none') return;
+
+                const x = Math.random() * (window.innerWidth - 100);
+                const y = Math.random() * (window.innerHeight - 100);
+                orb.style.left = `${x}px`;
+                orb.style.top = `${y}px`;
+            });
+        }
+
+        // Show Orb 3 with 30% chance
+        if (Math.random() < 0.3) {
+            document.getElementById('orb-3').style.display = 'flex';
+        }
+
+        setInterval(moveOrbs, 5000);
+        moveOrbs();
+
+        async function interactOrb(id) {
+            const staticMsg = orbMessages[id][Math.floor(Math.random() * orbMessages[id].length)];
+
+            try {
+                const resp = await fetch(`${API_URL}/studio/lore`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ question: `The ${id === 1 ? 'Encourager' : id === 2 ? 'Cynic' : 'Watcher'} Orb says something brief and cryptic to the visitor.` })
+                });
+                const data = await resp.json();
+                alert(`${id === 1 ? 'Orb 1 (Encourager)' : id === 2 ? 'Orb 2 (Cynic)' : 'Orb 3 (Watcher)'}: ${data.response || staticMsg}`);
+            } catch(e) {
+                alert(`Orb ${id}: ${staticMsg}`);
+            }
+        }
+
+        // --- Booth Logic ---
+        function activateBooth(id) {
+            const ring = document.getElementById(`portal-${id}`);
+            ring.classList.remove('expanding');
+            void ring.offsetWidth; // Trigger reflow
+            ring.classList.add('expanding');
+            ring.style.borderColor = id === 3 ? 'var(--cyan)' : 'var(--red)';
+        }
+
+        async function enterBooth(id) {
+            const overlay = document.getElementById('battle-overlay');
+            const text = document.getElementById('battle-text');
+
+            overlay.style.display = 'flex';
+            text.innerText = "LINKING TO REALITY STREAM...";
+
+            const prompt = id === 3 ?
+                "Describe what happens when a contestant enters Booth 3" :
+                "What happens in Booth 7 when the portal glitches?";
+
+            try {
+                const resp = await fetch(`${API_URL}/studio/lore`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ question: prompt })
+                });
+                const data = await resp.json();
+                text.innerText = data.response;
+            } catch(e) {
+                text.innerText = "CONNECTION FAILED. THE PORTAL IS UNSTABLE.";
+            }
+        }
+
+        function closeOverlay() {
+            document.getElementById('battle-overlay').style.display = 'none';
+        }
+
+        // --- Ticker Logic ---
+        const staticTickerMsgs = [
+            { text: "BOOTH 3: NEON BATTLE IN PROGRESS", color: "var(--cyan)" },
+            { text: "WARNING: SPATIAL FRACTURE IN BOOTH 7", color: "var(--purple)" },
+            { text: "ORB 1 DETECTS RISING RESONANCE", color: "var(--amber)" },
+            { text: "ORB 2 IS SKEPTICAL OF YOUR CHOICES", color: "var(--red)" },
+            { text: "THE DINER BREATHE. THE VOID WATCHES.", color: "white" }
+        ];
+
+        let tickerIdx = 0;
+        async function updateTicker() {
+            const container = document.getElementById('ticker-content');
+            tickerIdx++;
+
+            let msgData;
+            if (tickerIdx % 5 === 0) {
+                try {
+                    const resp = await fetch(`${API_URL}/studio/lore`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ question: "Provide a very short, one-sentence, all-caps status alert for a cyberpunk diner broadcast ticker." })
+                    });
+                    const data = await resp.json();
+                    msgData = { text: data.response, color: 'white' };
+                } catch(e) {
+                    msgData = staticTickerMsgs[Math.floor(Math.random() * staticTickerMsgs.length)];
+                }
+            } else {
+                msgData = staticTickerMsgs[Math.floor(Math.random() * staticTickerMsgs.length)];
+            }
+
+            const span = document.createElement('span');
+            span.className = 'ticker-msg';
+            span.innerText = msgData.text;
+            span.style.color = msgData.color;
+            container.appendChild(span);
+
+            if (container.children.length > 20) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        setInterval(updateTicker, 5000);
+        for(let i=0; i<10; i++) updateTicker();
+
+        // --- Nova Chat Logic ---
+        function toggleChat() {
+            const win = document.getElementById('chat-window');
+            win.style.display = (win.style.display === 'none' || win.style.display === '') ? 'flex' : 'none';
+        }
+
+        async function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            addMsg(text, 'user');
+            input.value = '';
+
+            try {
+                const resp = await fetch(`${API_URL}/ai/chat`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ prompt: text })
+                });
+                const data = await resp.json();
+                addMsg(data.response, 'nova');
+                speak(data.response);
+            } catch(e) {
+                addMsg("NOVA ERROR: REALITY DISCONNECT.", 'nova');
+            }
+        }
+
+        function addMsg(text, sender) {
+            const history = document.getElementById('chat-history');
+            const div = document.createElement('div');
+            div.className = `msg msg-${sender}`;
+            div.innerText = text;
+            history.appendChild(div);
+            history.scrollTop = history.scrollHeight;
+        }
+
+        function speak(text) {
+            // Attempt to use the specified TTS service
+            const audio = new Audio(`${TTS_URL}/api/tts?text=${encodeURIComponent(text)}`);
+            audio.play().catch(e => {
+                console.warn("TTS failed, falling back to browser synthesis.", e);
+                const synth = window.speechSynthesis;
+                const utter = new SpeechSynthesisUtterance(text);
+                synth.speak(utter);
+            });
+        }
+
+        function startVoiceRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert("Speech recognition not supported in this browser.");
+                return;
+            }
+            const recognition = new SpeechRecognition();
+            recognition.onresult = (event) => {
+                const text = event.results[0][0].transcript;
+                document.getElementById('chat-input').value = text;
+                sendChatMessage();
+            };
+            recognition.start();
+        }
+    </script>
+</body>
+</html>
