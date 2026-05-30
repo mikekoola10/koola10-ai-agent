@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diner Portal Watch</title>
+    <style>
+        :root {
+            --bg-color: #1E1B4B;
+            --cyan: #00F0FF;
+            --purple: #8B5CF6;
+            --red: #EF4444;
+            --amber: #F59E0B;
+            --green: #10B981;
+            --white: #FFFFFF;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            animation: breathe 8s infinite ease-in-out;
+        }
+
+        @keyframes breathe {
+            0%, 100% { background-color: #1E1B4B; }
+            50% { background-color: #2D2A6E; }
+        }
+
+        /* Neon Floor Grid */
+        .grid-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            perspective: 1000px;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .grid {
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            top: -50%;
+            left: -50%;
+            background-image:
+                linear-gradient(rgba(0, 240, 255, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 240, 255, 0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+            transform: rotateX(60deg);
+            animation: grid-move 20s linear infinite;
+        }
+
+        @keyframes grid-move {
+            from { transform: rotateX(60deg) translateY(0); }
+            to { transform: rotateX(60deg) translateY(50px); }
+        }
+
+        /* Portal Zones */
+        .portals {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 100px;
+            padding: 20px;
+        }
+
+        .portal-zone {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            text-align: center;
+        }
+
+        .portal-ring {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            position: relative;
+        }
+
+        .portal-label {
+            font-weight: bold;
+            letter-spacing: 2px;
+            font-size: 1.2rem;
+        }
+
+        .status-indicator {
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        /* Booth 3 - Stable Cyan */
+        #booth-3 .portal-ring {
+            border: 4px solid var(--cyan);
+            box-shadow: 0 0 20px var(--cyan), inset 0 0 20px var(--cyan);
+            animation: pulse-cyan 3s infinite ease-in-out;
+        }
+
+        @keyframes pulse-cyan {
+            0%, 100% { box-shadow: 0 0 20px var(--cyan), inset 0 0 20px var(--cyan); }
+            50% { box-shadow: 0 0 40px var(--cyan), inset 0 0 30px var(--cyan); }
+        }
+
+        #booth-3 .portal-ring.active {
+            transform: scale(1.5);
+            box-shadow: 0 0 60px var(--cyan), inset 0 0 40px var(--cyan);
+        }
+
+        /* Booth 7 - Unstable Purple/Red */
+        #booth-7 .portal-ring {
+            border: 4px solid var(--purple);
+            box-shadow: 0 0 20px var(--purple);
+            clip-path: polygon(10% 0%, 90% 0%, 100% 10%, 100% 90%, 90% 100%, 10% 100%, 0% 90%, 0% 10%);
+            animation: glitch-border 0.5s infinite step-end;
+        }
+
+        @keyframes glitch-border {
+            0%, 100% { border-color: var(--purple); box-shadow: 0 0 20px var(--purple); clip-path: polygon(10% 0%, 90% 0%, 100% 10%, 100% 90%, 90% 100%, 10% 100%, 0% 90%, 0% 10%); }
+            20% { border-color: var(--red); box-shadow: 0 0 30px var(--red); clip-path: polygon(15% 5%, 85% 5%, 95% 15%, 95% 85%, 85% 95%, 15% 95%, 5% 85%, 5% 15%); }
+            40% { clip-path: polygon(5% 0%, 95% 5%, 100% 20%, 90% 100%, 10% 95%, 0% 80%); }
+        }
+
+        #booth-7 .portal-ring.fractured {
+            animation: glitch-border 0.1s infinite step-end;
+            transform: scale(1.2) rotate(5deg);
+        }
+
+        /* Orbs */
+        .orb {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            z-index: 10;
+            transition: all 0.3s ease;
+        }
+
+        #orb-1 { background: radial-gradient(circle, var(--green), var(--amber)); box-shadow: 0 0 20px var(--amber); }
+        #orb-2 { background: radial-gradient(circle, var(--purple), var(--red)); box-shadow: 0 0 20px var(--red); }
+        #orb-3 { background: radial-gradient(circle, var(--white), #ccc); box-shadow: 0 0 20px var(--white); display: none; }
+
+        /* Broadcast Ticker */
+        .ticker-container {
+            width: 100%;
+            height: 40px;
+            background: rgba(0,0,0,0.5);
+            border-top: 1px solid rgba(255,255,255,0.2);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+        }
+
+        .ticker-wrapper {
+            display: inline-block;
+            white-space: nowrap;
+            padding-left: 100%;
+            animation: ticker 60s linear infinite;
+        }
+
+        @keyframes ticker {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(-200%, 0); }
+        }
+
+        .ticker-item {
+            display: inline-block;
+            padding: 0 30px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .ticker-item.booth-3 { color: var(--cyan); }
+        .ticker-item.booth-7 { color: var(--purple); }
+        .ticker-item.orb-1 { color: var(--amber); }
+        .ticker-item.orb-2 { color: var(--red); }
+
+        /* Nova Chat */
+        .nova-chat-container {
+            position: fixed;
+            bottom: 60px;
+            right: 20px;
+            z-index: 100;
+        }
+
+        .mic-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: var(--cyan);
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 0 20px var(--cyan);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            transition: transform 0.2s;
+        }
+
+        .mic-btn:active { transform: scale(0.9); }
+        .mic-btn.listening { animation: mic-pulse 1s infinite; background: var(--red); box-shadow: 0 0 20px var(--red); }
+
+        @keyframes mic-pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        .chat-window {
+            position: absolute;
+            bottom: 80px;
+            right: 0;
+            width: 300px;
+            height: 400px;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid var(--cyan);
+            border-radius: 10px;
+            display: none;
+            flex-direction: column;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 10px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .message {
+            padding: 8px 12px;
+            border-radius: 15px;
+            max-width: 80%;
+            font-size: 0.9rem;
+        }
+
+        .user-message {
+            align-self: flex-end;
+            background: var(--cyan);
+            color: #000;
+        }
+
+        .ai-message {
+            align-self: flex-start;
+            background: rgba(255,255,255,0.1);
+        }
+
+        .chat-input {
+            padding: 10px;
+            display: flex;
+            gap: 5px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .chat-input input {
+            flex: 1;
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+        }
+
+        /* Overlays */
+        #battle-scene {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0);
+            display: none;
+            justify-content: center; align-items: center;
+            z-index: 200;
+            transition: background 0.5s;
+        }
+
+        #battle-scene.active {
+            background: rgba(0,0,0,0.9);
+            display: flex;
+        }
+
+        .placeholder-box {
+            border: 2px dashed var(--cyan);
+            padding: 40px;
+            color: var(--cyan);
+            font-family: monospace;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+
+        #battle-scene.active .placeholder-box {
+            opacity: 1;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="grid-container"><div class="grid"></div></div>
+
+    <div id="battle-scene">
+        <div class="placeholder-box">[ BATTLE SCENE INITIALIZING... ]</div>
+    </div>
+
+    <div class="portals">
+        <div id="booth-3" class="portal-zone">
+            <div class="portal-ring" onclick="activatePortal(3)" ondblclick="startBattle()"></div>
+            <div class="portal-label">BOOTH 3 — NEON BATTLE</div>
+            <div class="status-indicator">🟢 ACTIVE</div>
+            <div id="lore-3" style="max-width: 250px; font-size: 0.8rem; margin-top: 10px;"></div>
+        </div>
+
+        <div id="booth-7" class="portal-zone">
+            <div class="portal-ring" onclick="activatePortal(7)" ondblclick="stabilizePortal()"></div>
+            <div class="portal-label">BOOTH 7 — UNSTABLE</div>
+            <div class="status-indicator">🔴 UNSTABLE</div>
+            <div id="lore-7" style="max-width: 250px; font-size: 0.8rem; margin-top: 10px;"></div>
+        </div>
+    </div>
+
+    <div id="orb-1" class="orb" onclick="orbClick(1)"></div>
+    <div id="orb-2" class="orb" onclick="orbClick(2)"></div>
+    <div id="orb-3" class="orb" onclick="orbClick(3)"></div>
+
+    <div class="nova-chat-container">
+        <div id="chat-window" class="chat-window">
+            <div id="chat-messages" class="chat-messages">
+                <div class="message ai-message">Welcome to the Diner. How can I help?</div>
+            </div>
+            <div class="chat-input">
+                <input type="text" id="user-input" placeholder="Type or use mic..." onkeypress="if(event.key==='Enter') sendMessage()">
+                <button onclick="sendMessage()" style="background: var(--cyan); border: none; padding: 5px 10px; cursor: pointer;">Send</button>
+            </div>
+        </div>
+        <button id="mic-btn" class="mic-btn" onclick="toggleChat()">🎙️</button>
+    </div>
+
+    <div class="ticker-container">
+        <div id="ticker-wrapper" class="ticker-wrapper">
+            <!-- Ticker items will be injected here -->
+        </div>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'https://koola10.fly.dev';
+        const TTS_URL = 'https://koola10-tts.fly.dev';
+
+        // Initial lore library
+        const staticLore = [
+            { text: "Booth 3: The neon warriors are gathering.", type: "booth-3" },
+            { text: "Booth 7: Reality is thinning in sector 7.", type: "booth-7" },
+            { text: "Orb 1: You're doing great, keep going!", type: "orb-1" },
+            { text: "Orb 2: This is all a simulation anyway.", type: "orb-2" },
+            { text: "Broadcast: System nominal. Gravity stable.", type: "" },
+            { text: "Booth 3: Neon Battle engaged. Victory awaits.", type: "booth-3" }
+        ];
+
+        let totalMessagesAdded = 0;
+
+        async function initTicker() {
+            const wrapper = document.getElementById('ticker-wrapper');
+            for (let item of staticLore) {
+                await addTickerItem(item.text, item.type);
+            }
+
+            // Loop to add more lore automatically
+            setInterval(async () => {
+                const loreLines = [
+                    { text: "Booth 3: Signal pulse detected.", type: "booth-3" },
+                    { text: "Booth 7: Anomaly expanding.", type: "booth-7" },
+                    { text: "Orb 1: Resonance is key.", type: "orb-1" },
+                    { text: "Orb 2: Nothing is real.", type: "orb-2" }
+                ];
+                const pick = loreLines[Math.floor(Math.random() * loreLines.length)];
+                await addTickerItem(pick.text, pick.type);
+            }, 5000);
+        }
+
+        async function addTickerItem(text, type) {
+            totalMessagesAdded++;
+            const wrapper = document.getElementById('ticker-wrapper');
+
+            if (totalMessagesAdded % 5 === 0) {
+                const liveLore = await callLore("Give me a one-sentence diner lore snippet.");
+                const el = document.createElement('span');
+                el.className = `ticker-item orb-3`;
+                el.textContent = liveLore;
+                wrapper.appendChild(el);
+            } else {
+                const el = document.createElement('span');
+                el.className = `ticker-item ${type}`;
+                el.textContent = text;
+                wrapper.appendChild(el);
+            }
+
+            if (wrapper.children.length > 50) wrapper.removeChild(wrapper.firstChild);
+        }
+
+        async function callLore(question) {
+            try {
+                const res = await fetch(`${BACKEND_URL}/studio/lore`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question })
+                });
+                const data = await res.json();
+                return data.response;
+            } catch (e) {
+                return "Lore signal lost...";
+            }
+        }
+
+        // Portals
+        function activatePortal(booth) {
+            const ring = document.querySelector(`#booth-${booth} .portal-ring`);
+            if (booth === 3) {
+                ring.classList.add('active');
+                callLore("Describe what happens when a contestant enters Booth 3").then(res => {
+                    document.getElementById('lore-3').innerText = res;
+                });
+            } else {
+                ring.classList.add('fractured');
+                callLore("What happens in Booth 7 when the portal glitches?").then(res => {
+                    document.getElementById('lore-7').innerText = res;
+                });
+            }
+        }
+
+        function startBattle() {
+            const scene = document.getElementById('battle-scene');
+            scene.style.display = 'flex';
+            setTimeout(() => scene.classList.add('active'), 10);
+            setTimeout(() => {
+                scene.classList.remove('active');
+                setTimeout(() => scene.style.display = 'none', 500);
+            }, 4000);
+        }
+
+        function stabilizePortal() {
+            const ring = document.querySelector(`#booth-7 .portal-ring`);
+            ring.classList.remove('fractured');
+            document.getElementById('lore-7').innerText = "Portal partially stabilized.";
+        }
+
+        // Orbs
+        function positionOrbs() {
+            const orb1 = document.getElementById('orb-1');
+            const orb2 = document.getElementById('orb-2');
+            const orb3 = document.getElementById('orb-3');
+
+            // Float around booths
+            setInterval(() => {
+                orb1.style.top = (window.innerHeight/2 + Math.sin(Date.now()/1000) * 50 - 100) + 'px';
+                orb1.style.left = (window.innerWidth/2 - 250 + Math.cos(Date.now()/1000) * 30) + 'px';
+
+                orb2.style.top = (window.innerHeight/2 + Math.cos(Date.now()/1200) * 60 - 100) + 'px';
+                orb2.style.left = (window.innerWidth/2 + 200 + Math.sin(Date.now()/1200) * 40) + 'px';
+            }, 50);
+
+            // Watcher orb logic
+            if (Math.random() < 0.3) {
+                orb3.style.display = 'block';
+                orb3.style.top = Math.random() * (window.innerHeight - 100) + 'px';
+                orb3.style.left = Math.random() * (window.innerWidth - 100) + 'px';
+            }
+        }
+
+        async function orbClick(id) {
+            let msg = "";
+            if (id === 1) msg = "Orb 1: Follow the resonance, young one.";
+            else if (id === 2) msg = "Orb 2: Do you really think choice matters?";
+            else {
+                msg = await callLore("What does the Watcher Orb see?");
+            }
+            addTickerItem(msg, `orb-${id}`);
+            speak(msg);
+        }
+
+        // Chat & Voice
+        function toggleChat() {
+            const win = document.getElementById('chat-window');
+            if (win.style.display === 'flex') {
+                win.style.display = 'none';
+            } else {
+                win.style.display = 'flex';
+                startSpeechRecognition();
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const text = input.value;
+            if (!text) return;
+
+            addMessage(text, 'user');
+            input.value = '';
+
+            try {
+                const res = await fetch(`${BACKEND_URL}/ai/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: text })
+                });
+                const data = await res.json();
+                addMessage(data.response, 'ai');
+                speak(data.response);
+            } catch (e) {
+                addMessage("Connection to Nova failed.", 'ai');
+            }
+        }
+
+        function addMessage(text, role) {
+            const container = document.getElementById('chat-messages');
+            const el = document.createElement('div');
+            el.className = `message ${role}-message`;
+            el.textContent = text;
+            container.appendChild(el);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function speak(text) {
+            try {
+                const res = await fetch(`${TTS_URL}/tts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                audio.play();
+            } catch (e) {
+                console.error("TTS failed", e);
+            }
+        }
+
+        function startSpeechRecognition() {
+            if (!('webkitSpeechRecognition' in window)) return;
+            const recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.onstart = () => document.getElementById('mic-btn').classList.add('listening');
+            recognition.onend = () => document.getElementById('mic-btn').classList.remove('listening');
+            recognition.onresult = (event) => {
+                const text = event.results[0][0].transcript;
+                document.getElementById('user-input').value = text;
+                sendMessage();
+            };
+            recognition.start();
+        }
+
+        // Init
+        window.onload = () => {
+            initTicker();
+            positionOrbs();
+        };
+
+    </script>
+</body>
+</html>
