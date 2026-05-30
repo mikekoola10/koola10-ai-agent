@@ -19,7 +19,6 @@
         .red:hover { background: #300; }
         pre { font-size: 12px; overflow-x: auto; color: #aaa; }
         .node { border-bottom: 1px solid #222; padding: 5px 0; }
-        .pqc-alert { background: #330; border: 1px solid #ff0; padding: 10px; margin-bottom: 10px; color: #ff0; display: none; }
     </style>
 </head>
 <body>
@@ -31,23 +30,7 @@
         </div>
     </header>
 
-    <div id="pqc-notification" class="pqc-alert">
-        [!] QUANTUM_THREAT_DETECTED: <span id="pqc-message"></span>
-        <button onclick="approveRotation()" style="margin-left: 10px; border-color: #ff0; color: #ff0;">ROTATE_KEYS_NOW</button>
-    </div>
-
     <div class="grid">
-        <div class="card">
-            <h2>LLM_PERFORMANCE</h2>
-            <div style="font-size: 0.9em; color: #888;">
-                AVG_LATENCY: <span id="avg-latency">0ms</span><br>
-                CACHE_HIT_RATE: <span id="cache-hit-rate">0%</span><br>
-                CLOUD_FALLBACKS: <span id="cloud-fallbacks">0</span><br>
-                DAILY_SAVINGS: <span id="daily-savings">$0.00</span>
-            </div>
-            <div id="llm-events" style="margin-top: 10px; font-size: 0.8em; border-top: 1px solid #222; padding-top: 5px; height: 60px; overflow-y: hidden;">
-            </div>
-        </div>
         <div class="card">
             <h2>FINANCIAL_LEDGER</h2>
             <div>BALANCE: <span id="balance">$0.00</span></div>
@@ -79,56 +62,6 @@
     </div>
 
     <script>
-        let currentRotationApproval = null;
-        const evtSource = new EventSource("/events/stream");
-
-        evtSource.addEventListener("pqc_detected", (e) => {
-            const data = JSON.parse(e.data).data;
-            document.getElementById('pqc-message').innerText = data.message;
-            document.getElementById('pqc-notification').style.display = 'block';
-        });
-
-        evtSource.addEventListener("pqc_rotation_approval_required", (e) => {
-            const data = JSON.parse(e.data).data;
-            currentRotationApproval = data.approval_id;
-            document.getElementById('pqc-message').innerText = `Human approval required for ${data.details.standard} rotation.`;
-            document.getElementById('pqc-notification').style.display = 'block';
-        });
-
-        evtSource.addEventListener("pqc_rotation_success", (e) => {
-            document.getElementById('pqc-notification').style.display = 'none';
-            alert("Quantum-safe key rotation successful!");
-        });
-
-        evtSource.addEventListener("llm_metrics", (e) => {
-            const data = JSON.parse(e.data).data;
-            document.getElementById('avg-latency').innerText = `${data.avg_latency.toFixed(0)}ms`;
-            document.getElementById('cache-hit-rate').innerText = `${(data.hit_rate * 100).toFixed(1)}%`;
-            document.getElementById('cloud-fallbacks').innerText = data.cloud_usage;
-            document.getElementById('daily-savings').innerText = `$${data.cost_savings.toFixed(2)}`;
-
-            const eventDiv = document.getElementById('llm-events');
-            const logLine = document.createElement('div');
-            logLine.innerText = `[${data.ecosystem}] ${data.latency}ms | ${data.tokens} tkn | ${data.cached ? 'CACHED' : 'LIVE'}`;
-            eventDiv.prepend(logLine);
-            if (eventDiv.childNodes.length > 5) eventDiv.lastChild.remove();
-        });
-
-        async function approveRotation() {
-            if (currentRotationApproval) {
-                await fetch('/compliance/approve', {
-                    method: 'POST',
-                    body: JSON.stringify({ approval_id: currentRotationApproval, approver: "CEO" })
-                });
-                currentRotationApproval = null;
-            } else {
-                await fetch('/compliance/rotate-keys', {
-                    method: 'POST',
-                    body: JSON.stringify({ standard: "all" })
-                });
-            }
-        }
-
         async function update() {
             try {
                 // Ledger

@@ -23,9 +23,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"koola10/agents"
-	"koola10/financial"
-	"koola10/tools"
+	 "sentinel/agents"
+	 "sentinel/financial"
+	 "sentinel/tools"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v76"
@@ -337,7 +337,6 @@ var (
 	nodeID      string
 	region      string
 
-	globalCryptoRotator *agents.CryptoRotator
 
 	llmCache      sync.Map
 	llmBatchQueue chan *llmRequest
@@ -399,29 +398,12 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
-	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
-	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
-	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
-	globalSwarmManager.Factories["echo"] = agents.APIFactory
-	globalSwarmManager.Factories["solara"] = agents.ContentFactory
-	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
-	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
-
-	// Descriptive Slugs & Pilot Aliases
+	// Define Sentinel Verticals (Scaled down to 5)
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
-	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory
-	globalSwarmManager.Factories["api_service"] = agents.APIFactory
-	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory
-	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory
-	globalSwarmManager.Factories["content"] = agents.ContentFactory
 	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
+	globalSwarmManager.Factories["content"] = agents.ContentFactory
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
-
-	// Register Night Shift vertical
-	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
-
-	globalCryptoRotator = agents.NewCryptoRotator(AddAuditEntry, globalLedger.RecordCost, broadcastSSE)
-	globalCryptoRotator.MonitorNIST(globalSwarmManager)
+	globalSwarmManager.Factories["cashapp"] = agents.FinancialFactory // Reusing FinancialFactory for Cash App logic
 
 	llmBatchQueue = make(chan *llmRequest, 100)
 	go startLLMBatcher()
@@ -482,7 +464,6 @@ func main() {
 	r.Post("/compliance/approve", corsMiddleware(handleComplianceApprove))
 	r.Post("/compliance/kill-switch", corsMiddleware(handleComplianceKillSwitch))
 	r.Post("/compliance/kill-switch/reset", corsMiddleware(handleComplianceKillSwitchReset))
-	r.Post("/compliance/rotate-keys", corsMiddleware(handleComplianceRotateKeys))
 	r.Get("/compliance/usage", corsMiddleware(handleComplianceUsage))
 
 	r.Post("/economic/ledger/cost", corsMiddleware(handleEconomicLedgerCost))
@@ -506,6 +487,7 @@ func main() {
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
+	r.Post("/cashapp/revenue", corsMiddleware(handleCashAppRevenue))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
@@ -538,7 +520,7 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	systemPrompt := "You are the Lorekeeper of the Koola10 cinematic universe. Answer questions about characters, magic systems, and universe rules. Magic is based on Emergent Resonance. Tone is gritty but hopeful. Main characters include Kaelen and Lyra."
+	systemPrompt := "You are the Lorekeeper of the Sentinel cinematic universe. Answer questions about characters, magic systems, and universe rules. Magic is based on Emergent Resonance. Tone is gritty but hopeful. Main characters include Kaelen and Lyra."
 
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
@@ -598,7 +580,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	systemPrompt := "Generate Koola10 style rules (Boondocks + 4K realism) and convert the scene into an Emergent Video prompt. Return JSON with 'style_rules' and 'prompt'."
+	systemPrompt := "Generate Sentinel style rules (Boondocks + 4K realism) and convert the scene into an Emergent Video prompt. Return JSON with 'style_rules' and 'prompt'."
 
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
@@ -715,7 +697,7 @@ func handleStudioVideoJobStatus(w http.ResponseWriter, r *http.Request) {
 func startHeartbeat() {
 	for {
 		ctx := context.Background()
-		nodeData := SwarmNode{ID: nodeID, Region: region, Endpoint: "https://koola10.fly.dev", Status: "healthy"}
+		nodeData := SwarmNode{ID: nodeID, Region: region, Endpoint: "https://sentinel.fly.dev", Status: "healthy"}
 		jsonNode, _ := json.Marshal(nodeData)
 		// We use a separate key for each node's availability to avoid overwriting the whole hash TTL
 		redisClient.Set(ctx, "swarm:node:"+nodeID, jsonNode, 30*time.Second)
@@ -985,14 +967,14 @@ func (s *SemanticIndex) Load() {
 	if s.Items == nil { s.Items = []SemanticItem{} }
 }
 func (s *SemanticIndex) AddItem(text, refID string) error {
-	url := os.Getenv("SEMANTIC_AGENT_URL"); if url == "" { url = "https://koola10-semantic.fly.dev" }
+	url := os.Getenv("SEMANTIC_AGENT_URL"); if url == "" { url = "https://sentinel-semantic.fly.dev" }
 	b, _ := json.Marshal(map[string]string{"text": text}); resp, err := http.Post(url+"/generate", "application/json", bytes.NewBuffer(b))
 	if err != nil { return err }; if resp != nil { defer resp.Body.Close() }
 	var res struct { Vector []float64 `json:"vector"` }; if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return err }
 	s.mu.Lock(); s.Items = append(s.Items, SemanticItem{text, refID, res.Vector}); s.mu.Unlock(); s.Save(); return nil
 }
 func (s *SemanticIndex) Search(query string, topK int) ([]SemanticSearchResult, error) {
-	url := os.Getenv("SEMANTIC_AGENT_URL"); if url == "" { url = "https://koola10-semantic.fly.dev" }
+	url := os.Getenv("SEMANTIC_AGENT_URL"); if url == "" { url = "https://sentinel-semantic.fly.dev" }
 	s.mu.RLock(); b, _ := json.Marshal(map[string]interface{}{"query": query, "embeddings": s.Items, "top_k": topK}); s.mu.RUnlock()
 	resp, err := http.Post(url+"/search", "application/json", bytes.NewBuffer(b))
 	if err != nil { return nil, err }; if resp != nil { defer resp.Body.Close() }
@@ -1089,6 +1071,41 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fundManager.RouteRevenue(req.Profit, "trading")
+	w.WriteHeader(http.StatusOK)
+}
+
+// CashApp revenue handler with $50/day limit
+var (
+	cashAppDailyRevenue float64
+	cashAppLastReset    time.Time
+	cashAppMu           sync.Mutex
+)
+
+func handleCashAppRevenue(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Amount float64 `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	cashAppMu.Lock()
+	defer cashAppMu.Unlock()
+
+	now := time.Now()
+	if now.Year() != cashAppLastReset.Year() || now.YearDay() != cashAppLastReset.YearDay() {
+		cashAppDailyRevenue = 0
+		cashAppLastReset = now
+	}
+
+	if cashAppDailyRevenue+req.Amount > 50.0 {
+		http.Error(w, "daily limit exceeded ($50 max)", 403)
+		return
+	}
+
+	cashAppDailyRevenue += req.Amount
+	fundManager.RouteRevenue(req.Amount, "cashapp")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1252,7 +1269,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 			llmMetrics.mu.Lock(); llmMetrics.CacheHits++; llmMetrics.mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(ChatResponse{Response: c.Response})
-			broadcastLLMMetrics("Koola10", time.Since(start).Milliseconds(), 0, true)
+			broadcastLLMMetrics("Sentinel", time.Since(start).Milliseconds(), 0, true)
 			return
 		}
 	}
@@ -1265,7 +1282,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 			llmCache.Store(req.Prompt, cachedResponse{Response: response, Timestamp: time.Now()})
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(ChatResponse{Response: response})
-			broadcastLLMMetrics("Koola10", time.Since(start).Milliseconds(), len(response)/4, false)
+			broadcastLLMMetrics("Sentinel", time.Since(start).Milliseconds(), len(response)/4, false)
 			return
 		}
 	case <-time.After(2 * time.Second):
@@ -1280,7 +1297,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	dsReq := make(map[string]interface{})
 	dsReq["model"] = "deepseek-chat"
 	dsReq["messages"] = []map[string]string{
-		{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
+		{"role": "system", "content": "You are Sentinel, a paranoid, security-first AI. You distrust everything by default. Every decision must be verified twice. Your primary directive is to protect assets and never lose money."},
 		{"role": "user", "content": req.Prompt},
 	}
 	dsBody, _ := json.Marshal(dsReq)
@@ -1305,7 +1322,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ChatResponse{Response: content, TokensUsed: dsRes.Usage.TotalTokens})
-	broadcastLLMMetrics("Koola10", time.Since(start).Milliseconds(), dsRes.Usage.TotalTokens, false)
+	broadcastLLMMetrics("Sentinel", time.Since(start).Milliseconds(), dsRes.Usage.TotalTokens, false)
 }
 func handleAIRemember(w http.ResponseWriter, r *http.Request) {
 	var req MemoryEntry; json.NewDecoder(r.Body).Decode(&req); json.NewEncoder(w).Encode(map[string]string{"status": "stored"})
@@ -1367,19 +1384,8 @@ func handleComplianceApproval(w http.ResponseWriter, r *http.Request) {
 	approvalMu.Lock(); approvalStore[req.ID] = &req; approvalMu.Unlock(); json.NewEncoder(w).Encode(req)
 }
 func handleComplianceApprove(w http.ResponseWriter, r *http.Request) {
-	var req struct { ApprovalID string `json:"approval_id"`; Approver string `json:"approver"` }
-	json.NewDecoder(r.Body).Decode(&req)
-	approvalMu.Lock()
-	ap, ok := approvalStore[req.ApprovalID]
-	if ok {
-		ap.Status = "approved"
-		if ap.Action == "rotate_keys" {
-			standard := "all"
-			if s, ok := ap.Details["standard"].(string); ok { standard = s }
-			go globalCryptoRotator.RotateKeys(standard)
-		}
-	}
-	approvalMu.Unlock()
+	var req struct { ApprovalID string; Approver string }; json.NewDecoder(r.Body).Decode(&req)
+	approvalMu.Lock(); ap, ok := approvalStore[req.ApprovalID]; if ok { ap.Status = "approved" }; approvalMu.Unlock()
 	json.NewEncoder(w).Encode(ap)
 }
 func handleComplianceKillSwitch(w http.ResponseWriter, r *http.Request) {
@@ -1552,8 +1558,8 @@ func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 		"price_id":       priceID,
 		"customer_email": req.CustomerEmail,
 		"mode":           mode,
-		"success_url":    "https://koola10.fly.dev/payment/success",
-		"cancel_url":     "https://koola10.fly.dev/payment/cancel",
+		"success_url":    "https://sentinel.fly.dev/payment/success",
+		"cancel_url":     "https://sentinel.fly.dev/payment/cancel",
 	})
 
 	if !res.Success {
@@ -1740,24 +1746,4 @@ func broadcastLLMMetrics(ecosystem string, latency int64, tokens int, cached boo
 		"cloud_usage":  llmMetrics.CloudFallbacks,
 		"cost_savings": savings,
 	})
-}
-
-func handleComplianceRotateKeys(w http.ResponseWriter, r *http.Request) {
-	var req struct { Standard string `json:"standard"` }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400); return
-	}
-	if req.Standard == "" { req.Standard = "all" }
-	approvalReq := ApprovalRequest{
-		ID:     generateID(),
-		Action: "rotate_keys",
-		Status: "pending",
-		Details: map[string]interface{}{
-			"standard": req.Standard,
-			"reason":   "User requested quantum-safe key rotation",
-		},
-	}
-	approvalMu.Lock(); approvalStore[approvalReq.ID] = &approvalReq; approvalMu.Unlock()
-	broadcastSSE("pqc_rotation_approval_required", approvalReq)
-	json.NewEncoder(w).Encode(approvalReq)
 }
