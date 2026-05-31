@@ -25,7 +25,7 @@ type NovaState struct {
 	LastProactiveCheck  time.Time         `json:"last_proactive_check"`
 	LastCreation        time.Time         `json:"last_creation"`
 	LastUserInteraction time.Time         `json:"last_user_interaction"`
-	mu                  sync.RWMutex
+	Mu                  sync.RWMutex
 	path                string
 }
 
@@ -47,8 +47,8 @@ type NovaAgent struct {
 }
 
 func (s *NovaState) Load() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
 	data, err := os.ReadFile(s.path)
 	if err == nil {
 		json.Unmarshal(data, s)
@@ -59,14 +59,14 @@ func (s *NovaState) Load() {
 }
 
 func (s *NovaState) Save() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
 	data, _ := json.Marshal(s)
 	os.WriteFile(s.path, data, 0644)
 }
 
 func (a *NovaAgent) AddGoal(description string, deadline time.Time) string {
-	a.State.mu.Lock()
+	a.State.Mu.Lock()
 	id := fmt.Sprintf("%x", time.Now().UnixNano())
 	goal := Goal{
 		ID:          id,
@@ -76,23 +76,23 @@ func (a *NovaAgent) AddGoal(description string, deadline time.Time) string {
 		Active:      true,
 	}
 	a.State.Goals = append(a.State.Goals, goal)
-	a.State.mu.Unlock()
+	a.State.Mu.Unlock()
 	a.State.Save()
 	return id
 }
 
 func (a *NovaAgent) UpdateGoalProgress(goalID string, progress int) error {
-	a.State.mu.Lock()
-	defer a.State.mu.Unlock()
+	a.State.Mu.Lock()
+	defer a.State.Mu.Unlock()
 	for i, g := range a.State.Goals {
 		if g.ID == goalID {
 			a.State.Goals[i].Progress = progress
 			if progress >= 100 {
 				a.State.Goals[i].Active = false
 			}
-			a.State.mu.Unlock()
+			a.State.Mu.Unlock()
 			a.State.Save()
-			a.State.mu.Lock()
+			a.State.Mu.Lock()
 			return nil
 		}
 	}
@@ -100,8 +100,8 @@ func (a *NovaAgent) UpdateGoalProgress(goalID string, progress int) error {
 }
 
 func (a *NovaAgent) ListActiveGoals() []Goal {
-	a.State.mu.RLock()
-	defer a.State.mu.RUnlock()
+	a.State.Mu.RLock()
+	defer a.State.Mu.RUnlock()
 	var active []Goal
 	for _, g := range a.State.Goals {
 		if g.Active {
@@ -121,19 +121,19 @@ func (a *NovaAgent) StartProactiveLoop(broadcast func(event string, data interfa
 }
 
 func (a *NovaAgent) CheckAndGenerate(broadcast func(event string, data interface{})) {
-	a.State.mu.Lock()
+	a.State.Mu.Lock()
 	a.State.LastProactiveCheck = time.Now()
 	inactiveDuration := time.Since(a.State.LastUserInteraction)
-	a.State.mu.Unlock()
+	a.State.Mu.Unlock()
 	a.State.Save()
 
 	if inactiveDuration >= 2*time.Hour {
 		log.Println("[Nova] Inactive for 2+ hours, generating creative content...")
 		content := a.GenerateCreativeContent()
 		if content != nil {
-			a.State.mu.Lock()
+			a.State.Mu.Lock()
 			a.State.LastCreation = time.Now()
-			a.State.mu.Unlock()
+			a.State.Mu.Unlock()
 			a.State.Save()
 			if broadcast != nil {
 				broadcast("nova_creation", content)
@@ -166,7 +166,7 @@ func (a *NovaAgent) GenerateCreativeContent() map[string]interface{} {
 }
 
 func (a *NovaAgent) RecordInteraction(userInput string) {
-	a.State.mu.Lock()
+	a.State.Mu.Lock()
 	a.State.LastUserInteraction = time.Now()
 	// Simple learning: if prompt contains certain keywords, increase style preference
 	keywords := map[string]string{
@@ -180,13 +180,13 @@ func (a *NovaAgent) RecordInteraction(userInput string) {
 			a.State.UserPreferences[style]++
 		}
 	}
-	a.State.mu.Unlock()
+	a.State.Mu.Unlock()
 	a.State.Save()
 }
 
 func (a *NovaAgent) GetTopStyles() []string {
-	a.State.mu.RLock()
-	defer a.State.mu.RUnlock()
+	a.State.Mu.RLock()
+	defer a.State.Mu.RUnlock()
 	type styleScore struct {
 		style string
 		score int
@@ -208,6 +208,26 @@ func (a *NovaAgent) GetTopStyles() []string {
 		top = append(top, scores[i].style)
 	}
 	return top
+}
+
+func (a *NovaAgent) GetStatusMessage() string {
+	a.State.Mu.RLock()
+	defer a.State.Mu.RUnlock()
+
+	activeProjects := len(a.State.ActiveProjects)
+	lastCreationStr := "Never"
+	if !a.State.LastCreation.IsZero() {
+		diff := time.Since(a.State.LastCreation)
+		if diff < time.Minute {
+			lastCreationStr = "just now"
+		} else if diff < time.Hour {
+			lastCreationStr = fmt.Sprintf("%d minutes ago", int(diff.Minutes()))
+		} else {
+			lastCreationStr = fmt.Sprintf("%d hours ago", int(diff.Hours()))
+		}
+	}
+
+	return fmt.Sprintf("I'm working on %d projects. Last creation was %s.", activeProjects, lastCreationStr)
 }
 
 func containsIgnoreCase(s, substr string) bool {

@@ -234,12 +234,7 @@
                     body: JSON.stringify({mode: 'state'})
                 });
                 const state = await resp.json();
-                let lastCreationStr = "Never";
-                if(state.last_creation && state.last_creation !== "0001-01-01T00:00:00Z") {
-                    const diff = Math.floor((new Date() - new Date(state.last_creation)) / (1000 * 60 * 60));
-                    lastCreationStr = diff + " hours ago";
-                }
-                document.getElementById('status-text').innerText = `Active Projects: ${state.active_projects.length}. Goals: ${state.goals.filter(g => g.active).length}. Last creation was ${lastCreationStr}.`;
+                document.getElementById('status-text').innerText = state.message || "Nova is online.";
 
                 let prefs = Object.entries(state.user_preferences).sort((a,b) => b[1] - a[1]);
                 if(prefs.length > 0) {

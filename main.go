@@ -1695,7 +1695,17 @@ func handleNova(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "generation failed: "+res.Error, 500)
 		}
 	case "state":
-		json.NewEncoder(w).Encode(globalNovaAgent.State)
+		state := globalNovaAgent.State
+		state.Mu.RLock()
+		defer state.Mu.RUnlock()
+		res := map[string]interface{}{
+			"message":          globalNovaAgent.GetStatusMessage(),
+			"goals":            state.Goals,
+			"active_projects":  state.ActiveProjects,
+			"user_preferences": state.UserPreferences,
+			"last_creation":    state.LastCreation,
+		}
+		json.NewEncoder(w).Encode(res)
 	default:
 		// Chat fallback
 		globalNovaAgent.RecordInteraction(req.Prompt)
