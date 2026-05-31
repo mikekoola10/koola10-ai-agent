@@ -289,6 +289,7 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	novaStatePath  = "/data/nova_state.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -307,6 +308,7 @@ var (
 	fundManager *financial.FundManager
 
 	globalSwarmManager = agents.NewSwarmManager()
+	globalNovaAgent    *agents.NovaAgent
 
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
@@ -357,6 +359,8 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	globalNovaAgent = agents.NewNovaAgent(novaStatePath)
+	globalNovaAgent.StartProactiveLoop(nil) // For now, we'll log to console
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -471,6 +475,10 @@ func main() {
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
+
+	r.Post("/nova", corsMiddleware(handleNova))
+	r.Get("/nova/media", corsMiddleware(handleNovaMedia))
+	r.Handle("/media/*", http.StripPrefix("/media/", http.FileServer(http.Dir("/data/media"))))
 
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
@@ -1601,4 +1609,96 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func handleNovaMedia(w http.ResponseWriter, r *http.Request) {
+	files, err := os.ReadDir("/data/media")
+	if err != nil {
+		json.NewEncoder(w).Encode([]string{})
+		return
+	}
+	var res []string
+	for _, f := range files {
+		if !f.IsDir() {
+			res = append(res, "/media/"+f.Name())
+		}
+	}
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleNova(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Mode        string `json:"mode"`
+		Action      string `json:"action"`
+		Description string `json:"description"`
+		GoalID      string `json:"goal_id"`
+		Progress    int    `json:"progress"`
+		Type        string `json:"type"`
+		Prompt      string `json:"prompt"`
+		Seconds     int    `json:"seconds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	switch req.Mode {
+	case "goal":
+		switch req.Action {
+		case "add":
+			id := globalNovaAgent.AddGoal(req.Description, time.Now().Add(72*time.Hour))
+			json.NewEncoder(w).Encode(map[string]string{"status": "success", "goal_id": id})
+		case "update":
+			err := globalNovaAgent.UpdateGoalProgress(req.GoalID, req.Progress)
+			if err != nil {
+				http.Error(w, err.Error(), 404)
+				return
+			}
+			w.Write([]byte(`{"status": "updated"}`))
+		case "list":
+			json.NewEncoder(w).Encode(globalNovaAgent.ListActiveGoals())
+		}
+	case "generate":
+		if req.Type == "image" {
+			res := tools.RunTool("huggingface", map[string]interface{}{
+				"action": "text_to_image",
+				"prompt": req.Prompt,
+			})
+			if res.Success {
+				dataStr, ok := res.Data.(string)
+				if ok {
+					url, err := tools.SaveMedia([]byte(dataStr), "nova_"+generateID()+".png")
+					if err == nil {
+						json.NewEncoder(w).Encode(map[string]string{"status": "success", "url": url})
+						return
+					}
+				}
+			}
+			http.Error(w, "generation failed: "+res.Error, 500)
+		} else if req.Type == "video" {
+			res := tools.RunTool("huggingface", map[string]interface{}{
+				"action": "text_to_video",
+				"prompt": req.Prompt,
+			})
+			if res.Success {
+				// Assuming HF returns frames or a link, for damo-vilab it might be a gif or video
+				// For this simulation, we'll save whatever we get as mp4
+				dataStr, ok := res.Data.(string)
+				if ok {
+					url, err := tools.SaveMedia([]byte(dataStr), "nova_"+generateID()+".mp4")
+					if err == nil {
+						json.NewEncoder(w).Encode(map[string]string{"status": "success", "url": url})
+						return
+					}
+				}
+			}
+			http.Error(w, "generation failed: "+res.Error, 500)
+		}
+	case "state":
+		json.NewEncoder(w).Encode(globalNovaAgent.State)
+	default:
+		// Chat fallback
+		globalNovaAgent.RecordInteraction(req.Prompt)
+		handleAIChat(w, r)
+	}
 }
