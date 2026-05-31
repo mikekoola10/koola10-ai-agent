@@ -21,9 +21,37 @@ func huggingfaceTool(payload map[string]interface{}) ToolResult {
 		return searchModels(payload)
 	case "run_model":
 		return runModel(payload)
+	case "text_to_image":
+		return textToImage(payload)
+	case "text_to_video":
+		return textToVideo(payload)
 	default:
 		return ToolResult{Success: false, Error: fmt.Sprintf("Unknown action: %s", action)}
 	}
+}
+
+func textToImage(payload map[string]interface{}) ToolResult {
+	prompt, _ := payload["prompt"].(string)
+	model, _ := payload["model"].(string)
+	if model == "" {
+		model = "stabilityai/stable-diffusion-2-1"
+	}
+	return runModel(map[string]interface{}{
+		"model":  model,
+		"inputs": prompt,
+	})
+}
+
+func textToVideo(payload map[string]interface{}) ToolResult {
+	prompt, _ := payload["prompt"].(string)
+	model, _ := payload["model"].(string)
+	if model == "" {
+		model = "damo-vilab/text-to-video-ms-1.7b"
+	}
+	return runModel(map[string]interface{}{
+		"model":  model,
+		"inputs": prompt,
+	})
 }
 
 func searchModels(payload map[string]interface{}) ToolResult {

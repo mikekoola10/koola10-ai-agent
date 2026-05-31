@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Nova Studio | Koola10</title>
+    <style>
+        :root {
+            --bg-color: #0d0d1a;
+            --panel-bg: rgba(25, 25, 50, 0.7);
+            --accent-cyan: #00f2ff;
+            --accent-amber: #ffbf00;
+            --text-color: #e0e0ff;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #sidebar {
+            width: 250px;
+            background: rgba(10, 10, 20, 0.9);
+            border-right: 1px solid var(--accent-cyan);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        #main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            position: relative;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: 1px solid var(--accent-cyan);
+            color: var(--accent-cyan);
+            padding: 10px;
+            cursor: pointer;
+            text-align: left;
+            transition: 0.3s;
+        }
+
+        .tab-btn.active, .tab-btn:hover {
+            background: var(--accent-cyan);
+            color: var(--bg-color);
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 242, 255, 0.3);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        #chat-area {
+            flex-grow: 1;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .message {
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 80%;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: rgba(0, 242, 255, 0.2);
+        }
+
+        .message.nova {
+            align-self: flex-start;
+            background: rgba(255, 191, 0, 0.2);
+        }
+
+        input[type="text"], textarea {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--accent-cyan);
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        button.action-btn {
+            background: var(--accent-cyan);
+            color: var(--bg-color);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        #voice-toggle {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: var(--accent-amber);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            box-shadow: 0 0 15px var(--accent-amber);
+        }
+
+        #voice-toggle.listening {
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 191, 0, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(255, 191, 0, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 191, 0, 0); }
+        }
+
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            overflow-y: auto;
+        }
+
+        .gallery img, .gallery video {
+            width: 100%;
+            border: 1px solid var(--accent-cyan);
+            border-radius: 4px;
+        }
+
+        #awareness-panel {
+            font-size: 0.9em;
+            border-top: 1px solid var(--accent-amber);
+            padding-top: 10px;
+            color: var(--accent-amber);
+        }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2 style="color: var(--accent-cyan)">NOVA STUDIO</h2>
+        <button class="tab-btn active" onclick="showTab('chat')">CHAT</button>
+        <button class="tab-btn" onclick="showTab('generate')">GENERATE</button>
+        <button class="tab-btn" onclick="showTab('goals')">GOALS</button>
+        <button class="tab-btn" onclick="showTab('gallery')">GALLERY</button>
+
+        <div id="awareness-panel">
+            <strong>SYSTEM STATE</strong><br>
+            <span id="status-text">Nova is online.</span><br>
+            <span id="pref-text">Learning your style...</span>
+        </div>
+    </div>
+
+    <div id="main-content">
+        <div id="tab-chat" class="tab-content panel" style="display: flex; flex-direction: column; height: 100%;">
+            <div id="chat-area"></div>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="chat-input" placeholder="Speak or type to Nova..." onkeypress="if(event.key==='Enter') sendMessage()">
+                <button class="action-btn" onclick="sendMessage()">SEND</button>
+            </div>
+        </div>
+
+        <div id="tab-generate" class="tab-content panel hidden">
+            <h3>Creative Engine</h3>
+            <textarea id="gen-prompt" placeholder="Describe your vision..."></textarea>
+            <div style="margin-top: 10px; display: flex; gap: 10px;">
+                <button class="action-btn" onclick="generate('image')">CREATE IMAGE</button>
+                <button class="action-btn" onclick="generate('video')">CREATE VIDEO</button>
+            </div>
+            <div id="gen-status" style="margin-top: 10px;"></div>
+        </div>
+
+        <div id="tab-goals" class="tab-content panel hidden">
+            <h3>Active Goals</h3>
+            <div id="goals-list"></div>
+            <hr>
+            <h4>Add New Goal</h4>
+            <input type="text" id="goal-desc" placeholder="Goal description...">
+            <button class="action-btn" style="margin-top: 10px;" onclick="addGoal()">ADD GOAL</button>
+        </div>
+
+        <div id="tab-gallery" class="tab-content panel hidden">
+            <h3>Media Gallery</h3>
+            <div class="gallery" id="gallery-grid"></div>
+        </div>
+
+        <button id="voice-toggle" onclick="toggleVoice()">🎤</button>
+    </div>
+
+    <script>
+        let recognition;
+        let isListening = false;
+        const API_BASE = "https://koola10.fly.dev";
+
+        function showTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById('tab-' + tabId).classList.remove('hidden');
+            event.target.classList.add('active');
+            if(tabId === 'goals') fetchGoals();
+            if(tabId === 'gallery') fetchGallery();
+            if(tabId === 'chat') updateState();
+        }
+
+        async function updateState() {
+            try {
+                const resp = await fetch(API_BASE + '/nova', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mode: 'state'})
+                });
+                const state = await resp.json();
+                let lastCreationStr = "Never";
+                if(state.last_creation && state.last_creation !== "0001-01-01T00:00:00Z") {
+                    const diff = Math.floor((new Date() - new Date(state.last_creation)) / (1000 * 60 * 60));
+                    lastCreationStr = diff + " hours ago";
+                }
+                document.getElementById('status-text').innerText = `Active Projects: ${state.active_projects.length}. Goals: ${state.goals.filter(g => g.active).length}. Last creation was ${lastCreationStr}.`;
+
+                let prefs = Object.entries(state.user_preferences).sort((a,b) => b[1] - a[1]);
+                if(prefs.length > 0) {
+                    document.getElementById('pref-text').innerText = `I think you prefer ${prefs[0][0]} styles.`;
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('chat-input');
+            const text = input.value;
+            if(!text) return;
+            addMessage('user', text);
+            input.value = '';
+
+            const resp = await fetch(API_BASE + '/nova', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({prompt: text})
+            });
+            const data = await resp.json();
+            addMessage('nova', data.response);
+            speak(data.response);
+            updateState();
+        }
+
+        function addMessage(role, text) {
+            const area = document.getElementById('chat-area');
+            const msg = document.createElement('div');
+            msg.className = 'message ' + role;
+            msg.innerText = text;
+            area.appendChild(msg);
+            area.scrollTop = area.scrollHeight;
+        }
+
+        async function generate(type) {
+            const prompt = document.getElementById('gen-prompt').value;
+            const status = document.getElementById('gen-status');
+            status.innerText = `Generating ${type}... please wait.`;
+
+            const resp = await fetch(API_BASE + '/nova', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mode: 'generate', type: type, prompt: prompt})
+            });
+            const data = await resp.json();
+            if(data.status === 'success') {
+                status.innerHTML = `<a href="${API_BASE}${data.url}" target="_blank" style="color: var(--accent-cyan)">Generation Complete: View ${type}</a>`;
+                fetchGallery();
+            } else {
+                status.innerText = "Error: " + data.error;
+            }
+        }
+
+        async function fetchGoals() {
+            const resp = await fetch(API_BASE + '/nova', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mode: 'goal', action: 'list'})
+            });
+            const goals = await resp.json();
+            const list = document.getElementById('goals-list');
+            list.innerHTML = goals.map(g => `
+                <div style="margin-bottom: 10px; border-bottom: 1px solid #333; padding: 5px;">
+                    <strong>${g.description}</strong><br>
+                    Progress: ${g.progress}% | Deadline: ${new Date(g.deadline).toLocaleDateString()}
+                </div>
+            `).join('');
+        }
+
+        async function addGoal() {
+            const desc = document.getElementById('goal-desc').value;
+            await fetch(API_BASE + '/nova', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mode: 'goal', action: 'add', description: desc})
+            });
+            document.getElementById('goal-desc').value = '';
+            fetchGoals();
+        }
+
+        async function fetchGallery() {
+            const resp = await fetch(API_BASE + '/nova/media');
+            const media = await resp.json();
+            const grid = document.getElementById('gallery-grid');
+            grid.innerHTML = media.map(url => {
+                if(url.endsWith('.mp4')) {
+                    return `<video src="${API_BASE}${url}" controls></video>`;
+                } else {
+                    return `<img src="${API_BASE}${url}">`;
+                }
+            }).join('');
+        }
+
+        function speak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            speechSynthesis.speak(utterance);
+        }
+
+        function toggleVoice() {
+            if (isListening) {
+                recognition.stop();
+            } else {
+                startListening();
+            }
+        }
+
+        function startListening() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) return alert("Browser does not support speech recognition.");
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+
+            recognition.onstart = () => {
+                isListening = true;
+                document.getElementById('voice-toggle').classList.add('listening');
+            };
+
+            recognition.onresult = (event) => {
+                const text = event.results[event.results.length - 1][0].transcript;
+                if (text.toLowerCase().includes("hey nova")) {
+                    const command = text.toLowerCase().split("hey nova")[1].trim();
+                    if(command) {
+                        document.getElementById('chat-input').value = command;
+                        sendMessage();
+                    }
+                }
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+                document.getElementById('voice-toggle').classList.remove('listening');
+            };
+
+            recognition.start();
+        }
+
+        updateState();
+    </script>
+</body>
+</html>

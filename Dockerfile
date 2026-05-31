@@ -12,7 +12,7 @@ RUN go build -o agent main.go
 FROM alpine:latest
 
 # Install necessary runtime dependencies
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates ffmpeg
 
 WORKDIR /app
 COPY --from=builder /app/agent .
