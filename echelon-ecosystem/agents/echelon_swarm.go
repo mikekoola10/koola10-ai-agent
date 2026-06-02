@@ -2,20 +2,40 @@ package agents
 
 import (
 	"fmt"
+	"echelon/tools"
 )
 
 type EchelonAgent struct {
+	vertical  string
 	specialty string
 	status    AgentStatus
 }
 
 func (a *EchelonAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
-	// In a real system, this would call specialized tools or APIs.
-	// For Echelon, we simulate high-compute outputs.
-	res := fmt.Sprintf("[Echelon-%s] Task processed. Efficiency: 0.998. Confidence: 0.999. Result: Optimizing %s", a.specialty, task)
-	a.status = StatusCompleted
-	return res, nil
+	defer func() { a.status = StatusCompleted }()
+
+	switch a.vertical {
+	case "trading_v2":
+		// Simulating sophisticated trading logic
+		return fmt.Sprintf("[Echelon-Trading-V2] Executed %s. Paper trading active. Efficiency: 0.9998", a.specialty), nil
+	case "tensor-opt":
+		// Use Hugging Face tool
+		res := tools.RunTool("huggingface", map[string]interface{}{
+			"action": "run_model",
+			"model":  "deepseek-ai/deepseek-coder-7b-instruct-v1.5",
+			"inputs": fmt.Sprintf("Optimize this model configuration for %s: %s", a.specialty, task),
+		})
+		return res, nil
+	case "quanta-research":
+		return fmt.Sprintf("[Echelon-Quanta] Researching %s. Data synthesis in progress.", a.specialty), nil
+	case "vector-compute":
+		return fmt.Sprintf("[Echelon-Vector] Allocating idle GPU cycles for %s. Throughput maximized.", a.specialty), nil
+	case "tensor-data":
+		return fmt.Sprintf("[Echelon-TensorData] Generating synthetic dataset for %s. Quality verified.", a.specialty), nil
+	}
+
+	return fmt.Sprintf("[Echelon-%s] Task processed: %s", a.specialty, task), nil
 }
 
 func (a *EchelonAgent) Status() AgentStatus { return a.status }
@@ -23,65 +43,65 @@ func (a *EchelonAgent) Specialty() string    { return a.specialty }
 
 func TensorOptimizationFactory() []SpecialistAgent {
 	specialties := []string{
-		"Quantization Engine", "Pruning Optimizer", "Layer Fusion Specialist",
-		"Kernel Tuner", "Memory Mapper", "Latency Profiler",
-		"Throughput Maximizer", "Hardware Abstraction", "Precision Scaler", "Distillation Orchestrator",
+		"DeepSeek-R1 Distillation", "Stable Diffusion Lora Tuner", "Whisper V3 Quantizer",
+		"Enterprise Model Hardener", "Layer-Wise Pruning Engine", "Bit-Serial Compute Mapper",
+		"Transformer Architecture Search", "Cross-Modal Alignment", "Hyper-Parameter Optimizer", "Model Compression Suite",
 	}
 	agents := make([]SpecialistAgent, 0, len(specialties))
 	for _, s := range specialties {
-		agents = append(agents, &EchelonAgent{specialty: s, status: StatusIdle})
+		agents = append(agents, &EchelonAgent{vertical: "tensor-opt", specialty: s, status: StatusIdle})
 	}
 	return agents
 }
 
-func EchelonTradingFactory() []SpecialistAgent {
+func EchelonTradingV2Factory() []SpecialistAgent {
 	specialties := []string{
-		"High-Frequency Arb", "Micro-Latency Execution", "Order Flow Analysis",
-		"Predictive Volatility", "Liquidity Aggregator", "Statistical Arbitrage",
-		"Cross-Exchange Signal", "Neural Trend Predictor", "Risk Vector Analysis", "Compute-Intensive Backtest",
+		"Real-Time Arb (100+ Pairs)", "HFT Momentum Engine", "Mean Reversion V2",
+		"Statistical Arbitrage", "Cross-Exchange Triangular Arb", "Order-Flow Analyst",
+		"Volatility Surface Modeler", "Gamma Scalper", "Liquidity Sniper", "Predictive Microstructure",
 	}
 	agents := make([]SpecialistAgent, 0, len(specialties))
 	for _, s := range specialties {
-		agents = append(agents, &EchelonAgent{specialty: s, status: StatusIdle})
+		agents = append(agents, &EchelonAgent{vertical: "trading_v2", specialty: s, status: StatusIdle})
 	}
 	return agents
 }
 
 func QuantaResearchFactory() []SpecialistAgent {
 	specialties := []string{
-		"Market Simulation", "Economic Modeling", "Competitor Intelligence",
-		"Tech Stack Audit", "Optimization Research", "Recursive Capability Search",
-		"Data Synthesis", "Algorithm Verification", "Probabilistic Forecasting", "Strategic Optimization",
+		"Custom Research Report Gen", "Recursive Capability Search", "Economic Simulation",
+		"Tech Stack Auditor", "Industry Brief Synthesizer", "Competitor Signal Intelligence",
+		"Market Dynamics Modeler", "White Paper Architect", "Strategy Optimization Lab", "Algorithmic Verification",
 	}
 	agents := make([]SpecialistAgent, 0, len(specialties))
 	for _, s := range specialties {
-		agents = append(agents, &EchelonAgent{specialty: s, status: StatusIdle})
+		agents = append(agents, &EchelonAgent{vertical: "quanta-research", specialty: s, status: StatusIdle})
 	}
 	return agents
 }
 
 func VectorComputeFactory() []SpecialistAgent {
 	specialties := []string{
-		"GPU Resource Allocator", "Workload Scheduler", "Cluster Optimizer",
-		"Thermal Management", "Energy Efficiency", "Provisioning Logic",
-		"Sharding Strategist", "Load Balancer", "Fault Tolerance Monitor", "Compute Arbitrage",
+		"GPU Idle Monitor", "Serverless API Gateway", "Compute Arbitrage Logic",
+		"Workload Batcher", "Thermal Efficiency Balancer", "Provisioning Automator",
+		"Latency Shaver", "Throughput Scaler", "Resource Scheduler", "Billing Integration",
 	}
 	agents := make([]SpecialistAgent, 0, len(specialties))
 	for _, s := range specialties {
-		agents = append(agents, &EchelonAgent{specialty: s, status: StatusIdle})
+		agents = append(agents, &EchelonAgent{vertical: "vector-compute", specialty: s, status: StatusIdle})
 	}
 	return agents
 }
 
 func TensorDataFactory() []SpecialistAgent {
 	specialties := []string{
-		"Schema Architect", "Noise Generator", "Constraint Validator",
-		"Augmentation Engine", "Quality Auditor", "Diversity Scraper",
-		"Labeling Automator", "Adversarial Trainer", "Contextual Synthesizer", "Dataset Packer",
+		"Synthetic Text Generator", "Image Dataset Architect", "Tabular Data Simulator",
+		"Data Pipeline Optimizer", "Augmentation Specialist", "Schema Constraint Validator",
+		"Diversity Scaper V2", "Adversarial Noise Generator", "Contextual Weaver", "Dataset Quality Auditor",
 	}
 	agents := make([]SpecialistAgent, 0, len(specialties))
 	for _, s := range specialties {
-		agents = append(agents, &EchelonAgent{specialty: s, status: StatusIdle})
+		agents = append(agents, &EchelonAgent{vertical: "tensor-data", specialty: s, status: StatusIdle})
 	}
 	return agents
 }

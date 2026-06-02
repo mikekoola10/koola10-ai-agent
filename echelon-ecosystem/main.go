@@ -60,6 +60,15 @@ func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
 	l.save()
 }
 
+func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.Balance += amount
+	l.TotalRevenue += amount
+	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, source})
+	l.save()
+}
+
 func (l *EconomicLedger) save() {
 	data, _ := json.Marshal(l)
 	os.WriteFile(ledgerPath, data, 0644)
@@ -82,7 +91,7 @@ func main() {
 
 	swarmManager.LedgerLogger = globalLedger.RecordCost
 	swarmManager.Factories["tensor-opt"] = agents.TensorOptimizationFactory
-	swarmManager.Factories["echelon-trading"] = agents.EchelonTradingFactory
+	swarmManager.Factories["trading_v2"] = agents.EchelonTradingV2Factory
 	swarmManager.Factories["quanta-research"] = agents.QuantaResearchFactory
 	swarmManager.Factories["vector-compute"] = agents.VectorComputeFactory
 	swarmManager.Factories["tensor-data"] = agents.TensorDataFactory
@@ -93,6 +102,7 @@ func main() {
 	r.Get("/financial/status", handleFinancialStatus)
 	r.Post("/ai/chat", handleAIChat)
 	r.Post("/swarm/{vertical}/start", handleVerticalStart)
+	r.Get("/swarm/status", handleSwarmStatus)
 
 	log.Printf("Echelon Supercomputer starting on :%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -160,7 +170,29 @@ func handleVerticalStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Simulate some revenue generation immediately for the task
-	fundManager.RouteRevenue(50.0, vertical)
+	revenue := 50.0
+	switch vertical {
+	case "tensor-opt": revenue = 499.0
+	case "trading_v2": revenue = 120.0
+	case "quanta-research": revenue = 299.0
+	case "vector-compute": revenue = 15.0
+	case "tensor-data": revenue = 99.0
+	}
+
+	fundManager.RouteRevenue(revenue, vertical)
 
 	w.Write([]byte(fmt.Sprintf(`{"status":"%s vertical activated", "compute_allocated": "100%%" }`, vertical)))
+}
+
+func handleSwarmStatus(w http.ResponseWriter, r *http.Request) {
+	swarmManager.Mu.RLock()
+	defer swarmManager.Mu.RUnlock()
+
+	status := make(map[string]interface{})
+	for v := range swarmManager.Swarms {
+		status[v] = swarmManager.GetSwarmStatus(v)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
 }
