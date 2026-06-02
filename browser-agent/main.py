@@ -45,6 +45,13 @@ class ExtractRequest(BaseModel):
     url: str
     instruction: str
 
+class TaskRequest(BaseModel):
+    task: str
+
+class CashAppSendRequest(BaseModel):
+    cashtag: str
+    amount: float
+
 class StripeKeysRequest(BaseModel):
     otp: Optional[str] = None
 
@@ -158,6 +165,102 @@ async def extract(req: ExtractRequest):
     result = await agent.run()
     await browser.close()
     return {"data": str(result)}
+
+@app.post("/browser/task")
+async def run_task(req: TaskRequest):
+    browser = Browser(profile=browser_profile)
+    agent = Agent(
+        task=req.task,
+        llm=llm,
+        browser=browser,
+    )
+    result = await agent.run()
+
+    screenshot_b64 = ""
+    try:
+        context = (await browser.get_context())
+        page = await context.get_current_page()
+        if page:
+            screenshot = await page.screenshot()
+            screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Screenshot failed: {e}")
+
+    await browser.close()
+    return {
+        "status": "success",
+        "result": str(result),
+        "screenshot": screenshot_b64
+    }
+
+@app.post("/browser/cashapp/send")
+async def cashapp_send(req: CashAppSendRequest):
+    email = os.getenv("CASHAPP_EMAIL")
+    password = os.getenv("CASHAPP_PASSWORD")
+    if not email or not password:
+        raise HTTPException(status_code=500, detail="CASHAPP_EMAIL or CASHAPP_PASSWORD not set")
+
+    task = f"""Go to https://cash.app and log in using email "{email}" and password "{password}".
+    Once logged in, navigate to the "Pay" or "Send Money" section.
+    Enter the cashtag "{req.cashtag}" and the amount "{req.amount:.2f}".
+    Click the "Pay" or "Send" button and confirm the transaction.
+    Provide a brief summary of the result and a confirmation message if successful."""
+
+    browser = Browser(profile=browser_profile)
+    agent = Agent(task=task, llm=llm, browser=browser)
+    result = await agent.run()
+
+    screenshot_b64 = ""
+    try:
+        context = (await browser.get_context())
+        page = await context.get_current_page()
+        if page:
+            screenshot = await page.screenshot()
+            screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Screenshot failed: {e}")
+
+    await browser.close()
+    return {
+        "status": "success",
+        "result": str(result),
+        "screenshot": screenshot_b64
+    }
+
+@app.get("/browser/cashapp/balance")
+async def cashapp_balance():
+    email = os.getenv("CASHAPP_EMAIL")
+    password = os.getenv("CASHAPP_PASSWORD")
+    if not email or not password:
+        raise HTTPException(status_code=500, detail="CASHAPP_EMAIL or CASHAPP_PASSWORD not set")
+
+    task = f"""Go to https://cash.app and log in using email "{email}" and password "{password}".
+    On the home dashboard, find and extract the current balance.
+    Return the balance amount."""
+
+    browser = Browser(profile=browser_profile)
+    agent = Agent(task=task, llm=llm, browser=browser)
+    result = await agent.run()
+    await browser.close()
+    return {"status": "success", "result": str(result)}
+
+@app.get("/browser/cashapp/history")
+async def cashapp_history():
+    email = os.getenv("CASHAPP_EMAIL")
+    password = os.getenv("CASHAPP_PASSWORD")
+    if not email or not password:
+        raise HTTPException(status_code=500, detail="CASHAPP_EMAIL or CASHAPP_PASSWORD not set")
+
+    task = f"""Go to https://cash.app and log in using email "{email}" and password "{password}".
+    Navigate to the activity or history section.
+    Extract the most recent transactions, including amount, status, and recipient/sender.
+    Return the list of transactions."""
+
+    browser = Browser(profile=browser_profile)
+    agent = Agent(task=task, llm=llm, browser=browser)
+    result = await agent.run()
+    await browser.close()
+    return {"status": "success", "result": str(result)}
 
 @app.post("/browser/stripe-live-keys")
 async def get_stripe_keys(req: StripeKeysRequest):
