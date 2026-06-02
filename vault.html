@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koola10 Vault | Financial Command</title>
+    <style>
+        :root {
+            --indigo: #0a0e1a;
+            --indigo-light: #161c2e;
+            --gold: #ffcc33;
+            --gold-glow: rgba(255, 204, 51, 0.3);
+            --amber: #ff9900;
+            --red: #ff4d4d;
+            --white: #ffffff;
+            --glass: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--indigo);
+            color: var(--white);
+            font-family: 'Inter', -apple-system, sans-serif;
+            min-height: 100vh;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+            padding: 20px;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: var(--gold);
+            text-transform: uppercase;
+        }
+
+        .total-balance {
+            text-align: right;
+        }
+
+        .total-balance h1 {
+            font-size: 48px;
+            color: var(--gold);
+            text-shadow: 0 0 20px var(--gold-glow);
+        }
+
+        .total-balance p {
+            font-size: 14px;
+            opacity: 0.6;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .card {
+            background: var(--glass);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 24px;
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover { transform: translateY(-5px); }
+
+        .card h3 {
+            font-size: 14px;
+            color: var(--gold);
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .card .amount {
+            font-size: 32px;
+            font-weight: 700;
+        }
+
+        #approval-panel {
+            grid-column: 1 / -1;
+            border: 2px solid var(--amber);
+            box-shadow: 0 0 30px rgba(255, 153, 0, 0.2);
+            display: none;
+        }
+
+        #approval-panel.active { display: block; animation: pulse 2s infinite; }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 20px rgba(255, 153, 0, 0.2); }
+            50% { box-shadow: 0 0 40px rgba(255, 153, 0, 0.4); }
+            100% { box-shadow: 0 0 20px rgba(255, 153, 0, 0.2); }
+        }
+
+        .approval-card {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255, 153, 0, 0.1);
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 15px;
+        }
+
+        .approval-info p { margin: 5px 0; }
+        .approval-info .big-amount { font-size: 28px; font-weight: 800; color: var(--gold); }
+
+        .btn-group { display: flex; gap: 10px; }
+
+        button {
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            font-weight: 700;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+        }
+
+        .btn-approve {
+            background: var(--gold);
+            color: var(--indigo);
+            padding: 15px 30px;
+            font-size: 16px;
+        }
+
+        .btn-approve:hover { background: var(--white); transform: scale(1.05); }
+
+        .btn-reject {
+            background: transparent;
+            color: var(--red);
+            border: 1px solid var(--red);
+            padding: 10px 20px;
+        }
+
+        .btn-reject:hover { background: var(--red); color: var(--white); }
+
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-size: 12px; opacity: 0.7; }
+        input {
+            width: 100%;
+            background: var(--indigo-light);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            padding: 12px;
+            color: var(--white);
+            font-size: 16px;
+        }
+
+        .btn-send {
+            width: 100%;
+            background: var(--gold);
+            color: var(--indigo);
+            padding: 15px;
+            margin-top: 10px;
+        }
+
+        .status-msg { margin-top: 15px; font-size: 14px; text-align: center; }
+
+        .quick-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .btn-quick {
+            background: var(--indigo-light);
+            color: var(--white);
+            padding: 8px 12px;
+            font-size: 12px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .btn-quick:hover { border-color: var(--gold); color: var(--gold); }
+
+        .audit-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .audit-item {
+            padding: 15px;
+            border-bottom: 1px solid var(--glass-border);
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+
+        .audit-item:last-child { border: none; }
+        .audit-meta { opacity: 0.5; font-size: 11px; }
+        .status-tag {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .status-completed { background: rgba(0, 255, 0, 0.1); color: #00ff00; }
+        .status-pending { background: rgba(255, 153, 0, 0.1); color: var(--amber); }
+
+        @media (max-width: 768px) {
+            .total-balance h1 { font-size: 32px; }
+            .approval-card { flex-direction: column; align-items: flex-start; gap: 20px; }
+            .btn-group { width: 100%; }
+            .btn-approve { flex: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">Koola10 Vault</div>
+            <div class="total-balance">
+                <p>Combined Empire Liquidity</p>
+                <h1 id="total-balance">$0.00</h1>
+            </div>
+        </header>
+
+        <div class="grid">
+            <div id="approval-panel" class="card">
+                <h3>⚠️ Authorization Console</h3>
+                <div id="approval-queue"></div>
+            </div>
+
+            <div class="card">
+                <h3>Core Ecosystem</h3>
+                <div class="amount" id="bal-core">$0.00</div>
+            </div>
+            <div class="card">
+                <h3>Oracle Insights</h3>
+                <div class="amount" id="bal-oracle">$0.00</div>
+            </div>
+            <div class="card">
+                <h3>Sentinel Security</h3>
+                <div class="amount" id="bal-sentinel">$0.00</div>
+            </div>
+            <div class="card">
+                <h3>Nexus Community</h3>
+                <div class="amount" id="bal-nexus">$0.00</div>
+            </div>
+            <div class="card">
+                <h3>Echelon Research</h3>
+                <div class="amount" id="bal-echelon">$0.00</div>
+            </div>
+            <div class="card">
+                <h3>Nova Creative</h3>
+                <div class="amount" id="bal-nova">$0.00</div>
+            </div>
+            <div class="card">
+                <h3>Sterling Finance</h3>
+                <div class="amount" id="bal-sterling">$0.00</div>
+            </div>
+
+            <div class="card">
+                <h3>Move Money</h3>
+                <div class="form-group">
+                    <label>Amount (USD)</label>
+                    <input type="number" id="send-amount" placeholder="0.00">
+                </div>
+                <div class="form-group">
+                    <label>Recipient Cashtag</label>
+                    <input type="text" id="send-recipient" placeholder="$cashtag">
+                </div>
+                <button class="btn-send" onclick="sendMoney()">Authorize Transaction</button>
+                <div id="send-status" class="status-msg"></div>
+
+                <div class="quick-actions">
+                    <button class="btn-quick" onclick="prefill(5, '$test')">$5 Test</button>
+                    <button class="btn-quick" onclick="prefill(110, '$sony')">$110 PS Plus</button>
+                    <button class="btn-quick" onclick="prefill(200, '$openai')">$200 GPT</button>
+                    <button class="btn-quick" onclick="prefill(20, '$anthropic')">$20 Claude</button>
+                    <button class="btn-quick" onclick="prefill(99, '$abacus')">$99 Abacus</button>
+                </div>
+            </div>
+
+            <div class="card" style="grid-column: span 2;">
+                <h3>Transaction Audit</h3>
+                <div class="audit-list" id="audit-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CORE_BASE = ['localhost', '127.0.0.1', ''].includes(window.location.hostname) ? 'http://localhost:8080' : 'https://koola10.fly.dev';
+        const ecosystems = [
+            { id: 'core', url: 'https://koola10.fly.dev' },
+            { id: 'oracle', url: 'https://chatgpt-oracle.fly.dev' },
+            { id: 'sentinel', url: 'https://sentinel-koola10.fly.dev' },
+            { id: 'nexus', url: 'https://nexus-koola10-agent.fly.dev' },
+            { id: 'echelon', url: 'https://echelon-koola10.fly.dev' },
+            { id: 'nova', url: 'https://nova-koola10.fly.dev' },
+            { id: 'sterling', url: 'https://sterling-koola10.fly.dev' }
+        ];
+
+        async function fetchBalances() {
+            let total = 0;
+            for (const eco of ecosystems) {
+                try {
+                    const resp = await fetch(`${eco.url}/economic/ledger/summary`);
+                    const data = await resp.json();
+                    const bal = data.balance || 0;
+                    document.getElementById(`bal-${eco.id}`).innerText = `$${bal.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                    total += bal;
+                } catch (e) {
+                    document.getElementById(`bal-${eco.id}`).innerText = `$ERROR`;
+                }
+            }
+            document.getElementById('total-balance').innerText = `$${total.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+        }
+
+        async function sendMoney() {
+            const amount = parseFloat(document.getElementById('send-amount').value);
+            const recipient = document.getElementById('send-recipient').value;
+            const statusDiv = document.getElementById('send-status');
+            if (!amount || !recipient) return;
+            statusDiv.innerText = "Initiating...";
+            statusDiv.style.color = "var(--gold)";
+            try {
+                const resp = await fetch(`${CORE_BASE}/agent/send-to-cashapp`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount, recipient })
+                });
+                const data = await resp.json();
+                if (data.status === 'completed') {
+                    statusDiv.innerText = "✅ Completed";
+                    statusDiv.style.color = "#00ff00";
+                    fetchBalances(); fetchAudit();
+                } else if (data.status === 'awaiting_approval') {
+                    statusDiv.innerText = "⏳ Awaiting authorization...";
+                    statusDiv.style.color = "var(--amber)";
+                } else {
+                    statusDiv.innerText = "❌ Failed";
+                    statusDiv.style.color = "var(--red)";
+                }
+            } catch (e) {
+                statusDiv.innerText = "Error connecting to Vault";
+                statusDiv.style.color = "var(--red)";
+            }
+        }
+
+        function prefill(amount, cashtag) {
+            document.getElementById('send-amount').value = amount;
+            document.getElementById('send-recipient').value = cashtag;
+        }
+
+        async function fetchAudit() {
+            try {
+                const resp = await fetch(`${CORE_BASE}/compliance/audit`);
+                const data = await resp.json();
+                const list = document.getElementById('audit-list');
+                list.innerHTML = "";
+                const payouts = data.filter(e => e.action.includes('cashapp_payout')).reverse();
+                payouts.forEach(e => {
+                    const item = document.createElement('div');
+                    item.className = "audit-item";
+                    const isCompleted = e.action.includes('completed') || e.action.includes('approved');
+                    item.innerHTML = `
+                        <div>
+                            <strong>${e.details.recipient || 'Unknown'}</strong><br>
+                            <span class="audit-meta">${new Date(e.timestamp).toLocaleString()}</span>
+                        </div>
+                        <div style="text-align: right">
+                            <strong>$${e.details.amount}</strong><br>
+                            <span class="status-tag ${isCompleted ? 'status-completed' : 'status-pending'}">${e.action.replace('cashapp_payout_', '')}</span>
+                        </div>
+                    `;
+                    list.appendChild(item);
+                });
+            } catch (e) {}
+        }
+
+        async function handleApproval(payoutId, approved) {
+            try {
+                await fetch(`${CORE_BASE}/voice/confirm`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ payout_id: payoutId, approved })
+                });
+                refreshApprovals(); fetchBalances(); fetchAudit();
+            } catch (e) { alert("Action failed"); }
+        }
+
+        async function refreshApprovals() {
+            try {
+                const resp = await fetch(`${CORE_BASE}/agent/pending-approvals`);
+                const pending = await resp.json();
+                const panel = document.getElementById('approval-panel');
+                const queue = document.getElementById('approval-queue');
+                if (pending && pending.length > 0) {
+                    panel.classList.add('active');
+                    queue.innerHTML = "";
+                    pending.forEach(req => {
+                        const card = document.createElement('div');
+                        card.className = "approval-card";
+                        card.innerHTML = `
+                            <div class="approval-info">
+                                <p class="big-amount">$${req.details.amount.toLocaleString()}</p>
+                                <p>Recipient: <strong>${req.details.recipient}</strong></p>
+                                <p class="audit-meta">Requested: ${new Date(req.created_at).toLocaleTimeString()}</p>
+                            </div>
+                            <div class="btn-group">
+                                <button class="btn-approve" onclick="handleApproval('${req.approval_id}', true)">Approve</button>
+                                <button class="btn-reject" onclick="handleApproval('${req.approval_id}', false)">Reject</button>
+                            </div>
+                        `;
+                        queue.appendChild(card);
+                    });
+                } else { panel.classList.remove('active'); }
+            } catch (e) {}
+        }
+
+        function initSSE() {
+            const evtSource = new EventSource(`${CORE_BASE}/events/stream`);
+            evtSource.addEventListener('cashapp_payout_request', (event) => {
+                refreshApprovals();
+            });
+            evtSource.onerror = () => {
+                evtSource.close();
+                setTimeout(initSSE, 5000);
+            };
+        }
+
+        fetchBalances(); fetchAudit(); refreshApprovals(); initSSE();
+        setInterval(fetchBalances, 30000);
+        setInterval(fetchAudit, 30000);
+        setInterval(refreshApprovals, 15000);
+    </script>
+</body>
+</html>
