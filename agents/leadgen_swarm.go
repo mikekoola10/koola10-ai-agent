@@ -21,6 +21,8 @@ func (a *LeadGenAgent) Run(task string) (interface{}, error) {
 	content := "name,company,email,status\nJohn Doe,Acme Corp,john@acme.com,qualified"
 	os.WriteFile(filepath.Join(dir, filename), []byte(content), 0644)
 
+	NotifyCelebration("new_lead", fmt.Sprintf("📬 New lead alert! Found some fresh leads via %s! The empire grows!", a.specialty))
+
 	a.status = StatusCompleted
 	return "Leads generated in " + filename, nil
 }

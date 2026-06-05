@@ -116,6 +116,13 @@
         <div id="approvals-empty" class="empty-state">No pending approvals.</div>
     </div>
 
+    <!-- Achievements Panel -->
+    <div class="card">
+        <h2>🏆 Achievements & Challenges</h2>
+        <div id="badges-list" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:15px;"></div>
+        <div id="challenges-list"></div>
+    </div>
+
     <!-- Transaction History -->
     <div class="card">
         <h2>Transaction History</h2>
@@ -125,7 +132,7 @@
 </div>
 
 <script>
-const BASE = 'https://koola10.fly.dev';
+const BASE = window.location.origin === 'null' ? 'https://koola10.fly.dev' : window.location.origin;
 const ECOSYSTEMS = [
     { name: 'Koola10', url: `${BASE}/financial/status` },
     { name: 'Oracle', url: 'https://chatgpt-oracle.fly.dev/financial/status' },
@@ -261,8 +268,16 @@ async function loadHistory() {
             const statusLabel = p.action.includes('approved') ? 'Approved' :
                                 p.action.includes('rejected') ? 'Rejected' :
                                 p.action.includes('auto') ? 'Auto' : 'Pending';
+
+            let recipient = p.cashtag || '—';
+            if (p.details && typeof p.details === 'object') {
+                recipient = p.details.cashtag || p.details.recipient || JSON.stringify(p.details);
+            } else if (p.details) {
+                recipient = p.details;
+            }
+
             return `<div class="history-item">
-                <span>$${p.amount?.toFixed(2) || '—'} → ${p.cashtag || p.details || '—'}</span>
+                <span>$${p.amount?.toFixed(2) || '—'} → ${recipient}</span>
                 <span class="status ${statusClass}">${statusLabel}</span>
                 <span style="color:#666;font-size:0.75rem;">${new Date(p.timestamp).toLocaleString()}</span>
             </div>`;
@@ -289,11 +304,35 @@ function connectSSE() {
     };
 }
 
+// ===== ACHIEVEMENTS =====
+async function loadAchievements() {
+    try {
+        const res = await fetch(`${BASE}/agent/gamification`);
+        const data = await res.json();
+
+        const badgesContainer = document.getElementById('badges-list');
+        badgesContainer.innerHTML = Object.keys(data.badges || {}).map(b => `
+            <div style="background:#F59E0B; color:#000; padding:5px 10px; border-radius:20px; font-size:0.8rem; font-weight:bold;">🏅 ${b}</div>
+        `).join('') || '<div class="empty-state">No badges earned yet.</div>';
+
+        const challengesContainer = document.getElementById('challenges-list');
+        challengesContainer.innerHTML = Object.values(data.daily_challenges || {}).map(c => `
+            <div class="history-item">
+                <span>🎯 ${c.name} (${c.current}/${c.target})</span>
+                <span class="status ${c.completed ? 'status-approved' : 'status-pending'}">${c.completed ? 'COMPLETED' : 'IN PROGRESS'}</span>
+            </div>
+        `).join('') || '<div class="empty-state">No challenges found today.</div>';
+    } catch(e) {}
+}
+
 // ===== INIT =====
 loadBalances();
 loadApprovals();
 loadHistory();
+loadAchievements();
 connectSSE();
+
+setInterval(loadAchievements, 10000);
 
 // Poll fallback every 15s
 setInterval(loadApprovals, 15000);
