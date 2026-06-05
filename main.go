@@ -289,6 +289,7 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	portfolioPath  = "/data/portfolio.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -305,6 +306,8 @@ var (
 	}
 
 	fundManager *financial.FundManager
+	portfolioManager *financial.PortfolioManager
+	investmentAgent  *agents.InvestmentAgent
 
 	globalSwarmManager = agents.NewSwarmManager()
 
@@ -357,6 +360,30 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	portfolioManager = financial.NewPortfolioManager(portfolioPath)
+	investmentAgent = &agents.InvestmentAgent{}
+
+	// Proactive Investment Opportunity Detection
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		for {
+			log.Println("[Investment] Scanning for opportunities...")
+			res := tools.RunTool("market_data", map[string]interface{}{
+				"action": "search_news",
+				"query":  "IPO announcement market major move",
+			})
+			if res.Success {
+				// We can log or process articles here if needed
+				log.Printf("[Investment] Found %v results", res.Output)
+			}
+
+			// Simple implementation: broadcast any news to SSE
+			msg := "Proactive analysis: Major market moves detected. Check dashboard."
+			broadcastSSE("investment_opportunity", map[string]string{"headline": "Market Scan", "summary": msg})
+
+			<-ticker.C
+		}
+	}()
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -471,6 +498,12 @@ func main() {
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
+
+	r.Post("/investment/analyze", corsMiddleware(handleInvestmentAnalyze))
+	r.Get("/investment/portfolio", corsMiddleware(handleInvestmentPortfolio))
+	r.Post("/investment/paper-trade", corsMiddleware(handleInvestmentPaperTrade))
+	r.Post("/investment/buy", corsMiddleware(handleInvestmentBuy))
+	r.Get("/investment/opportunities", corsMiddleware(handleInvestmentOpportunities))
 
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
@@ -1587,11 +1620,161 @@ func handleCollaborate(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"collaborate endpoint"}`))
 }
 
+var (
+	sseClients = make(map[chan string]bool)
+	sseMu      sync.Mutex
+)
+
+func broadcastSSE(eventType string, data interface{}) {
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	payload, _ := json.Marshal(data)
+	msg := fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(payload))
+	for clientChan := range sseClients {
+		select {
+		case clientChan <- msg:
+		default:
+		}
+	}
+}
+
 func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+
+	clientChan := make(chan string, 10)
+	sseMu.Lock()
+	sseClients[clientChan] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, clientChan)
+		sseMu.Unlock()
+		close(clientChan)
+	}()
+
 	w.Write([]byte("event: connected\ndata: {}\n\n"))
+
+	for {
+		select {
+		case msg := <-clientChan:
+			fmt.Fprint(w, msg)
+			w.(http.Flusher).Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func handleInvestmentAnalyze(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Symbol  string `json:"symbol"`
+		Context string `json:"context"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	rec, err := investmentAgent.AnalyzeOpportunity(req.Symbol, req.Context)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(rec)
+}
+
+func handleInvestmentPortfolio(w http.ResponseWriter, r *http.Request) {
+	summary := portfolioManager.GetPortfolioSummary()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summary)
+}
+
+func handleInvestmentPaperTrade(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Symbol string  `json:"symbol"`
+		Shares float64 `json:"shares"`
+		Price  float64 `json:"price"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	portfolioManager.AddHolding(req.Symbol, req.Shares, req.Price)
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleInvestmentBuy(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Symbol string  `json:"symbol"`
+		Shares float64 `json:"shares"`
+		Side   string  `json:"side"` // buy or sell
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	apiKey := os.Getenv("ALPACA_API_KEY")
+	apiSecret := os.Getenv("ALPACA_SECRET")
+	if apiKey == "" || apiSecret == "" {
+		http.Error(w, "ALPACA_API_KEY or ALPACA_SECRET not set", 500)
+		return
+	}
+
+	// Alpaca Paper Trading URL (defaulting to paper for safety)
+	alpacaURL := "https://paper-api.alpaca.markets/v2/orders"
+	if os.Getenv("ALPACA_LIVE") == "true" {
+		alpacaURL = "https://api.alpaca.markets/v2/orders"
+	}
+
+	orderBody := map[string]interface{}{
+		"symbol":        req.Symbol,
+		"qty":           req.Shares,
+		"side":          req.Side,
+		"type":          "market",
+		"time_in_force": "gtc",
+	}
+	b, _ := json.Marshal(orderBody)
+
+	hReq, _ := http.NewRequest("POST", alpacaURL, bytes.NewBuffer(b))
+	hReq.Header.Set("APCA-API-KEY-ID", apiKey)
+	hReq.Header.Set("APCA-API-SECRET-KEY", apiSecret)
+	hReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(hReq)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Alpaca request failed: %v", err), 500)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var errRes interface{}
+		json.NewDecoder(resp.Body).Decode(&errRes)
+		w.WriteHeader(resp.StatusCode)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Alpaca error", "details": errRes})
+		return
+	}
+
+	var orderRes interface{}
+	json.NewDecoder(resp.Body).Decode(&orderRes)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(orderRes)
+}
+
+func handleInvestmentOpportunities(w http.ResponseWriter, r *http.Request) {
+	res := tools.RunTool("market_data", map[string]interface{}{
+		"action": "search_news",
+		"query":  "IPO announcement",
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
