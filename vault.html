@@ -101,11 +101,11 @@
         <div id="send-status" style="margin-top:10px;"></div>
         <div class="quick-actions">
             <span style="color:#aaa;font-size:0.8rem;">Quick:</span>
-            <button class="btn btn-outline" onclick="quickSend(5)">$5 Test</button>
-            <button class="btn btn-outline" onclick="quickSend(110)">$110 PS Plus</button>
-            <button class="btn btn-outline" onclick="quickSend(200)">$200 ChatGPT Pro</button>
-            <button class="btn btn-outline" onclick="quickSend(20)">$20 Claude</button>
-            <button class="btn btn-outline" onclick="quickSend(99)">$99 Abacus</button>
+            <button class="btn btn-outline" onclick="quickSend(5, 'Test')">$5 Test</button>
+            <button class="btn btn-outline" onclick="quickSend(110, 'PlayStation')">$110 PS Plus</button>
+            <button class="btn btn-outline" onclick="quickSend(200, 'OpenAI')">$200 ChatGPT Pro</button>
+            <button class="btn btn-outline" onclick="quickSend(20, 'Anthropic')">$20 Claude</button>
+            <button class="btn btn-outline" onclick="quickSend(99, 'Abacus')">$99 Abacus</button>
         </div>
     </div>
 
@@ -159,33 +159,29 @@ async function loadBalances() {
 // ===== MOVE MONEY =====
 async function sendPayout() {
     const amount = parseFloat(document.getElementById('amount').value);
-    const cashtag = document.getElementById('cashtag').value.trim();
+    const merchant = document.getElementById('cashtag').value.trim().replace('$','');
     if (!amount || amount <= 0) return alert('Please enter a valid amount.');
-    if (!cashtag) return alert('Please enter a recipient $cashtag.');
+    if (!merchant) return alert('Please enter a merchant name.');
 
     const statusDiv = document.getElementById('send-status');
-    statusDiv.innerHTML = 'Sending…';
+    statusDiv.innerHTML = 'Generating card…';
     try {
-        const res = await fetch(`${BASE}/agent/send-to-cashapp`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ cashtag, amount })
+        const res = await fetch(`${BASE}/agent/create-agent-card`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ merchant, amount })
         });
         const data = await res.json();
-        if (data.approval_required) {
-            statusDiv.innerHTML = '⏳ Awaiting approval… Check the Authorization Console.';
-        } else {
-            statusDiv.innerHTML = '✅ Payout completed! Check your Cash App.';
-        }
+        statusDiv.innerHTML = `✅ Card ready! Number: ${data.pan}, Exp: ${data.expiry}, CVV: ${data.cvv}`;
     } catch(e) {
-        statusDiv.innerHTML = '❌ Error sending payout. Check console.';
+        statusDiv.innerHTML = '❌ Error generating card. Check console.';
     }
     document.getElementById('amount').value = '';
-    loadApprovals();
-    loadHistory();
 }
 
-function quickSend(amount) {
+function quickSend(amount, merchant) {
     document.getElementById('amount').value = amount;
+    document.getElementById('cashtag').value = merchant;
     sendPayout();
 }
 
