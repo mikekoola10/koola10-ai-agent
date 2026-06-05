@@ -422,6 +422,8 @@ func main() {
 	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
 	r.Post("/grants/check-status", corsMiddleware(handleCheckStatus))
 
+	r.Post("/agent/create-agent-card", corsMiddleware(handleCreateAgentCard))
+
 	r.Post("/payment/create-checkout", corsMiddleware(handleCreateCheckout))
 	r.Post("/stripe/webhook", handleStripeWebhook)
 
@@ -1202,6 +1204,45 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Status check")
 	w.Write([]byte(`{"data": "pending"}`))
 }
+func handleCreateAgentCard(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Merchant string  `json:"merchant"`
+		Amount   float64 `json:"amount"`
+		Limit    float64 `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	amount := req.Amount
+	if amount == 0 {
+		amount = req.Limit
+	}
+
+	if amount == 0 {
+		http.Error(w, "amount or limit required", 400)
+		return
+	}
+
+	// Convert to cents for Privacy API
+	limitCents := amount * 100
+
+	res := tools.RunTool("privacy", map[string]interface{}{
+		"action":   "create_agent_card",
+		"merchant": req.Merchant,
+		"limit":    limitCents,
+	})
+
+	if !res.Success {
+		http.Error(w, res.Error, 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res.Data)
+}
+
 func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
