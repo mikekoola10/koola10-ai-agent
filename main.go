@@ -425,6 +425,8 @@ func main() {
 	r.Post("/payment/create-checkout", corsMiddleware(handleCreateCheckout))
 	r.Post("/stripe/webhook", handleStripeWebhook)
 
+	r.Post("/agent/create-agent-card", corsMiddleware(handleCreateAgentCard))
+
 	r.Post("/ai/chat", corsMiddleware(handleAIChat))
 	r.Post("/ai/remember", corsMiddleware(handleAIRemember))
 	r.Get("/ai/recall", corsMiddleware(handleAIRecall))
@@ -1454,6 +1456,36 @@ func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
 		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
 	}
 	json.NewEncoder(w).Encode(report)
+}
+
+func handleCreateAgentCard(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Merchant string  `json:"merchant"`
+		Limit    float64 `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	if req.Merchant == "" {
+		http.Error(w, "missing merchant", 400)
+		return
+	}
+
+	res := tools.RunTool("privacy", map[string]interface{}{
+		"action":   "create_agent_card",
+		"merchant": req.Merchant,
+		"limit":    req.Limit,
+	})
+
+	if !res.Success {
+		http.Error(w, res.Error, 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res.Data)
 }
 
 func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
