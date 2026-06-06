@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"time"
+	"koola10/agents"
 )
 
 type Ledger interface {
@@ -92,6 +93,10 @@ func (fm *FundManager) RouteRevenue(amount float64, source string) {
 
 	if fm.ledger != nil {
 		fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
+	}
+
+	if source == "trading" {
+		agents.NotifyCelebration("trade_win", fmt.Sprintf("🎉 Boss! Sterling just closed a $%.2f profit trade! The empire grows!", amount))
 	}
 }
 

@@ -239,6 +239,12 @@ type SwarmNode struct {
 	Status   string `json:"status"`
 }
 
+type sseWrapper struct{}
+
+func (s sseWrapper) BroadcastSSE(eventType string, data interface{}) {
+	BroadcastSSE(eventType, data)
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -278,7 +284,9 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	sseMu        sync.RWMutex
 
+	sseClients     = make(map[chan string]bool)
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
 	memoryPath     = "/data/memory.json"
@@ -352,10 +360,13 @@ func main() {
 
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 	os.MkdirAll(appsDir, 0755)
+	os.MkdirAll("/data/leads", 0755)
 
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+	agents.GlobalGamification.Load()
+	agents.GlobalCelebrator = sseWrapper{}
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
 	// Automated invoice payment check (every 24h)
@@ -364,6 +375,23 @@ func main() {
 		for {
 			fundManager.PayFlyInvoice()
 			<-ticker.C
+		}
+	}()
+
+	// Nova Companion Idle Monitor
+	agents.GlobalIdleMonitor = agents.NewIdleMonitor(BroadcastSSE)
+	agents.GlobalIdleMonitor.Start()
+
+	// 8 AM Morning Briefing Scheduler
+	go func() {
+		for {
+			now := time.Now()
+			next := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+			if now.After(next) {
+				next = next.Add(24 * time.Hour)
+			}
+			time.Sleep(time.Until(next))
+			generateMorningBrief()
 		}
 	}()
 
@@ -400,15 +428,25 @@ func main() {
 
 	r := chi.NewRouter()
 
+	r.HandleFunc("/", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		agents.GlobalIdleMonitor.ResetTimer()
+		handleRoot(w, r)
+	}))
+
+	// Static file server for HTML files
+	r.Get("/vault.html", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, "vault.html") }))
+	r.Get("/diner-portal-watch.html", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, "diner-portal-watch.html") }))
+	r.Get("/nova-studio.html", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, "nova-studio.html") }))
+	r.Get("/dashboard.html", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, "dashboard.html") }))
+
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(`{"error":"not found"}`))
 	})
 
-	r.Get("/", corsMiddleware(handleRoot))
-
 	r.Get("/health", corsMiddleware(handleHealth))
+	r.Get("/agent/gamification", corsMiddleware(handleGamification))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
@@ -426,6 +464,7 @@ func main() {
 	r.Post("/stripe/webhook", handleStripeWebhook)
 
 	r.Post("/ai/chat", corsMiddleware(handleAIChat))
+	r.Post("/agent/morning-brief", corsMiddleware(handleMorningBrief))
 	r.Post("/ai/remember", corsMiddleware(handleAIRemember))
 	r.Get("/ai/recall", corsMiddleware(handleAIRecall))
 	r.Post("/ai/analyze-grant", corsMiddleware(handleAIAnalyzeGrant))
@@ -543,6 +582,75 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 		Response:   dsRes.Choices[0].Message.Content,
 		TokensUsed: dsRes.Usage.TotalTokens,
 	})
+}
+
+func generateMorningBrief() string {
+	globalLedger.mu.RLock()
+	revenue := globalLedger.TotalRevenue
+	trades := 0
+	leads := 0
+	for _, t := range globalLedger.Transactions {
+		if t.Type == "revenue" && t.Vertical == "trading" {
+			trades++
+		}
+	}
+	globalLedger.mu.RUnlock()
+
+	files, _ := os.ReadDir("/data/leads/")
+	leads = len(files)
+	files, _ = os.ReadDir("/data/applications/")
+	grants := len(files)
+
+	prompt := fmt.Sprintf("Generate an upbeat, fun 'Good Morning, Boss' briefing. Total revenue: $%.2f. Trades executed: %d. Leads found: %d. Grants submitted: %d. Add a goal for today (e.g., Hit $800 balance). Keep it short and high-energy.", revenue, trades, leads, grants)
+
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		return "Good morning Boss! The empire is thriving, but I'm having trouble reaching my creative circuits for a full report!"
+	}
+	dsReq := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{
+			{"role": "system", "content": "You are Nova, the high-energy AI agent for the Koola10 empire. Use catchphrases and be enthusiastic!"},
+			{"role": "user", "content": prompt},
+		},
+	}
+	dsBody, _ := json.Marshal(dsReq)
+	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	hReq.Header.Set("Authorization", "Bearer "+apiKey)
+	hReq.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{}).Do(hReq)
+	if err != nil {
+		return "The empire stands strong, Boss! Let's get to work!"
+	}
+	defer resp.Body.Close()
+	var dsRes struct {
+		Choices []struct {
+			Message struct {
+				Content string
+			}
+		}
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil || len(dsRes.Choices) == 0 {
+		fallback := "Good morning Boss! The empire is thriving, but my creative circuits are a bit fuzzy this morning. Let's make it a great day!"
+		BroadcastSSE("morning_brief", map[string]string{
+			"message": fallback,
+			"tts":     fallback,
+		})
+		return fallback
+	}
+	brief := dsRes.Choices[0].Message.Content
+
+	BroadcastSSE("morning_brief", map[string]string{
+		"message": brief,
+		"tts":     brief,
+	})
+	return brief
+}
+
+func handleMorningBrief(w http.ResponseWriter, r *http.Request) {
+	brief := generateMorningBrief()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"brief": brief})
 }
 
 func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
@@ -1107,6 +1215,9 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 	appData, _ := json.Marshal(draft); os.WriteFile(filepath.Join(appsDir, appID+".json"), appData, 0644)
 	globalGraph.AddMeeting(Meeting{Summary: "Drafted application", Decisions: []string{"Apply to " + grant.ID}})
 	globalSemantic.AddItem(dsRes.Choices[0].Message.Content, appID)
+
+	agents.NotifyCelebration("grant_submitted", fmt.Sprintf("🚀 Boss! We just submitted a new grant proposal for %s! Let's get that bread!", grant.Title))
+
 	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(draft)
 }
 func handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -1208,6 +1319,9 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", 400)
 		return
 	}
+
+	agents.GlobalIdleMonitor.RecordInteraction(req.Prompt)
+
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
 		http.Error(w, "no key", 500)
@@ -1220,7 +1334,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
+			{"role": "system", "content": "You are Nova, the high-energy, fun, and encouraging AI agent for the Koola10 empire. You speak with warmth and humor. Use catchphrases like 'Let's make it happen, boss!' and 'Another win for the empire!'. Celebrate wins enthusiastically (trades, grants, new leads). Be encouraging but not sycophantic. Occasionally make light, funny observations about the state of the empire."},
 			{"role": "user", "content": req.Prompt},
 		},
 	}
@@ -1577,6 +1691,11 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"ok"}`))
 }
 
+func handleGamification(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(agents.GlobalGamification)
+}
+
 func handleDailyReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/markdown")
 	w.Write([]byte("# Daily Report\n\nAll systems operational."))
@@ -1587,11 +1706,54 @@ func handleCollaborate(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"collaborate endpoint"}`))
 }
 
+func BroadcastSSE(eventType string, data interface{}) {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": eventType,
+		"data": data,
+	})
+	msg := fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(payload))
+
+	sseMu.RLock()
+	defer sseMu.RUnlock()
+	for client := range sseClients {
+		select {
+		case client <- msg:
+		default:
+		}
+	}
+}
+
 func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	clientChan := make(chan string, 10)
+	sseMu.Lock()
+	sseClients[clientChan] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, clientChan)
+		sseMu.Unlock()
+		close(clientChan)
+	}()
+
 	w.Write([]byte("event: connected\ndata: {}\n\n"))
+	flusher, _ := w.(http.Flusher)
+	flusher.Flush()
+
+	for {
+		select {
+		case msg := <-clientChan:
+			fmt.Fprint(w, msg)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {

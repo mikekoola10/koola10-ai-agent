@@ -280,6 +280,45 @@
         if (Math.random() < 0.3) {
             document.getElementById('orb3').style.display = 'block';
         }
+
+        // Real-time Events
+        const es = new EventSource(`${BASE}/events/stream`);
+        es.addEventListener('trade_win', (e) => {
+            const data = JSON.parse(e.data).data;
+            const ticker = document.getElementById('ticker');
+            ticker.textContent = `💰 WIN: ${data.message}`;
+            document.getElementById('booth3').style.boxShadow = '0 0 50px #00F0FF';
+            setTimeout(() => document.getElementById('booth3').style.boxShadow = '', 5000);
+            if (data.tts) new Audio(`https://koola10-tts.fly.dev/tts?text=${encodeURIComponent(data.tts)}&voice=nova`).play();
+        });
+        es.addEventListener('grant_submitted', (e) => {
+            const data = JSON.parse(e.data).data;
+            const ticker = document.getElementById('ticker');
+            ticker.textContent = `🚀 GRANT: ${data.message}`;
+            document.getElementById('orb-msg').textContent = "Orb 1: Excellent work, contestant!";
+            document.getElementById('orb-msg').style.color = "#F59E0B";
+            if (data.tts) new Audio(`https://koola10-tts.fly.dev/tts?text=${encodeURIComponent(data.tts)}&voice=nova`).play();
+        });
+        es.addEventListener('new_lead', (e) => {
+            const data = JSON.parse(e.data).data;
+            const ticker = document.getElementById('ticker');
+            ticker.textContent = `📬 LEAD: ${data.message}`;
+            document.getElementById('orb3').style.display = 'block';
+            setTimeout(() => document.getElementById('orb3').style.display = 'none', 10000);
+            if (data.tts) new Audio(`https://koola10-tts.fly.dev/tts?text=${encodeURIComponent(data.tts)}&voice=nova`).play();
+        });
+        es.addEventListener('morning_brief', (e) => {
+            const data = JSON.parse(e.data).data;
+            alert("Good Morning, Boss! Nova has a briefing for you.");
+            if (data.tts) new Audio(`https://koola10-tts.fly.dev/tts?text=${encodeURIComponent(data.tts)}&voice=nova`).play();
+        });
+        es.addEventListener('idle_chat', (e) => {
+            const data = JSON.parse(e.data).data;
+            const chatDiv = document.getElementById('chat-messages');
+            chatDiv.innerHTML += `<div style="color:#00F0FF">Nova: ${data.message}</div>`;
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+            if (data.tts) new Audio(`https://koola10-tts.fly.dev/tts?text=${encodeURIComponent(data.tts)}&voice=nova`).play();
+        });
     </script>
 </body>
 </html>
