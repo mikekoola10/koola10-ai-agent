@@ -15,9 +15,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 PROFILE_DIR = "/data/browser-profile"
+CASHAPP_PROFILE_DIR = "/data/cashapp-browser-profile"
 os.makedirs(PROFILE_DIR, exist_ok=True)
+os.makedirs(CASHAPP_PROFILE_DIR, exist_ok=True)
 
 app = FastAPI()
+
+# Global state to prevent infinite login retries within a request context
+# Simple in-memory tracker for active login attempts per cashtag
+active_login_attempts = {}
 
 # Configure LLM
 api_key = os.getenv("DEEPSEEK_API_KEY")
@@ -31,8 +37,6 @@ browser_profile = BrowserProfile(
     headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
     disable_security=True,
 )
-# We'll create a new browser instance for each task to ensure clean state and session persistence within task
-# browser = Browser(config=browser_config)
 
 class NavigateRequest(BaseModel):
     url: str
@@ -44,6 +48,14 @@ class FormRequest(BaseModel):
 class ExtractRequest(BaseModel):
     url: str
     instruction: str
+
+class TaskRequest(BaseModel):
+    task: str
+
+class CashAppSendRequest(BaseModel):
+    cashtag: str
+    amount: float
+    otp: Optional[str] = None
 
 class StripeKeysRequest(BaseModel):
     otp: Optional[str] = None
@@ -77,11 +89,8 @@ async def navigate(req: NavigateRequest):
 @app.post("/browser/fill-form")
 async def fill_form(req: FormRequest):
     instructions = [f"Fill the field '{k}' with value '{v}'" for k, v in req.form_data.items()]
-    # Task includes returning a screenshot of the filled form.
-    # browser-use Agent can take screenshots, but to return it via API we need to capture it after the task.
     full_instruction = f"Go to {req.url}, " + ", ".join(instructions) + ". After filling everything, stay on the page so I can take a screenshot."
 
-    # Using a local browser instance to ensure we can capture the final state
     browser = Browser(profile=browser_profile)
     agent = Agent(
         task=full_instruction,
@@ -90,23 +99,15 @@ async def fill_form(req: FormRequest):
     )
     result = await agent.run()
 
-    # Capture screenshot from the same session
-    # browser-use manages sessions internally. We can access the playwright page via the browser instance.
-    playwright_browser = await browser.get_playwright_browser()
-    # This is slightly tricky as browser-use abstracts the page.
-    # Actually, browser-use Agent has a .run() that returns a result.
-    # Let's try to get the active page.
-
     screenshot_b64 = ""
     try:
-        # Get the underlying playwright page from the browser manager
         context = (await browser.get_context())
         page = await context.get_current_page()
         if page:
             screenshot = await page.screenshot()
             screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
     except Exception as e:
-        print(f"Screenshot failed: {e}")
+        logger.error(f"Screenshot failed: {e}")
 
     await browser.close()
     return {
@@ -136,7 +137,7 @@ async def submit_form(req: FormRequest):
             screenshot = await page.screenshot()
             screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
     except Exception as e:
-        print(f"Screenshot failed: {e}")
+        logger.error(f"Screenshot failed: {e}")
 
     await browser.close()
     return {
@@ -159,6 +160,178 @@ async def extract(req: ExtractRequest):
     await browser.close()
     return {"data": str(result)}
 
+@app.post("/browser/task")
+async def run_task(req: TaskRequest):
+    browser = Browser(profile=browser_profile)
+    agent = Agent(
+        task=req.task,
+        llm=llm,
+        browser=browser,
+    )
+    result = await agent.run()
+
+    screenshot_b64 = ""
+    try:
+        context = (await browser.get_context())
+        page = await context.get_current_page()
+        if page:
+            screenshot = await page.screenshot()
+            screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Screenshot failed: {e}")
+
+    await browser.close()
+    return {
+        "status": "success",
+        "result": str(result),
+        "screenshot": screenshot_b64
+    }
+
+@app.post("/browser/cashapp/send")
+async def cashapp_send(req: CashAppSendRequest):
+    email = os.getenv("CASHAPP_EMAIL")
+    password = os.getenv("CASHAPP_PASSWORD")
+    if not email or not password:
+        raise HTTPException(status_code=500, detail="CASHAPP_EMAIL or CASHAPP_PASSWORD not set")
+
+    # Halt retry loop: Check if we've already tried and failed recently for this cashtag
+    attempt_key = f"{req.cashtag}_{req.amount}"
+    if active_login_attempts.get(attempt_key, 0) > 1:
+         return {
+            "status": "error",
+            "error": "HALTED_RETRY: Multiple failed attempts detected for this transaction. Please check credentials and anti-bot status.",
+            "message": "Retry loop halted for safety."
+        }
+
+    async with async_playwright() as p:
+        # User requested headless=False for Cash App to bypass anti-bot
+        context = await p.chromium.launch_persistent_context(
+            user_data_dir=CASHAPP_PROFILE_DIR,
+            headless=False,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"],
+            viewport={"width": 1280, "height": 800}
+        )
+        page = context.pages[0] if context.pages else await context.new_page()
+        page.set_default_timeout(60000)
+
+        try:
+            logger.info("Navigating to Cash App...")
+            await page.goto("https://cash.app/login", wait_until="networkidle")
+
+            # Check for login markers
+            login_needed = await page.locator('input[name="email"], input[type="email"]').is_visible(timeout=5000)
+            if login_needed:
+                logger.info("Login required. Filling credentials...")
+                active_login_attempts[attempt_key] = active_login_attempts.get(attempt_key, 0) + 1
+                await page.locator('input[name="email"], input[type="email"]').first.fill(email)
+                await page.keyboard.press("Enter")
+                await asyncio.sleep(2)
+
+                if await page.locator('input[name="password"]').is_visible(timeout=5000):
+                    await page.locator('input[name="password"]').fill(password)
+                    await page.keyboard.press("Enter")
+                    await asyncio.sleep(5)
+
+            # Handle challenges/2FA
+            is_2fa = await page.get_by_text("Verification code").is_visible() or \
+                     await page.locator('input[name="otp"]').is_visible() or \
+                     await page.get_by_text("Enter the code").is_visible()
+
+            is_captcha = await page.get_by_text("Verify you are human").is_visible() or \
+                         await page.get_by_text("Please drag the element").is_visible()
+
+            if is_2fa or is_captcha:
+                if req.otp and is_2fa:
+                    logger.info("Submitting OTP...")
+                    otp_field = page.locator('input[name="otp"], input[id="otp"]').first
+                    await otp_field.fill(req.otp)
+                    await page.keyboard.press("Enter")
+                    await asyncio.sleep(5)
+                else:
+                    logger.info("2FA or Challenge detected")
+                    screenshot = await get_screenshot_base64(page)
+                    await context.close()
+                    return {
+                        "status": "2FA_REQUIRED",
+                        "screenshot": screenshot,
+                        "message": "Cash App requires manual verification or 2FA."
+                    }
+
+            # Now use Agent for the actual transaction logic
+            logger.info("Login process complete. Delegating to Agent for payment flow...")
+            await context.close()
+
+            # Using BrowserProfile for browser-use integration
+            browser = Browser(profile=BrowserProfile(headless=False, user_data_dir=CASHAPP_PROFILE_DIR))
+            task = f"""Navigate to the "Pay" or "Send Money" section.
+            Send ${req.amount:.2f} to cashtag "{req.cashtag}".
+            Confirm the payment.
+            Provide the final result message."""
+
+            agent = Agent(task=task, llm=llm, browser=browser)
+            result = await agent.run()
+
+            # Get final state screenshot
+            screenshot_b64 = ""
+            try:
+                agent_context = await browser.get_context()
+                agent_page = await agent_context.get_current_page()
+                if agent_page:
+                    screenshot_b64 = await get_screenshot_base64(agent_page)
+            except Exception as se:
+                logger.error(f"Agent screenshot failed: {se}")
+
+            await browser.close()
+            # Success! Reset attempts for this transaction
+            active_login_attempts.pop(attempt_key, None)
+
+            return {
+                "status": "success",
+                "result": str(result),
+                "screenshot": screenshot_b64
+            }
+
+        except Exception as e:
+            logger.error(f"Cash App Error: {e}")
+            screenshot = await get_screenshot_base64(page)
+            try:
+                await context.close()
+            except:
+                pass
+            return {
+                "status": "error",
+                "error": str(e),
+                "screenshot": screenshot
+            }
+
+@app.get("/browser/cashapp/balance")
+async def cashapp_balance():
+    email = os.getenv("CASHAPP_EMAIL")
+    password = os.getenv("CASHAPP_PASSWORD")
+    if not email or not password:
+        raise HTTPException(status_code=500, detail="CASHAPP_EMAIL or CASHAPP_PASSWORD not set")
+
+    browser = Browser(profile=BrowserProfile(headless=False, user_data_dir=CASHAPP_PROFILE_DIR))
+    task = "Log in to Cash App if needed and tell me the current balance."
+    agent = Agent(task=task, llm=llm, browser=browser)
+    result = await agent.run()
+    await browser.close()
+    return {"status": "success", "result": str(result)}
+
+@app.get("/browser/cashapp/history")
+async def cashapp_history():
+    email = os.getenv("CASHAPP_EMAIL")
+    password = os.getenv("CASHAPP_PASSWORD")
+    if not email or not password:
+        raise HTTPException(status_code=500, detail="CASHAPP_EMAIL or CASHAPP_PASSWORD not set")
+
+    browser = Browser(profile=BrowserProfile(headless=False, user_data_dir=CASHAPP_PROFILE_DIR))
+    task = "Log in to Cash App if needed and show me the recent transaction history. Summarize the last 5 transactions."
+    agent = Agent(task=task, llm=llm, browser=browser)
+    result = await agent.run()
+    await browser.close()
+    return {"status": "success", "result": str(result)}
+
 @app.post("/browser/stripe-live-keys")
 async def get_stripe_keys(req: StripeKeysRequest):
     email = os.getenv("STRIPE_LOGIN_EMAIL")
@@ -171,10 +344,9 @@ async def get_stripe_keys(req: StripeKeysRequest):
     logger.info(f"Starting Stripe key extraction for {email}")
 
     async with async_playwright() as p:
-        # Launch persistent context — saves cookies, localStorage, session tokens
         context = await p.chromium.launch_persistent_context(
             user_data_dir=PROFILE_DIR,
-            headless=os.getenv("BROWSER_HEADLESS", "false").lower() == "true",  # Default to False for Stripe
+            headless=os.getenv("BROWSER_HEADLESS", "false").lower() == "true",
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"],
             viewport={"width": 1280, "height": 800}
         )
@@ -182,16 +354,13 @@ async def get_stripe_keys(req: StripeKeysRequest):
         page.set_default_timeout(60000)
 
         try:
-            # Step 1: Check if already logged in or need login
             logger.info("Checking Stripe session...")
             await page.goto("https://dashboard.stripe.com/dashboard", wait_until="load")
 
-            # If redirected to login, we need to authenticate
             if "login" in page.url:
                 logger.info("Session expired or not found. Logging in...")
                 await page.goto("https://dashboard.stripe.com/login", wait_until="load")
 
-                # Dismiss cookies
                 try:
                     cookie_button = page.locator('button:has-text("Accept all"), button:has-text("Accept"), button:has-text("Reject non-essential")').first
                     if await cookie_button.is_visible(timeout=3000):
@@ -214,14 +383,12 @@ async def get_stripe_keys(req: StripeKeysRequest):
                 logger.info("Filling password...")
                 await password_field.fill(password)
 
-                # Click Sign in
                 submit_button = page.locator('button[type="submit"], button:has-text("Sign in")').first
                 await submit_button.click()
                 logger.info("Login submitted")
             else:
                 logger.info("Already logged in.")
 
-            # Step 2: Handle 2FA or dashboard redirect
             logger.info("Waiting for dashboard or 2FA...")
             success = False
             for _ in range(30):
@@ -230,7 +397,6 @@ async def get_stripe_keys(req: StripeKeysRequest):
                     success = True
                     break
 
-                # Check for 2FA markers
                 is_2fa = await page.get_by_text("Verification code").is_visible() or \
                          await page.locator('input[name="otp"]').is_visible() or \
                          await page.locator('input[id="otp"]').is_visible() or \
@@ -241,11 +407,10 @@ async def get_stripe_keys(req: StripeKeysRequest):
                         logger.info("OTP provided, filling...")
                         otp_field = page.locator('input[name="otp"], input[id="otp"]').first
                         await otp_field.fill(req.otp)
-                        # Usually it auto-submits, but let's check for a button just in case
                         submit_otp = page.locator('button:has-text("Continue"), button:has-text("Submit")').first
                         if await submit_otp.is_visible(timeout=2000):
                             await submit_otp.click()
-                        req.otp = None # Clear it so we don't try again if it fails
+                        req.otp = None
                         await asyncio.sleep(5)
                         continue
                     else:
@@ -257,7 +422,6 @@ async def get_stripe_keys(req: StripeKeysRequest):
                             "screenshot": screenshot
                         }
 
-                # Handle anti-bot challenge
                 if await page.get_by_text("Please drag the element").is_visible() or \
                    await page.get_by_text("Verify you are human").is_visible():
                     logger.info("Bot challenge detected")
@@ -269,7 +433,6 @@ async def get_stripe_keys(req: StripeKeysRequest):
                         "info": "Anti-bot challenge detected. Manual intervention required."
                     }
 
-                # Handle intermediate pages
                 if "select-account" in page.url:
                     logger.info("Account selection detected, picking first account...")
                     await page.locator('button').first.click()
@@ -289,11 +452,9 @@ async def get_stripe_keys(req: StripeKeysRequest):
                     "info": "Timed out waiting for dashboard. Screenshot attached."
                 }
 
-            # Step 3: Extract Secret Key
             logger.info("Navigating to API keys page...")
             await page.goto("https://dashboard.stripe.com/apikeys", wait_until="load")
 
-            # Look for the Reveal button in the Secret key row
             logger.info("Looking for secret key...")
             secret_key = None
             try:
@@ -313,7 +474,6 @@ async def get_stripe_keys(req: StripeKeysRequest):
             except Exception as e:
                 logger.error(f"Failed to find secret key: {e}")
 
-            # Step 4: Extract Webhook Secret
             logger.info("Navigating to Webhooks page...")
             await page.goto("https://dashboard.stripe.com/webhooks", wait_until="load")
 
