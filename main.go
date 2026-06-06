@@ -469,6 +469,8 @@ func main() {
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
+	r.Post("/agent/create-agent-card", corsMiddleware(handleCreateAgentCard))
+	r.Post("/agent/purchase-psplus", corsMiddleware(handlePurchasePSPlus))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
@@ -1011,6 +1013,138 @@ func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float
 }
 
 // --- Financial Handlers ---
+
+func handleCreateAgentCard(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Merchant string  `json:"merchant"`
+		Amount   float64 `json:"amount"`
+		Limit    float64 `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	amount := req.Amount
+	if amount == 0 {
+		amount = req.Limit
+	}
+
+	if amount == 0 {
+		http.Error(w, "amount or limit required", 400)
+		return
+	}
+
+	// Convert to cents for Privacy API
+	limitCents := amount * 100
+
+	res := tools.RunTool("privacy", map[string]interface{}{
+		"action":   "create_agent_card",
+		"merchant": req.Merchant,
+		"limit":    limitCents,
+	})
+
+	if !res.Success {
+		http.Error(w, res.Error, 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res.Data)
+}
+
+func handlePurchasePSPlus(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OTP string `json:"otp"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	password := os.Getenv("PLAYSTATION_PASSWORD")
+	if password == "" {
+		http.Error(w, "PLAYSTATION_PASSWORD secret not set", 500)
+		return
+	}
+	email := "mikekoola10@gmail.com"
+
+	// 1. Create agent card
+	cardRes := tools.RunTool("privacy", map[string]interface{}{
+		"action":   "create_agent_card",
+		"merchant": "PlayStation",
+		"limit":    11000.0, // $110 in cents
+	})
+
+	if !cardRes.Success {
+		http.Error(w, "Failed to create virtual card: "+cardRes.Error, 500)
+		return
+	}
+
+	cardData, ok := cardRes.Data.(map[string]interface{})
+	if !ok {
+		http.Error(w, "Invalid card data from privacy tool", 500)
+		return
+	}
+
+	// Helper for safe string extraction
+	getStr := func(m map[string]interface{}, key string) string {
+		v, _ := m[key].(string)
+		return v
+	}
+
+	pan := getStr(cardData, "pan")
+	expMonth := getStr(cardData, "exp_month")
+	expYear := getStr(cardData, "exp_year")
+	cvv := getStr(cardData, "cvv")
+
+	if pan == "" || expMonth == "" || expYear == "" || cvv == "" {
+		http.Error(w, "Incomplete card details from privacy tool", 500)
+		return
+	}
+
+	// 2. Prepare browser task
+	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
+	if browserAgentURL == "" {
+		browserAgentURL = "http://localhost:8081"
+	}
+
+	purchaseReq := map[string]interface{}{
+		"email":    email,
+		"password": password,
+		"otp":      req.OTP,
+		"card_details": map[string]string{
+			"number":       pan,
+			"expiry_month": expMonth,
+			"expiry_year":  expYear,
+			"cvc":          cvv,
+		},
+	}
+
+	jsonBody, _ := json.Marshal(purchaseReq)
+	resp, err := http.Post(browserAgentURL+"/browser/psplus-purchase", "application/json", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		http.Error(w, "Failed to connect to browser agent: "+err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+
+	var browserRes map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&browserRes); err != nil {
+		http.Error(w, "Failed to parse browser agent response", 500)
+		return
+	}
+
+	if browserRes["status"] != "success" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(browserRes)
+		return
+	}
+
+	// 3. Log to economic ledger
+	globalLedger.RecordCost("ps_plus", "ps_plus_subscription", 110.0, "PlayStation Plus Premium Subscription")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(browserRes)
+}
 
 func handleFinancialStatus(w http.ResponseWriter, r *http.Request) {
 	status := fundManager.GetStatus()

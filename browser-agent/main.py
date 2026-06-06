@@ -48,6 +48,12 @@ class ExtractRequest(BaseModel):
 class StripeKeysRequest(BaseModel):
     otp: Optional[str] = None
 
+class PSPlusPurchaseRequest(BaseModel):
+    email: str
+    password: str
+    card_details: Dict[str, str]
+    otp: Optional[str] = None
+
 async def get_screenshot_base64(page):
     try:
         screenshot = await page.screenshot()
@@ -158,6 +164,140 @@ async def extract(req: ExtractRequest):
     result = await agent.run()
     await browser.close()
     return {"data": str(result)}
+
+@app.post("/browser/psplus-purchase")
+async def psplus_purchase(req: PSPlusPurchaseRequest):
+    logger.info(f"Starting PS Plus purchase for {req.email}")
+
+    # Profile for Cash App is used as per instructions (session persistence)
+    PROFILE_DIR_PS = "/data/cashapp-browser-profile"
+    os.makedirs(PROFILE_DIR_PS, exist_ok=True)
+
+    async with async_playwright() as p:
+        context = await p.chromium.launch_persistent_context(
+            user_data_dir=PROFILE_DIR_PS,
+            headless=os.getenv("BROWSER_HEADLESS", "false").lower() == "true",
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"],
+            viewport={"width": 1280, "height": 800}
+        )
+        page = context.pages[0] if context.pages else await context.new_page()
+        page.set_default_timeout(60000)
+
+        try:
+            # 1. Login Flow
+            logger.info("Navigating to PlayStation Store...")
+            await page.goto("https://store.playstation.com/en-us/pages/latest", wait_until="load")
+
+            # Check if signed in
+            signin_button = page.locator('button:has-text("Sign In")').first
+            if await signin_button.is_visible(timeout=5000):
+                logger.info("Clicking Sign In...")
+                await signin_button.click()
+                await page.wait_for_url("**/login**", timeout=30000)
+
+                await page.fill('input[type="email"], input[name="username"]', req.email)
+                await page.click('button:has-text("Next")')
+
+                await page.fill('input[type="password"], input[name="password"]', req.password)
+                await page.click('button:has-text("Sign In")')
+
+                # Check for 2FA
+                await asyncio.sleep(5)
+                is_2fa = "2step" in page.url or await page.locator('input[name="verificationCode"]').is_visible(timeout=5000)
+
+                if is_2fa:
+                    if req.otp:
+                        logger.info("Filling 2FA code...")
+                        await page.fill('input[name="verificationCode"]', req.otp)
+                        await page.click('button:has-text("Verify")')
+                        await asyncio.sleep(5)
+                    else:
+                        logger.info("2FA Required")
+                        screenshot = await get_screenshot_base64(page)
+                        await context.close()
+                        return {"status": "2FA_REQUIRED", "screenshot": screenshot}
+
+            # 2. Navigate to Premium Subscription
+            logger.info("Navigating to PS Plus Premium page...")
+            await page.goto("https://store.playstation.com/en-us/product/IP9102-NPIA90006_01-PSPLUSPREMIUM12M", wait_until="load")
+
+            # 3. Add to Cart / Subscribe
+            subscribe_btn = page.locator('button:has-text("Add to Cart"), button:has-text("Subscribe"), button:has-text("Select")').first
+            await subscribe_btn.click()
+            logger.info("Clicked Subscribe/Add to Cart")
+
+            # 4. Checkout Flow
+            # Navigate to cart/checkout if not automatic
+            if "cart" not in page.url and "checkout" not in page.url:
+                await page.goto("https://store.playstation.com/en-us/cart", wait_until="load")
+
+            checkout_btn = page.locator('button:has-text("Proceed to Checkout")').first
+            await checkout_btn.click()
+
+            # 5. Payment Method
+            # Find "Add a credit/debit card"
+            add_card_btn = page.locator('button:has-text("Add a credit/debit card"), button:has-text("Add a New Card")').first
+            if await add_card_btn.is_visible(timeout=10000):
+                await add_card_btn.click()
+
+                # Enter card details
+                # Note: PlayStation often uses iframes for card details
+                logger.info("Filling card details...")
+
+                async def fill_field(selector, value):
+                    # Try main page
+                    try:
+                        field = page.locator(selector)
+                        if await field.is_visible(timeout=2000):
+                            await field.fill(value)
+                            return True
+                    except:
+                        pass
+
+                    # Try iframes
+                    for frame in page.frames:
+                        try:
+                            field = frame.locator(selector)
+                            if await field.is_visible(timeout=1000):
+                                await field.fill(value)
+                                return True
+                        except:
+                            continue
+                    return False
+
+                await fill_field('input[name="cardNumber"], #cardNumber', req.card_details["number"])
+                await fill_field('input[name="expiryDate"], #expiryDate', f"{req.card_details['expiry_month']}/{req.card_details['expiry_year'][-2:]}")
+                await fill_field('input[name="cvv"], #cvv', req.card_details["cvc"])
+                await fill_field('input[name="cardholderName"], #cardholderName', "Mike Koola")
+
+                save_btn = page.locator('button:has-text("Save")').first
+                await save_btn.click()
+                await asyncio.sleep(3)
+
+            # 6. Confirm Purchase
+            confirm_btn = page.locator('button:has-text("Confirm Purchase"), button:has-text("Order & Pay")').first
+            await confirm_btn.click()
+            logger.info("Purchase confirmed")
+
+            await page.wait_for_selector('text="Thank you"', timeout=30000)
+            screenshot = await get_screenshot_base64(page)
+
+            await context.close()
+            return {
+                "status": "success",
+                "message": "PlayStation Plus Premium purchased successfully",
+                "screenshot": screenshot
+            }
+
+        except Exception as e:
+            logger.error(f"Purchase failed: {e}")
+            screenshot = await get_screenshot_base64(page)
+            await context.close()
+            return {
+                "status": "error",
+                "error": str(e),
+                "screenshot": screenshot
+            }
 
 @app.post("/browser/stripe-live-keys")
 async def get_stripe_keys(req: StripeKeysRequest):
