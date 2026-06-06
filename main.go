@@ -275,6 +275,7 @@ var (
 	auditMutex   sync.Mutex
 	usageMutex   sync.Mutex
 	approvalMu   sync.Mutex
+	sseMu        sync.Mutex
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
@@ -309,6 +310,8 @@ var (
 	globalSwarmManager = agents.NewSwarmManager()
 
 	approvalStore = make(map[string]*ApprovalRequest)
+	payoutStore   = make(map[string]*ApprovalRequest)
+	sseClients    = make(map[chan string]bool)
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
 
@@ -411,6 +414,9 @@ func main() {
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
+	r.Post("/agent/send-to-cashapp", corsMiddleware(handleSendToCashApp))
+	r.Get("/agent/pending-approvals", corsMiddleware(handlePendingApprovals))
+	r.Post("/voice/confirm", corsMiddleware(handleVoiceConfirm))
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
 
 	r.Get("/grants/search", corsMiddleware(handleSearch))
@@ -1587,12 +1593,134 @@ func handleCollaborate(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"collaborate endpoint"}`))
 }
 
+
+func broadcastSSE(eventType string, data interface{}) {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": eventType,
+		"data": data,
+	})
+	msg := fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(payload))
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	for clientChan := range sseClients {
+		select {
+		case clientChan <- msg:
+		default:
+		}
+	}
+}
+
+func handleSendToCashApp(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Amount    float64 `json:"amount"`
+		Recipient string  `json:"recipient"`
+		Cashtag   string  `json:"cashtag"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	recipient := req.Recipient
+	if recipient == "" {
+		recipient = req.Cashtag
+	}
+	payoutID := generateID()
+	details := map[string]interface{}{"amount": req.Amount, "recipient": recipient, "payout_id": payoutID}
+	if req.Amount >= 50.0 {
+		approval := &ApprovalRequest{ID: payoutID, Action: "cashapp_payout", Details: details, Status: "pending", CreatedAt: time.Now().Format(time.RFC3339)}
+		approvalMu.Lock()
+		payoutStore[payoutID] = approval
+		approvalMu.Unlock()
+		broadcastSSE("cashapp_payout_request", approval)
+		AddAuditEntry("cashapp_payout_requested", details)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "awaiting_approval", "payout_id": payoutID})
+		return
+	}
+	globalLedger.RecordCost("cashapp", "payout", req.Amount, "Payout to "+recipient)
+	AddAuditEntry("cashapp_payout_completed", details)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "completed"})
+}
+
+func handlePendingApprovals(w http.ResponseWriter, r *http.Request) {
+	approvalMu.Lock()
+	defer approvalMu.Unlock()
+	pending := []*ApprovalRequest{}
+	for _, p := range payoutStore {
+		if p.Status == "pending" {
+			pending = append(pending, p)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(pending)
+}
+
+func handleVoiceConfirm(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Approved bool   `json:"approved"`
+		PayoutID string `json:"payout_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	approvalMu.Lock()
+	p, ok := payoutStore[req.PayoutID]
+	if !ok {
+		approvalMu.Unlock()
+		http.Error(w, "not found", 404)
+		return
+	}
+	if req.Approved {
+		p.Status = "approved"
+		amount := p.Details["amount"].(float64)
+		recipient := p.Details["recipient"].(string)
+		globalLedger.RecordCost("cashapp", "payout", amount, "Approved Payout to "+recipient)
+		AddAuditEntry("cashapp_payout_approved", p.Details)
+	} else {
+		p.Status = "rejected"
+		AddAuditEntry("cashapp_payout_rejected", p.Details)
+	}
+	approvalMu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": p.Status})
+}
+
 func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Write([]byte("event: connected\ndata: {}\n\n"))
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	clientChan := make(chan string, 10)
+	sseMu.Lock()
+	sseClients[clientChan] = true
+	sseMu.Unlock()
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, clientChan)
+		sseMu.Unlock()
+		close(clientChan)
+	}()
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, "event: connected\ndata: {}\n\n")
+	flusher.Flush()
+	ctx := r.Context()
+	for {
+		select {
+		case msg := <-clientChan:
+			fmt.Fprint(w, msg)
+			flusher.Flush()
+		case <-ctx.Done():
+			return
+		}
+	}
 }
+
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
