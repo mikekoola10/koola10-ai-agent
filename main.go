@@ -373,13 +373,19 @@ func main() {
 				"query":  "IPO announcement market major move",
 			})
 			if res.Success {
-				// We can log or process articles here if needed
-				log.Printf("[Investment] Found %v results", res.Output)
-			}
+				// Try to parse the first article to make it proactive and specific
+				if articles, ok := res.Data.([]interface{}); ok && len(articles) > 0 {
+					if article, ok := articles[0].(map[string]interface{}); ok {
+						headline, _ := article["title"].(string)
+						description, _ := article["description"].(string)
 
-			// Simple implementation: broadcast any news to SSE
-			msg := "Proactive analysis: Major market moves detected. Check dashboard."
-			broadcastSSE("investment_opportunity", map[string]string{"headline": "Market Scan", "summary": msg})
+						broadcastSSE("investment_opportunity", map[string]string{
+							"headline": headline,
+							"summary":  description + " Ask Echelon for a full analysis.",
+						})
+					}
+				}
+			}
 
 			<-ticker.C
 		}
