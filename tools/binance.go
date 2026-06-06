@@ -108,11 +108,20 @@ func binanceTool(payload map[string]interface{}) ToolResult {
 			},
 		}
 
-	case "trade":
+	case "trade", "market_buy", "market_sell":
 		side, _ := payload["side"].(string)
+		if action == "market_buy" {
+			side = "BUY"
+		} else if action == "market_sell" {
+			side = "SELL"
+		}
 		if side == "" { side = "BUY" }
 		side = strings.ToUpper(side)
+
 		quantity, _ := payload["quantity"].(float64)
+		if quantity == 0 {
+			quantity, _ = payload["amount"].(float64)
+		}
 		if quantity == 0 { return ToolResult{Success: false, Error: "quantity is required"} }
 
 		timestamp := time.Now().UnixMilli()
