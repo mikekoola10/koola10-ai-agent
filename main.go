@@ -25,6 +25,7 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	_ "koola10/tools"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -289,6 +290,7 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	portfolioPath  = "/data/portfolio.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -304,7 +306,8 @@ var (
 		Balance: 100.0,
 	}
 
-	fundManager *financial.FundManager
+	fundManager      *financial.FundManager
+	portfolioManager *financial.PortfolioManager
 
 	globalSwarmManager = agents.NewSwarmManager()
 
@@ -357,12 +360,29 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	portfolioManager = financial.NewPortfolioManager(portfolioPath, globalLedger)
 
 	// Automated invoice payment check (every 24h)
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		for {
 			fundManager.PayFlyInvoice()
+			<-ticker.C
+		}
+	}()
+
+	// Automated crypto profit sweep (every 24h)
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		for {
+			globalLedger.mu.RLock()
+			txs := make([]interface{}, len(globalLedger.Transactions))
+			for i, v := range globalLedger.Transactions {
+				txs[i] = v
+			}
+			portfolioManager.SweepProfits(txs)
+			globalLedger.mu.RUnlock()
+			AddAuditEntry("crypto_profit_sweep", map[string]interface{}{"balance": portfolioManager.Balance})
 			<-ticker.C
 		}
 	}()
@@ -444,6 +464,7 @@ func main() {
 	r.Get("/compliance/audit/verify", corsMiddleware(handleComplianceAuditVerify))
 	r.Post("/compliance/approval", corsMiddleware(handleComplianceApproval))
 	r.Post("/compliance/approve", corsMiddleware(handleComplianceApprove))
+	r.Get("/compliance/approval/status/{id}", corsMiddleware(handleComplianceApprovalStatus))
 	r.Post("/compliance/kill-switch", corsMiddleware(handleComplianceKillSwitch))
 	r.Post("/compliance/kill-switch/reset", corsMiddleware(handleComplianceKillSwitchReset))
 	r.Get("/compliance/usage", corsMiddleware(handleComplianceUsage))
@@ -1320,6 +1341,16 @@ func handleComplianceApprove(w http.ResponseWriter, r *http.Request) {
 	approvalMu.Lock(); ap, ok := approvalStore[req.ApprovalID]; if ok { ap.Status = "approved" }; approvalMu.Unlock()
 	json.NewEncoder(w).Encode(ap)
 }
+func handleComplianceApprovalStatus(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	approvalMu.Lock()
+	defer approvalMu.Unlock()
+	if ap, ok := approvalStore[id]; ok {
+		json.NewEncoder(w).Encode(ap)
+	} else {
+		http.Error(w, "not found", 404)
+	}
+}
 func handleComplianceKillSwitch(w http.ResponseWriter, r *http.Request) {
 	os.WriteFile(killSwitchPath, []byte("active"), 0644); w.Write([]byte("Active"))
 }
@@ -1333,6 +1364,10 @@ func handleEconomicLedgerCost(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
+	var req struct { Amount float64; Source string; Vertical string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+		globalLedger.RecordRevenueWithVertical(req.Vertical, req.Amount, req.Source)
+	}
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
