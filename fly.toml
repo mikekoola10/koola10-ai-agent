@@ -1,9 +1,9 @@
-# fly.toml app configuration file generated for koola10-stacking on 2026-05-23T10:08:16Z
+# fly.toml app configuration file generated for koola10-browser on 2026-06-06T07:49:39Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'koola10-stacking'
+app = 'koola10-browser'
 primary_region = 'ams'
 
 [build]
