@@ -268,6 +268,18 @@ type VideoJob struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type ErrorReport struct {
+	Agent     string                 `json:"agent"`
+	TaskID    string                 `json:"task_id"`
+	Step      string                 `json:"step"`
+	Error     string                 `json:"error"`
+	Traceback string                 `json:"traceback"`
+	Details   map[string]interface{} `json:"details"`
+	Timestamp int64                  `json:"timestamp"`
+}
+
+var errorChan = make(chan ErrorReport, 100)
+
 // --- Global States ---
 
 var (
@@ -338,6 +350,25 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+func handleErrorReport(w http.ResponseWriter, r *http.Request) {
+	var report ErrorReport
+	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	errorChan <- report
+	w.WriteHeader(http.StatusOK)
+}
+
+func startSupervisor() {
+	go func() {
+		for report := range errorChan {
+			log.Printf("Received error from %s: %s", report.Agent, report.Error)
+			// For now, just log. Objective 3 will add auto-fix.
+		}
+	}()
 }
 
 // --- Main ---
@@ -478,6 +509,9 @@ func main() {
 	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+
+	r.Post("/api/v1/error_report", corsMiddleware(handleErrorReport))
+	go startSupervisor()
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
