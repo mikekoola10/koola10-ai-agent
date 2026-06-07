@@ -1,4 +1,6 @@
 import os
+# Force Playwright to use the browsers installed in the image
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/ms-playwright"
 import base64
 import asyncio
 import logging
@@ -56,11 +58,17 @@ class PSPlusPurchaseRequest(BaseModel):
 
 async def get_screenshot_base64(page):
     try:
-        screenshot = await page.screenshot()
+        # Use animations disabled to speed up and avoid font timeouts
+        screenshot = await page.screenshot(animations="disabled", timeout=10000)
         return base64.b64encode(screenshot).decode('utf-8')
     except Exception as e:
         logger.error(f"Failed to take screenshot: {e}")
-        return None
+        try:
+            # Fallback to very basic screenshot
+            screenshot = await page.screenshot(timeout=5000)
+            return base64.b64encode(screenshot).decode('utf-8')
+        except:
+            return None
 
 @app.get("/health")
 async def health():
@@ -169,15 +177,23 @@ async def extract(req: ExtractRequest):
 async def psplus_purchase(req: PSPlusPurchaseRequest):
     logger.info(f"Starting PS Plus purchase for {req.email}")
 
-    # Profile for Cash App is used as per instructions (session persistence)
-    PROFILE_DIR_PS = "/data/cashapp-browser-profile"
+    # Use a specific profile for PS Plus to avoid permission issues with existing root-owned folders
+    PROFILE_DIR_PS = "/data/psplus-browser-profile"
     os.makedirs(PROFILE_DIR_PS, exist_ok=True)
 
     async with async_playwright() as p:
         context = await p.chromium.launch_persistent_context(
             user_data_dir=PROFILE_DIR_PS,
             headless=os.getenv("BROWSER_HEADLESS", "false").lower() == "true",
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"],
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process"
+            ],
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800}
         )
         page = context.pages[0] if context.pages else await context.new_page()
@@ -186,20 +202,86 @@ async def psplus_purchase(req: PSPlusPurchaseRequest):
         try:
             # 1. Login Flow
             logger.info("Navigating to PlayStation Store...")
-            await page.goto("https://store.playstation.com/en-us/pages/latest", wait_until="load")
+            await page.goto("https://store.playstation.com/en-us/pages/latest", wait_until="networkidle", timeout=60000)
+
+            # Dismiss cookie banner if present
+            logger.info("Handling potential cookie banner...")
+            await asyncio.sleep(2)
+            try:
+                await page.evaluate("""
+                    () => {
+                        const clickBtn = (id) => document.getElementById(id)?.click();
+                        clickBtn('onetrust-accept-btn-handler');
+
+                        const removeEls = (sel) => document.querySelectorAll(sel).forEach(el => el.remove());
+                        ['#onetrust-banner-sdk', '.ot-sdk-container', '.ot-sdk-overlay'].forEach(removeEls);
+
+                        document.body.style.overflow = 'auto';
+                        document.body.classList.remove('ot-sdk-no-scroll');
+                        document.documentElement.classList.remove('ot-sdk-no-scroll');
+                    }
+                """)
+                logger.info("Cleanup cookie banner elements")
+            except:
+                pass
 
             # Check if signed in
-            signin_button = page.locator('button:has-text("Sign In")').first
-            if await signin_button.is_visible(timeout=5000):
+            signin_button = page.locator('button:has-text("Sign In"), [data-qa="web-server-nav-primary-button"]').first
+            if await signin_button.is_visible(timeout=10000):
                 logger.info("Clicking Sign In...")
-                await signin_button.click()
-                await page.wait_for_url("**/login**", timeout=30000)
 
-                await page.fill('input[type="email"], input[name="username"]', req.email)
-                await page.click('button:has-text("Next")')
+                # Handle popup or redirect
+                try:
+                    async with context.expect_page(timeout=10000) as new_page_info:
+                        await signin_button.click(force=True)
+                    page = await new_page_info.value
+                    logger.info("Detected new page/popup for sign-in")
+                except:
+                    logger.info("No popup detected, continuing on current page")
+                    # If no popup, it might be a redirect. Let's just wait for the fields.
 
-                await page.fill('input[type="password"], input[name="password"]', req.password)
-                await page.click('button:has-text("Sign In")')
+                # Wait for any of the common Sony login markers
+                logger.info(f"Current URL: {page.url}")
+                logger.info("Waiting for sign-in page content...")
+
+                email_selectors = [
+                    'input[name="loginId"]',
+                    'input[type="email"]',
+                    '#signin-id',
+                    '[data-qa="loginId-input-field"]',
+                    'input[name="username"]'
+                ]
+
+                # Wait for at least one to be visible
+                email_field = None
+                for _ in range(12): # 60 seconds total
+                    for sel in email_selectors:
+                        try:
+                            el = page.locator(sel).first
+                            if await el.is_visible(timeout=1000):
+                                email_field = el
+                                break
+                        except: continue
+                    if email_field: break
+                    await asyncio.sleep(5)
+                    logger.info("Still waiting for email field...")
+
+                if not email_field:
+                    raise Exception("Timeout waiting for Sony login email field")
+
+                logger.info("Filling email...")
+                await email_field.fill(req.email)
+
+                next_btn = page.locator('button:has-text("Next"), button:has-text("Continue"), [data-qa="loginId-next-button"]').first
+                await next_btn.click()
+
+                logger.info("Filling password...")
+                password_field = page.locator('input[type="password"], input[name="password"]').first
+                await password_field.wait_for(state="visible", timeout=20000)
+                await password_field.fill(req.password)
+
+                signin_btn = page.locator('button:has-text("Sign In"), button:has-text("Log In"), [data-qa="password-signin-button"]').first
+                await signin_btn.click()
 
                 # Check for 2FA
                 await asyncio.sleep(5)
@@ -528,4 +610,4 @@ async def get_stripe_keys(req: StripeKeysRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8081)

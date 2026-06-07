@@ -1128,13 +1128,31 @@ func handlePurchasePSPlus(w http.ResponseWriter, r *http.Request) {
 
 	var browserRes map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&browserRes); err != nil {
-		http.Error(w, "Failed to parse browser agent response", 500)
+		// Fallback: Provide card details if browser agent response is unparseable
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "error",
+			"error":  "Failed to parse browser agent response: " + err.Error(),
+			"fallback_card": map[string]string{
+				"number":       pan,
+				"expiry_month": expMonth,
+				"expiry_year":  expYear,
+				"cvc":          cvv,
+			},
+		})
 		return
 	}
 
 	if browserRes["status"] != "success" {
+		// Fallback: Provide card details if automation failed
+		browserRes["fallback_card"] = map[string]string{
+			"number":       pan,
+			"expiry_month": expMonth,
+			"expiry_year":  expYear,
+			"cvc":          cvv,
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusOK) // Use 200 so user gets the data
 		json.NewEncoder(w).Encode(browserRes)
 		return
 	}

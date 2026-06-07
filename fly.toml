@@ -1,18 +1,16 @@
-# fly.toml app configuration file generated for koola10-stacking on 2026-05-23T10:08:16Z
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = 'koola10-stacking'
+app = 'koola10'
 primary_region = 'ams'
 
 [build]
 
 [env]
   PORT = '8080'
+  BROWSER_AGENT_URL = 'http://localhost:8081'
+  PLAYWRIGHT_BROWSERS_PATH = '/ms-playwright'
+  HOME = '/home/node'
 
 [processes]
-  app = './agent'
+  app = './start.sh'
 
 [[mounts]]
   source = 'metaclaw_data'
@@ -31,10 +29,9 @@ primary_region = 'ams'
     timeout = '2s'
     grace_period = '5s'
     method = 'get'
-    path = '/'
+    path = '/health'
 
 [[vm]]
-  memory = '1gb'
+  memory = '2gb'
   cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 256
