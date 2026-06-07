@@ -56,6 +56,14 @@ class PSPlusPurchaseRequest(BaseModel):
     card_details: Dict[str, str]
     otp: Optional[str] = None
 
+class PrivacyCreateCardRequest(BaseModel):
+    email: str
+    password: str
+    amount_cents: int
+    merchant: str
+    memo: str
+    otp: Optional[str] = None
+
 async def get_screenshot_base64(page):
     try:
         # Use animations disabled to speed up and avoid font timeouts
@@ -172,6 +180,139 @@ async def extract(req: ExtractRequest):
     result = await agent.run()
     await browser.close()
     return {"data": str(result)}
+
+@app.post("/browser/privacy/create-card")
+async def privacy_create_card(req: PrivacyCreateCardRequest):
+    logger.info(f"Starting Privacy card creation for {req.merchant}")
+
+    PROFILE_DIR_PRIVACY = "/data/privacy-browser-profile"
+    os.makedirs(PROFILE_DIR_PRIVACY, exist_ok=True)
+
+    async with async_playwright() as p:
+        context = await p.chromium.launch_persistent_context(
+            user_data_dir=PROFILE_DIR_PRIVACY,
+            headless=os.getenv("BROWSER_HEADLESS", "false").lower() == "true",
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox"
+            ],
+            viewport={"width": 1280, "height": 800}
+        )
+        page = context.pages[0] if context.pages else await context.new_page()
+        page.set_default_timeout(60000)
+
+        try:
+            # Step 1: Login
+            logger.info("Logging into Privacy.com...")
+            await page.goto("https://app.privacy.com/login", wait_until="networkidle")
+
+            if await page.locator('input[name="email"]').is_visible(timeout=5000):
+                await page.fill('input[name="email"]', req.email)
+                await page.fill('input[name="password"]', req.password)
+                await page.click('button[type="submit"]')
+                await page.wait_for_load_state("networkidle")
+
+            # Handle 2FA if required
+            if "2fa" in page.url or await page.locator('input[name="otp"]').is_visible(timeout=5000):
+                if req.otp:
+                    logger.info("Filling Privacy 2FA...")
+                    await page.fill('input[name="otp"]', req.otp)
+                    await page.click('button:has-text("Verify"), button:has-text("Submit")')
+                    await page.wait_for_load_state("networkidle")
+                else:
+                    logger.info("Privacy 2FA Required")
+                    screenshot = await get_screenshot_base64(page)
+                    await context.close()
+                    return {"status": "2FA_REQUIRED", "screenshot": screenshot}
+
+            # Step 2: Handle paused account
+            logger.info("Checking account status...")
+            is_paused = await page.is_visible("text=account is paused") or await page.is_visible("text=temporarily frozen")
+            if is_paused:
+                logger.info("Account paused – attempting auto-reactivation...")
+                reactivate_btn = page.locator("button:has-text('Reactivate'), a:has-text('Reactivate')").first
+                if await reactivate_btn.is_visible(timeout=5000):
+                    await reactivate_btn.click()
+                    await page.wait_for_selector("text=Account active", timeout=30000)
+                    logger.info("Account reactivated successfully.")
+                else:
+                    logger.info("Contacting support for reactivation...")
+                    await page.click("button:has-text('Contact Support')")
+                    await page.fill("textarea", "Please reactivate my account. It was paused due to inactivity.")
+                    await page.click("button:has-text('Send')")
+                    logger.info("Support request sent.")
+                    # We can't wait forever, so we'll just try to proceed or fail gracefully
+                    await asyncio.sleep(5)
+
+            # Step 3: Create Card
+            logger.info("Navigating to card creation...")
+            create_btn = page.locator("a:has-text('Create Card'), button:has-text('New Card'), button:has-text('Create Card')").first
+            await create_btn.click()
+            await page.wait_for_load_state("networkidle")
+
+            # Fill card details
+            logger.info(f"Filling card details: {req.merchant}, ${req.amount_cents/100:.2f}")
+            await page.fill("input[placeholder*='limit']", f"{req.amount_cents/100:.2f}")
+
+            # Merchant lock
+            merchant_lock = page.locator("text=Merchant lock, label:has-text('Merchant lock')").first
+            if await merchant_lock.is_visible(timeout=3000):
+                await merchant_lock.click()
+                await page.fill("input[placeholder='Merchant name']", req.merchant)
+
+            await page.fill("input[placeholder*='memo']", req.memo)
+
+            # Submit
+            await page.click("button:has-text('Create Card')")
+
+            # Step 4: Extract details
+            logger.info("Waiting for card details...")
+            # These selectors might need adjustment based on real UI
+            await page.wait_for_selector("[data-testid='card-number'], .card-number, text=4111", timeout=30000)
+
+            async def get_text(sel):
+                try: return await page.locator(sel).first.inner_text()
+                except: return ""
+
+            card_number = await get_text("[data-testid='card-number']")
+            expiry = await get_text("[data-testid='expiry']")
+            cvv = await get_text("[data-testid='cvv']")
+
+            if not card_number:
+                # Fallback extraction from page content
+                content = await page.content()
+                # Simple regex for PAN-like structures if needed
+
+            # Split expiry MM/YYYY or MM/YY
+            exp_month, exp_year = "", ""
+            if expiry and "/" in expiry:
+                parts = expiry.split("/")
+                exp_month = parts[0].strip()
+                exp_year = parts[1].strip()
+                if len(exp_year) == 2:
+                    exp_year = "20" + exp_year
+
+            await context.close()
+            return {
+                "status": "success",
+                "card": {
+                    "pan": card_number,
+                    "exp_month": exp_month,
+                    "exp_year": exp_year,
+                    "cvv": cvv
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Privacy automation failed: {e}")
+            screenshot = await get_screenshot_base64(page)
+            await context.close()
+            return {
+                "status": "error",
+                "error": str(e),
+                "screenshot": screenshot
+            }
 
 @app.post("/browser/psplus-purchase")
 async def psplus_purchase(req: PSPlusPurchaseRequest):

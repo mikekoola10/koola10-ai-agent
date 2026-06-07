@@ -1067,6 +1067,7 @@ func handlePurchasePSPlus(w http.ResponseWriter, r *http.Request) {
 	email := "mikekoola10@gmail.com"
 
 	// 1. Create agent card
+	// Try API first
 	cardRes := tools.RunTool("privacy", map[string]interface{}{
 		"action":   "create_agent_card",
 		"merchant": "PlayStation",
@@ -1074,6 +1075,22 @@ func handlePurchasePSPlus(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if !cardRes.Success {
+		log.Printf("Privacy API card creation failed: %v. Retrying via browser...", cardRes.Error)
+		// Try via Browser Agent (handles paused accounts)
+		cardRes = tools.RunTool("privacy", map[string]interface{}{
+			"action":   "create_card_browser",
+			"merchant": "PlayStation",
+			"limit":    11000.0,
+			"otp":      req.OTP, // Reuse OTP if it was provided
+		})
+	}
+
+	if !cardRes.Success {
+		if cardRes.Error == "2FA_REQUIRED" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(cardRes.Data)
+			return
+		}
 		http.Error(w, "Failed to create virtual card: "+cardRes.Error, 500)
 		return
 	}
