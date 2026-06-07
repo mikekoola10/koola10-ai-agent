@@ -1,4 +1,5 @@
 koola10
+.env
 agent.log
 *.log
 /data/
