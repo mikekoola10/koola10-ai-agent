@@ -3,6 +3,9 @@ import base64
 import asyncio
 import logging
 import re
+import requests
+import traceback
+import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
@@ -37,9 +40,15 @@ browser_profile = BrowserProfile(
 class NavigateRequest(BaseModel):
     url: str
 
+class DiagnoseRequest(BaseModel):
+    url: str
+    old_selector: Optional[str] = ""
+    hint: Optional[str] = ""
+
 class FormRequest(BaseModel):
     url: str
     form_data: Dict[str, str]
+    overridden_selectors: Optional[Dict[str, str]] = None
 
 class ExtractRequest(BaseModel):
     url: str
@@ -47,6 +56,24 @@ class ExtractRequest(BaseModel):
 
 class StripeKeysRequest(BaseModel):
     otp: Optional[str] = None
+
+KOOLA10_API = os.getenv("KOOLA10_API_URL", "https://koola10.fly.dev/api/v1/error_report")
+
+async def report_error_to_koola10(task_id: str, step: str, error: Exception, details: Optional[Dict[str, Any]] = None):
+    payload = {
+        "agent": "Jules",
+        "task_id": task_id,
+        "step": step,
+        "error": str(error),
+        "traceback": traceback.format_exc(),
+        "details": details or {},
+        "timestamp": time.time()
+    }
+    try:
+        # Run synchronous requests.post in a thread to avoid blocking the event loop
+        await asyncio.to_thread(requests.post, KOOLA10_API, json=payload, timeout=3)
+    except Exception as e:
+        logger.error(f"Failed to report error to Koola-10: {e}")
 
 async def get_screenshot_base64(page):
     try:
@@ -59,6 +86,69 @@ async def get_screenshot_base64(page):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+@app.post("/diagnose")
+async def diagnose_selector(req: DiagnoseRequest):
+    """
+    Expects JSON: {"url": "...", "old_selector": "...", "hint": "..."}
+    Returns: {"selector": "new_selector"} or {"selector": null}
+    """
+    url = req.url
+    old_selector = req.old_selector or ''
+    hint = req.hint or ''
+
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+
+    new_selector = None
+    try:
+        async with async_playwright() as p:
+            # Use persistent profile if needed (same as your Cash App setup)
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--disable-blink-features=AutomationControlled']
+            )
+            page = await browser.new_page()
+            await page.goto(url, timeout=30000)
+
+            # Strategy 1: try by text hint (button/link)
+            if hint:
+                candidates = [
+                    f"button:has-text('{hint}')",
+                    f"a:has-text('{hint}')",
+                    f"*:has-text('{hint}')"
+                ]
+                for cand in candidates:
+                    if await page.locator(cand).count() > 0:
+                        new_selector = cand
+                        break
+
+            # Strategy 2: if old selector was a button, look for any button containing "create"/"new"
+            if not new_selector and 'button' in old_selector.lower():
+                buttons = page.locator('button')
+                count = await buttons.count()
+                for i in range(min(count, 20)):
+                    text = (await buttons.nth(i).inner_text()).lower()
+                    if 'create' in text or 'new card' in text or 'add' in text:
+                        new_selector = f"button:has-text('{text}')"
+                        break
+
+            # Strategy 3: if old selector was an input, look for placeholders
+            if not new_selector and 'input' in old_selector.lower():
+                inputs = page.locator('input')
+                count = await inputs.count()
+                for i in range(min(count, 10)):
+                    placeholder = await inputs.nth(i).get_attribute('placeholder') or ''
+                    if 'limit' in placeholder.lower() or 'amount' in placeholder.lower():
+                        new_selector = f"input[placeholder='{placeholder}']"
+                        break
+
+            await browser.close()
+    except Exception as e:
+        logger.error(f"Diagnosis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"selector": new_selector}
 
 @app.post("/browser/navigate")
 async def navigate(req: NavigateRequest):
@@ -117,33 +207,45 @@ async def fill_form(req: FormRequest):
 
 @app.post("/browser/submit-form")
 async def submit_form(req: FormRequest):
-    instructions = [f"Fill the field '{k}' with value '{v}'" for k, v in req.form_data.items()]
-    full_instruction = f"Go to {req.url}, " + ", ".join(instructions) + ". Finally, find and click the submit button. Wait for a confirmation or success message."
-
-    browser = Browser(profile=browser_profile)
-    agent = Agent(
-        task=full_instruction,
-        llm=llm,
-        browser=browser,
-    )
-    result = await agent.run()
-
-    screenshot_b64 = ""
     try:
-        context = (await browser.get_context())
-        page = await context.get_current_page()
-        if page:
-            screenshot = await page.screenshot()
-            screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
-    except Exception as e:
-        print(f"Screenshot failed: {e}")
+        instructions = [f"Fill the field '{k}' with value '{v}'" for k, v in req.form_data.items()]
+        if req.overridden_selectors:
+            for step_name, selector in req.overridden_selectors.items():
+                instructions.append(f"For step '{step_name}', use the selector '{selector}'")
+        full_instruction = f"Go to {req.url}, " + ", ".join(instructions) + ". Finally, find and click the submit button. Wait for a confirmation or success message."
 
-    await browser.close()
-    return {
-        "status": "success",
-        "confirmation": str(result),
-        "screenshot": screenshot_b64
-    }
+        browser = Browser(profile=browser_profile)
+        agent = Agent(
+            task=full_instruction,
+            llm=llm,
+            browser=browser,
+        )
+        result = await agent.run()
+
+        screenshot_b64 = ""
+        try:
+            context = (await browser.get_context())
+            page = await context.get_current_page()
+            if page:
+                screenshot = await page.screenshot()
+                screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
+        except Exception as e:
+            print(f"Screenshot failed: {e}")
+
+        await browser.close()
+        return {
+            "status": "success",
+            "confirmation": str(result),
+            "screenshot": screenshot_b64
+        }
+    except Exception as e:
+        await report_error_to_koola10(
+            task_id="submit_form",
+            step="browser_automation",
+            error=e,
+            details={"url": req.url, "form_data": req.form_data}
+        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/browser/extract")
 async def extract(req: ExtractRequest):
@@ -376,6 +478,12 @@ async def get_stripe_keys(req: StripeKeysRequest):
 
         except Exception as e:
             logger.error(f"Error during extraction: {e}")
+            await report_error_to_koola10(
+                task_id="stripe_keys",
+                step="extract_keys",
+                error=e,
+                details={"url": page.url}
+            )
             screenshot = await get_screenshot_base64(page)
             current_url = page.url
             await context.close()
