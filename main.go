@@ -239,6 +239,14 @@ type SwarmNode struct {
 	Status   string `json:"status"`
 }
 
+type ErrorReport struct {
+	Agent   string                 `json:"agent"`
+	Error   string                 `json:"error"`
+	TaskID  string                 `json:"task_id"`
+	Step    string                 `json:"step"`
+	Details map[string]interface{} `json:"details"`
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -278,6 +286,11 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+
+	errorChan = make(chan ErrorReport, 10)
+
+	retryCounts = make(map[string]int)
+	retryMutex  sync.Mutex
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -338,6 +351,147 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// --- Helpers ---
+
+func getRetryKey(taskID, step string) string {
+	return taskID + "_" + step
+}
+
+func incrementRetry(key string) int {
+	retryMutex.Lock()
+	defer retryMutex.Unlock()
+	retryCounts[key]++
+	return retryCounts[key]
+}
+
+func resetRetry(key string) {
+	retryMutex.Lock()
+	defer retryMutex.Unlock()
+	delete(retryCounts, key)
+}
+
+func getURLForTask(taskID string) string {
+	switch {
+	case strings.Contains(taskID, "privacy") || strings.Contains(taskID, "card"):
+		return "https://app.privacy.com/dashboard"
+	default:
+		return ""
+	}
+}
+
+func extractHintFromError(errMsg string) string {
+	if strings.Contains(errMsg, "Create Card") {
+		return "Create Card"
+	}
+	if strings.Contains(errMsg, "spend limit") {
+		return "spend limit"
+	}
+	return ""
+}
+
+func attemptAutoFix(report ErrorReport) bool {
+	url := getURLForTask(report.TaskID)
+	if url == "" {
+		return false
+	}
+	hint := extractHintFromError(report.Error)
+	if hint == "" && report.Step == "create_card" {
+		hint = "Create Card"
+	}
+
+	// Get old selector from details if available
+	oldSelector := ""
+	if sel, ok := report.Details["selector"].(string); ok {
+		oldSelector = sel
+	}
+
+	diagnosePayload := map[string]string{
+		"url":          url,
+		"old_selector": oldSelector,
+		"hint":         hint,
+	}
+	jsonPayload, _ := json.Marshal(diagnosePayload)
+
+	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
+	if browserAgentURL == "" || strings.Contains(browserAgentURL, "localhost") {
+		browserAgentURL = "https://koola10-browser.fly.dev"
+	}
+
+	resp, err := http.Post(browserAgentURL+"/diagnose", "application/json", bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		log.Printf("Diagnose call failed: %v", err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Selector string `json:"selector"`
+		Error    string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("Failed to parse diagnose response: %v", err)
+		return false
+	}
+	if result.Selector == "" {
+		log.Printf("No selector found for %s", url)
+		return false
+	}
+
+	// Store the fixed selector (e.g., in a config map or send back to Jules)
+	log.Printf("Auto-fix found selector: %s", result.Selector)
+	// For now, we'll just log. Next step: update Jules' config or pass in retry.
+	return true
+}
+
+func retryTask(taskID string) {
+	retryPayload := map[string]interface{}{
+		"task_id": taskID,
+		"action":  "retry",
+	}
+	jsonPayload, _ := json.Marshal(retryPayload)
+
+	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
+	if browserAgentURL == "" || strings.Contains(browserAgentURL, "localhost") {
+		browserAgentURL = "https://koola10-browser.fly.dev"
+	}
+
+	resp, err := http.Post(browserAgentURL+"/run", "application/json", bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		log.Printf("Retry request failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	log.Printf("Retry request sent for task %s, status: %s", taskID, resp.Status)
+}
+
+func startSupervisor() {
+	go func() {
+		for report := range errorChan {
+			log.Printf("🔴 Supervisor received error from %s: %s", report.Agent, report.Error)
+
+			key := getRetryKey(report.TaskID, report.Step)
+			count := incrementRetry(key)
+
+			if count > 3 {
+				log.Printf("Max retries exceeded for %s, giving up", key)
+				resetRetry(key)
+				// Optional: send notification (Objective 4)
+				continue
+			}
+
+			log.Printf("Attempting auto‑fix (attempt %d/3) for %s", count, key)
+			fixed := attemptAutoFix(report)
+			if fixed {
+				log.Printf("Auto‑fix succeeded for %s, retrying task", key)
+				retryTask(report.TaskID)
+			} else {
+				log.Printf("Auto‑fix failed for %s", key)
+				// Could also retry without fix? We'll just let it fail.
+			}
+		}
+	}()
 }
 
 // --- Main ---
@@ -413,6 +567,8 @@ func main() {
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
 
+	r.Post("/agent/report-error", corsMiddleware(handleReportError))
+
 	r.Get("/grants/search", corsMiddleware(handleSearch))
 	r.Post("/grants/apply", corsMiddleware(handleApply))
 	r.Get("/grants/status", corsMiddleware(handleStatus))
@@ -478,6 +634,8 @@ func main() {
 	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+
+	startSupervisor()
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -1597,6 +1755,16 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleReportError(w http.ResponseWriter, r *http.Request) {
+	var report ErrorReport
+	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	errorChan <- report
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func generateID() string {
