@@ -3,298 +3,358 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koola10 Vault — Financial Command</title>
+    <title>Koola10 Vault — Personal Finance</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
+        :root {
+            --primary: #00ff41;
+            --bg: #000000;
+            --card-bg: #0a0a0a;
+            --border: #00ff41;
+            --text: #00ff41;
+            --error: #ff0000;
+            --font: 'Courier New', Courier, monospace;
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: #0b0820;
-            font-family: system-ui, sans-serif;
-            color: #fff;
+            background: var(--bg);
+            font-family: var(--font);
+            color: var(--text);
             min-height: 100vh;
+            padding: 20px;
         }
-        .vault-bg {
-            position: fixed; inset: 0; pointer-events: none; z-index: 0;
-            background: radial-gradient(ellipse at 30% 50%, rgba(245,158,11,0.05) 0%, transparent 70%),
-                        radial-gradient(ellipse at 70% 50%, rgba(245,158,11,0.03) 0%, transparent 70%),
-                        linear-gradient(180deg, #0b0820 0%, #1E1B4B 50%, #0b0820 100%);
-        }
-        .container {
-            position: relative; z-index: 1; max-width: 800px; margin: 0 auto; padding: 30px 20px 100px;
-        }
-        h1 { font-size: 2.5rem; margin-bottom: 5px; text-shadow: 0 0 30px rgba(245,158,11,0.6); letter-spacing: 2px; }
-        .subtitle { color: #aaa; margin-bottom: 30px; }
+
+        .container { max-width: 900px; margin: 0 auto; }
+        
+        header { border-bottom: 2px solid var(--border); margin-bottom: 30px; padding-bottom: 10px; }
+        h1 { font-size: 1.8rem; text-transform: uppercase; letter-spacing: 2px; }
+        .subtitle { font-size: 0.9rem; opacity: 0.8; }
+
+        .auth-section, .app-section { display: none; }
+        .active { display: block; }
+
         .card {
-            background: rgba(15,12,35,0.7); border-radius: 16px; padding: 20px;
-            margin-bottom: 20px; backdrop-filter: blur(10px); border: 1px solid #333;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
         }
-        .card h2 { color: #F59E0B; margin-bottom: 15px; }
-        .balance-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
-        .balance-item {
-            flex: 1; min-width: 120px; background: rgba(0,0,0,0.3); border-radius: 12px;
-            padding: 15px; text-align: center; border: 1px solid #333;
+
+        h2 { font-size: 1.2rem; margin-bottom: 15px; text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-size: 0.8rem; text-transform: uppercase; }
+        input, select {
+            width: 100%;
+            background: #000;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 10px;
+            font-family: var(--font);
+            outline: none;
         }
-        .balance-item .ecosystem { font-size: 0.8rem; color: #aaa; text-transform: uppercase; }
-        .balance-item .amount { font-size: 1.4rem; font-weight: bold; color: #F59E0B; margin-top: 5px; }
-        .total-card { background: rgba(245,158,11,0.1); border-color: #F59E0B; }
-        .total-card .amount { font-size: 2rem; }
-        .input-row { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
-        .input-row input {
-            flex: 1; min-width: 150px; background: rgba(255,255,255,0.05); border: 1px solid #444;
-            color: #fff; padding: 10px; border-radius: 8px; outline: none;
-        }
-        .input-row input::placeholder { color: #666; }
+        input:focus { box-shadow: 0 0 5px var(--primary); }
+
         .btn {
-            padding: 10px 20px; border-radius: 8px; cursor: pointer; border: none;
-            font-weight: bold; transition: all 0.3s;
+            background: var(--primary);
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: var(--font);
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: all 0.2s;
         }
-        .btn-primary { background: #F59E0B; color: #000; }
-        .btn-primary:hover { background: #d97706; }
-        .btn-danger { background: #EF4444; color: #fff; }
-        .btn-danger:hover { background: #dc2626; }
-        .btn-outline { background: transparent; border: 1px solid #F59E0B; color: #F59E0B; }
-        .btn-outline:hover { background: rgba(245,158,11,0.1); }
-        .quick-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-        .approval-card {
-            background: rgba(245,158,11,0.08); border: 1px solid #F59E0B;
-            border-radius: 12px; padding: 15px; margin-bottom: 10px;
-            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
-            animation: pulse 2s ease-in-out infinite;
+        .btn:hover { background: #00cc33; box-shadow: 0 0 15px var(--primary); }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
+        th, td { border: 1px solid var(--border); padding: 10px; text-align: left; }
+        th { background: rgba(0, 255, 65, 0.1); text-transform: uppercase; }
+        .type-income { color: #00ff41; }
+        .type-expense { color: #ff4141; }
+
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .summary-item { border: 1px solid var(--border); padding: 15px; text-align: center; }
+        .summary-label { font-size: 0.7rem; text-transform: uppercase; opacity: 0.7; }
+        .summary-value { font-size: 1.5rem; font-weight: bold; margin-top: 5px; }
+
+        .status-msg { margin-top: 10px; font-size: 0.8rem; min-height: 1.2rem; }
+        .error { color: var(--error); }
+
+        .config-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); z-index: 100;
+            display: flex; align-items: center; justify-content: center;
         }
-        @keyframes pulse { 0%,100% { box-shadow: 0 0 10px rgba(245,158,11,0.2); } 50% { box-shadow: 0 0 25px rgba(245,158,11,0.5); } }
-        .approval-info { flex: 1; }
-        .approval-info .amount { font-size: 1.3rem; font-weight: bold; color: #F59E0B; }
-        .approval-info .detail { font-size: 0.85rem; color: #aaa; }
-        .approval-actions { display: flex; gap: 10px; }
-        .history-item {
-            border-bottom: 1px solid #222; padding: 10px 0; font-size: 0.9rem;
-            display: flex; justify-content: space-between; flex-wrap: wrap;
-        }
-        .history-item .status { font-weight: bold; }
-        .status-approved { color: #10B981; }
-        .status-rejected { color: #EF4444; }
-        .status-auto { color: #F59E0B; }
-        .status-pending { color: #3B82F6; }
-        .empty-state { color: #666; text-align: center; padding: 20px; }
-        .loading { text-align: center; color: #aaa; padding: 20px; }
+        .config-card { max-width: 500px; width: 90%; }
+
+        /* Terminal prompt style */
+        .prompt::before { content: "> "; color: var(--primary); }
     </style>
 </head>
 <body>
-<div class="vault-bg"></div>
+
+<div id="config-overlay" class="config-overlay">
+    <div class="card config-card">
+        <h2>[ INITIALIZING SYSTEM ]</h2>
+        <p style="margin-bottom: 15px; font-size: 0.8rem;">Enter Supabase credentials to connect to the vault.</p>
+        <div class="form-group">
+            <label>Supabase URL</label>
+            <input type="text" id="supabase-url" placeholder="https://your-project.supabase.co">
+        </div>
+        <div class="form-group">
+            <label>Supabase Anon Key</label>
+            <input type="password" id="supabase-key" placeholder="your-anon-key">
+        </div>
+        <button class="btn" onclick="initSupabase()">Connect</button>
+    </div>
+</div>
+
 <div class="container">
-    <h1>🏦 Koola10 Vault</h1>
-    <p class="subtitle">Financial Command Center — All 7 Ecosystems</p>
+    <header>
+        <h1>Koola10 Financial Vault</h1>
+        <p class="subtitle prompt">Terminal Access Restricted to Authorized Personnel Only</p>
+    </header>
 
-    <!-- Balance Overview -->
-    <div class="card">
-        <h2>Empire Balance</h2>
-        <div class="balance-row" id="balances"></div>
-    </div>
-
-    <!-- Move Money -->
-    <div class="card">
-        <h2>Move Money</h2>
-        <div class="input-row">
-            <input type="number" id="amount" placeholder="Amount (USD)" step="0.01" min="0.01">
-            <input type="text" id="cashtag" placeholder="Recipient $cashtag" value="$Koola10">
-            <button class="btn btn-primary" onclick="sendPayout()">Send</button>
-        </div>
-        <div id="send-status" style="margin-top:10px;"></div>
-        <div class="quick-actions">
-            <span style="color:#aaa;font-size:0.8rem;">Quick:</span>
-            <button class="btn btn-outline" onclick="quickSend(5, 'Test')">$5 Test</button>
-            <button class="btn btn-outline" onclick="quickSend(110, 'PlayStation')">$110 PS Plus</button>
-            <button class="btn btn-outline" onclick="quickSend(200, 'OpenAI')">$200 ChatGPT Pro</button>
-            <button class="btn btn-outline" onclick="quickSend(20, 'Anthropic')">$20 Claude</button>
-            <button class="btn btn-outline" onclick="quickSend(99, 'Abacus')">$99 Abacus</button>
+    <!-- Auth Section -->
+    <div id="auth-section" class="auth-section active">
+        <div class="card">
+            <h2 id="auth-title">[ LOGIN ]</h2>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="auth-email">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="auth-password">
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button id="auth-btn" class="btn" onclick="handleAuth()">Login</button>
+                <button class="btn btn-outline" onclick="toggleAuthMode()">Switch to Signup</button>
+            </div>
+            <div id="auth-msg" class="status-msg"></div>
         </div>
     </div>
 
-    <!-- Authorization Console -->
-    <div class="card">
-        <h2>🔐 Authorization Console</h2>
-        <div id="approvals-list"></div>
-        <div id="approvals-empty" class="empty-state">No pending approvals.</div>
-    </div>
+    <!-- App Section -->
+    <div id="app-section" class="app-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <div id="user-display" class="prompt" style="font-size: 0.8rem;">User: </div>
+            <button class="btn btn-outline" style="padding: 5px 10px; font-size: 0.7rem;" onclick="logout()">Logout</button>
+        </div>
 
-    <!-- Transaction History -->
-    <div class="card">
-        <h2>Transaction History</h2>
-        <div id="history-list"></div>
-        <div id="history-empty" class="empty-state">No transactions yet.</div>
+        <div class="summary-grid">
+            <div class="summary-item">
+                <div class="summary-label">Total Balance</div>
+                <div id="total-balance" class="summary-value">$0.00</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Income</div>
+                <div id="total-income" class="summary-value" style="color: #00ff41;">$0.00</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Expenses</div>
+                <div id="total-expense" class="summary-value" style="color: #ff4141;">$0.00</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>[ NEW TRANSACTION ]</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+                <div class="form-group">
+                    <label>Description</label>
+                    <input type="text" id="t-desc" placeholder="Rent, Salary, etc.">
+                </div>
+                <div class="form-group">
+                    <label>Amount</label>
+                    <input type="number" id="t-amount" step="0.01" placeholder="0.00">
+                </div>
+                <div class="form-group">
+                    <label>Type</label>
+                    <select id="t-type">
+                        <option value="expense">Expense</option>
+                        <option value="income">Income</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Date</label>
+                    <input type="date" id="t-date">
+                </div>
+            </div>
+            <button class="btn" onclick="addTransaction()">Execute Transaction</button>
+            <div id="t-msg" class="status-msg"></div>
+        </div>
+
+        <div class="card">
+            <h2>[ TRANSACTION LOG ]</h2>
+            <div style="overflow-x: auto;">
+                <table id="transaction-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Description</th>
+                            <th>Type</th>
+                            <th>Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transaction-body">
+                        <!-- Transactions will be loaded here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
-const BASE = 'https://koola10.fly.dev';
-const ECOSYSTEMS = [
-    { name: 'Koola10', url: `${BASE}/financial/status` },
-    { name: 'Oracle', url: 'https://chatgpt-oracle.fly.dev/financial/status' },
-    { name: 'Sentinel', url: 'https://sentinel-koola10.fly.dev/financial/status' },
-    { name: 'Nexus', url: 'https://nexus-koola10-agent.fly.dev/financial/status' },
-    { name: 'Echelon', url: 'https://echelon-koola10.fly.dev/financial/status' },
-    { name: 'Aegis', url: 'https://aegis-koola10.fly.dev/financial/status' },
-    { name: 'Prism', url: 'https://prism-koola10.fly.dev/financial/status' }
-];
+    let supabase;
+    let isSignup = false;
 
-// ===== BALANCE OVERVIEW =====
-async function loadBalances() {
-    const container = document.getElementById('balances');
-    let total = 0;
-    let html = '';
-    for (const eco of ECOSYSTEMS) {
+    // Initialize Supabase from inputs
+    function initSupabase() {
+        const url = document.getElementById('supabase-url').value.trim();
+        const key = document.getElementById('supabase-key').value.trim();
+        
+        if (!url || !key) return alert("Please enter both URL and Key.");
+        
         try {
-            const res = await fetch(eco.url);
-            const data = await res.json();
-            const balance = data.balance || 0;
-            total += balance;
-            html += `<div class="balance-item"><div class="ecosystem">${eco.name}</div><div class="amount">$${balance.toFixed(2)}</div></div>`;
-        } catch(e) {
-            html += `<div class="balance-item"><div class="ecosystem">${eco.name}</div><div class="amount" style="color:#EF4444;">Offline</div></div>`;
+            supabase = supabase.createClient(url, key);
+            document.getElementById('config-overlay').style.display = 'none';
+            checkSession();
+        } catch (e) {
+            alert("Connection failed: " + e.message);
         }
     }
-    html = `<div class="balance-item total-card"><div class="ecosystem">Total Empire</div><div class="amount">$${total.toFixed(2)}</div></div>` + html;
-    container.innerHTML = html;
-}
 
-// ===== MOVE MONEY =====
-async function sendPayout() {
-    const amount = parseFloat(document.getElementById('amount').value);
-    const merchant = document.getElementById('cashtag').value.trim().replace('$','');
-    if (!amount || amount <= 0) return alert('Please enter a valid amount.');
-    if (!merchant) return alert('Please enter a merchant name.');
+    // Auth logic
+    async function handleAuth() {
+        const email = document.getElementById('auth-email').value;
+        const password = document.getElementById('auth-password').value;
+        const msg = document.getElementById('auth-msg');
+        
+        msg.textContent = isSignup ? "Creating account..." : "Authenticating...";
+        msg.className = "status-msg";
 
-    const statusDiv = document.getElementById('send-status');
-    statusDiv.innerHTML = 'Generating card…';
-    try {
-        const res = await fetch(`${BASE}/agent/create-agent-card`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ merchant, amount })
-        });
-        const data = await res.json();
-        statusDiv.innerHTML = `✅ Card ready! Number: ${data.pan}, Exp: ${data.expiry}, CVV: ${data.cvv}`;
-    } catch(e) {
-        statusDiv.innerHTML = '❌ Error generating card. Check console.';
-    }
-    document.getElementById('amount').value = '';
-}
+        const { data, error } = isSignup 
+            ? await supabase.auth.signUp({ email, password })
+            : await supabase.auth.signInWithPassword({ email, password });
 
-function quickSend(amount, merchant) {
-    document.getElementById('amount').value = amount;
-    document.getElementById('cashtag').value = merchant;
-    sendPayout();
-}
-
-// ===== AUTHORIZATION CONSOLE =====
-async function loadApprovals() {
-    const container = document.getElementById('approvals-list');
-    const empty = document.getElementById('approvals-empty');
-    try {
-        const res = await fetch(`${BASE}/agent/pending-approvals`);
-        const data = await res.json();
-        const approvals = data.approvals || data || [];
-        if (!approvals.length) {
-            container.innerHTML = '';
-            empty.style.display = 'block';
-            return;
-        }
-        empty.style.display = 'none';
-        container.innerHTML = approvals.map(a => `
-            <div class="approval-card">
-                <div class="approval-info">
-                    <div class="amount">$${a.amount.toFixed(2)}</div>
-                    <div class="detail">To: ${a.cashtag} | ${new Date(a.timestamp).toLocaleString()}</div>
-                </div>
-                <div class="approval-actions">
-                    <button class="btn btn-primary" onclick="approve('${a.payout_id}')">APPROVE</button>
-                    <button class="btn btn-danger" onclick="reject('${a.payout_id}')">Reject</button>
-                </div>
-            </div>
-        `).join('');
-    } catch(e) {
-        container.innerHTML = '';
-        empty.style.display = 'block';
-    }
-}
-
-async function approve(id) {
-    await fetch(`${BASE}/voice/confirm`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ approved: true, payout_id: id })
-    });
-    loadApprovals();
-    loadHistory();
-    loadBalances();
-}
-
-async function reject(id) {
-    await fetch(`${BASE}/voice/confirm`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ approved: false, payout_id: id })
-    });
-    loadApprovals();
-    loadHistory();
-}
-
-// ===== TRANSACTION HISTORY =====
-async function loadHistory() {
-    const container = document.getElementById('history-list');
-    const empty = document.getElementById('history-empty');
-    try {
-        const res = await fetch(`${BASE}/compliance/audit`);
-        const data = await res.json();
-        const payouts = (data.events || data || []).filter(e => e.action && e.action.includes('cashapp_payout'));
-        if (!payouts.length) {
-            container.innerHTML = '';
-            empty.style.display = 'block';
-            return;
-        }
-        empty.style.display = 'none';
-        container.innerHTML = payouts.reverse().slice(0, 30).map(p => {
-            const statusClass = p.action.includes('approved') ? 'status-approved' :
-                                p.action.includes('rejected') ? 'status-rejected' :
-                                p.action.includes('auto') ? 'status-auto' : 'status-pending';
-            const statusLabel = p.action.includes('approved') ? 'Approved' :
-                                p.action.includes('rejected') ? 'Rejected' :
-                                p.action.includes('auto') ? 'Auto' : 'Pending';
-            return `<div class="history-item">
-                <span>$${p.amount?.toFixed(2) || '—'} → ${p.cashtag || p.details || '—'}</span>
-                <span class="status ${statusClass}">${statusLabel}</span>
-                <span style="color:#666;font-size:0.75rem;">${new Date(p.timestamp).toLocaleString()}</span>
-            </div>`;
-        }).join('');
-    } catch(e) {
-        container.innerHTML = '';
-        empty.style.display = 'block';
-    }
-}
-
-// ===== SSE FOR REAL-TIME APPROVALS =====
-function connectSSE() {
-    const es = new EventSource(`${BASE}/events/stream`);
-    es.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            if (data.type === 'cashapp_payout_request') {
-                loadApprovals();
+        if (error) {
+            msg.textContent = "Error: " + error.message;
+            msg.className = "status-msg error";
+        } else {
+            if (isSignup) {
+                msg.textContent = "Signup successful! Please check your email for confirmation.";
+            } else {
+                checkSession();
             }
-        } catch(e) {}
-    };
-    es.onerror = () => {
-        setTimeout(connectSSE, 5000);
-    };
-}
+        }
+    }
 
-// ===== INIT =====
-loadBalances();
-loadApprovals();
-loadHistory();
-connectSSE();
+    function toggleAuthMode() {
+        isSignup = !isSignup;
+        document.getElementById('auth-title').textContent = isSignup ? "[ SIGNUP ]" : "[ LOGIN ]";
+        document.getElementById('auth-btn').textContent = isSignup ? "Signup" : "Login";
+        document.querySelector('.btn-outline').textContent = isSignup ? "Switch to Login" : "Switch to Signup";
+    }
 
-// Poll fallback every 15s
-setInterval(loadApprovals, 15000);
-setInterval(loadBalances, 60000);
-setInterval(loadHistory, 30000);
+    async function checkSession() {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+            document.getElementById('auth-section').classList.remove('active');
+            document.getElementById('app-section').classList.add('active');
+            document.getElementById('user-display').textContent = "User: " + session.user.email;
+            document.getElementById('t-date').valueAsDate = new Date();
+            loadTransactions();
+        } else {
+            document.getElementById('auth-section').classList.add('active');
+            document.getElementById('app-section').classList.remove('active');
+        }
+    }
+
+    async function logout() {
+        await supabase.auth.signOut();
+        checkSession();
+    }
+
+    // Transaction logic
+    async function addTransaction() {
+        const description = document.getElementById('t-desc').value;
+        const amount = parseFloat(document.getElementById('t-amount').value);
+        const type = document.getElementById('t-type').value;
+        const date = document.getElementById('t-date').value;
+        const msg = document.getElementById('t-msg');
+
+        if (!description || !amount || !date) {
+            msg.textContent = "Error: All fields required.";
+            msg.className = "status-msg error";
+            return;
+        }
+
+        msg.textContent = "Processing...";
+        const { error } = await supabase.from('transactions').insert([
+            { description, amount, type, date }
+        ]);
+
+        if (error) {
+            msg.textContent = "Error: " + error.message;
+            msg.className = "status-msg error";
+        } else {
+            msg.textContent = "Transaction logged successfully.";
+            msg.className = "status-msg";
+            document.getElementById('t-desc').value = '';
+            document.getElementById('t-amount').value = '';
+            loadTransactions();
+        }
+    }
+
+    async function loadTransactions() {
+        const { data, error } = await supabase
+            .from('transactions')
+            .select('*')
+            .order('date', { ascending: false });
+
+        if (error) {
+            console.error(error);
+            return;
+        }
+
+        const body = document.getElementById('transaction-body');
+        body.innerHTML = '';
+        
+        let income = 0;
+        let expense = 0;
+
+        data.forEach(t => {
+            const row = document.createElement('tr');
+            const amt = parseFloat(t.amount);
+            if (t.type === 'income') income += amt;
+            else expense += amt;
+
+            row.innerHTML = `
+                <td>${t.date}</td>
+                <td>${t.description}</td>
+                <td class="type-${t.type}">${t.type.toUpperCase()}</td>
+                <td>$${amt.toFixed(2)}</td>
+            `;
+            body.appendChild(row);
+        });
+
+        document.getElementById('total-income').textContent = `$${income.toFixed(2)}`;
+        document.getElementById('total-expense').textContent = `$${expense.toFixed(2)}`;
+        document.getElementById('total-balance').textContent = `$${(income - expense).toFixed(2)}`;
+    }
+
+    // Listen for auth changes
+    if (supabase) {
+        supabase.auth.onAuthStateChange((event, session) => {
+            checkSession();
+        });
+    }
 </script>
 </body>
 </html>
