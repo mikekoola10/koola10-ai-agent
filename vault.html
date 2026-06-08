@@ -3,401 +3,217 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koola10 Vault — Personal Finance</title>
+    <title>Koola Vault - Final Working</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#00ff41">
-    <link rel="apple-touch-icon" href="https://img.icons8.com/nolan/512/safe.png">
     <style>
-        :root {
-            --primary: #00ff41;
-            --bg: #000000;
-            --card-bg: #0a0a0a;
-            --border: #00ff41;
-            --text: #00ff41;
-            --error: #ff0000;
-            --font: 'Courier New', Courier, monospace;
-        }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: var(--bg);
-            font-family: var(--font);
-            color: var(--text);
-            min-height: 100vh;
+            background: #0a0a0a;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
             padding: 20px;
+            margin: 0;
         }
-
-        .container { max-width: 900px; margin: 0 auto; }
-        
-        header { border-bottom: 2px solid var(--border); margin-bottom: 30px; padding-bottom: 10px; }
-        h1 { font-size: 1.8rem; text-transform: uppercase; letter-spacing: 2px; }
-        .subtitle { font-size: 0.9rem; opacity: 0.8; }
-
-        .auth-section, .app-section { display: none; }
-        .active { display: block; }
-
-        .card {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
         }
-
-        h2 { font-size: 1.2rem; margin-bottom: 15px; text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
-
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-size: 0.8rem; text-transform: uppercase; }
-        input, select {
-            width: 100%;
-            background: #000;
-            border: 1px solid var(--border);
-            color: var(--text);
+        .error {
+            color: #f55;
+            background: #311;
             padding: 10px;
-            font-family: var(--font);
-            outline: none;
+            margin: 10px 0;
+            border-left: 4px solid #f55;
         }
-        input:focus { box-shadow: 0 0 5px var(--primary); }
-
-        .btn {
-            background: var(--primary);
+        .success {
+            color: #0f0;
+            background: #131;
+            padding: 10px;
+            margin: 10px 0;
+            border-left: 4px solid #0f0;
+        }
+        input, select, button {
+            background: #1e1e1e;
+            border: 1px solid #0f0;
+            color: #0f0;
+            padding: 8px 12px;
+            margin: 5px;
+            border-radius: 8px;
+            font-family: monospace;
+        }
+        button {
+            background: #0f0;
             color: #000;
-            border: none;
-            padding: 10px 20px;
             cursor: pointer;
-            font-family: var(--font);
             font-weight: bold;
-            text-transform: uppercase;
-            transition: all 0.2s;
         }
-        .btn:hover { background: #00cc33; box-shadow: 0 0 15px var(--primary); }
-        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
-
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
-        th, td { border: 1px solid var(--border); padding: 10px; text-align: left; }
-        th { background: rgba(0, 255, 65, 0.1); text-transform: uppercase; }
-        .type-income { color: #00ff41; }
-        .type-expense { color: #ff4141; }
-
-        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
-        .summary-item { border: 1px solid var(--border); padding: 15px; text-align: center; }
-        .summary-label { font-size: 0.7rem; text-transform: uppercase; opacity: 0.7; }
-        .summary-value { font-size: 1.5rem; font-weight: bold; margin-top: 5px; }
-
-        .status-msg { margin-top: 10px; font-size: 0.8rem; min-height: 1.2rem; }
-        .error { color: var(--error); }
-
-        .config-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.9); z-index: 100;
-            display: flex; align-items: center; justify-content: center;
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
         }
-        .config-card { max-width: 500px; width: 90%; }
-
-        /* Terminal prompt style */
-        .prompt::before { content: "> "; color: var(--primary); }
+        th, td {
+            border: 1px solid #2a2a2a;
+            padding: 8px;
+            text-align: left;
+        }
+        .income { color: #0f0; }
+        .expense { color: #f55; }
     </style>
 </head>
 <body>
-
-<div id="config-overlay" class="config-overlay">
-    <div class="card config-card">
-        <h2>[ INITIALIZING SYSTEM ]</h2>
-        <p style="margin-bottom: 15px; font-size: 0.8rem;">Enter Supabase credentials to connect to the vault.</p>
-        <div class="form-group">
-            <label>Supabase URL</label>
-            <input type="text" id="supabase-url" value="https://bhrvqcandkpolrvatlqx.supabase.co">
-        </div>
-        <div class="form-group">
-            <label>Supabase Anon Key</label>
-            <input type="password" id="supabase-key" placeholder="Paste your long anon key here">
-        </div>
-        <button class="btn" onclick="initSupabase()">Connect</button>
-        <p style="margin-top: 10px; font-size: 0.7rem; color: #888;">Note: Use the 'anon' 'public' key from your Supabase dashboard.</p>
-    </div>
-</div>
-
 <div class="container">
-    <header>
-        <h1>Koola10 Financial Vault</h1>
-        <p class="subtitle prompt">Terminal Access Restricted to Authorized Personnel Only</p>
-    </header>
+    <h1>🌀 Koola Vault</h1>
+    <div id="message"></div>
 
-    <!-- Auth Section -->
-    <div id="auth-section" class="auth-section">
-        <div class="card">
-            <h2 id="auth-title">[ LOGIN ]</h2>
-            <div class="form-group">
-                <label>Email</label>
-                <input type="email" id="auth-email">
-            </div>
-            <div class="form-group">
-                <label>Password</label>
-                <input type="password" id="auth-password">
-            </div>
-            <div style="display: flex; gap: 10px;">
-                <button id="auth-btn" class="btn" onclick="handleAuth()">Login</button>
-                <button class="btn btn-outline" onclick="toggleAuthMode()">Switch to Signup</button>
-            </div>
-            <div id="auth-msg" class="status-msg"></div>
-        </div>
+    <div id="authSection">
+        <h2>Access Vault</h2>
+        <input type="email" id="email" placeholder="Email"><br>
+        <input type="password" id="password" placeholder="Password"><br>
+        <button id="signUpBtn">Sign Up</button>
+        <button id="signInBtn">Sign In</button>
     </div>
 
-    <!-- App Section -->
-    <div id="app-section" class="app-section">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <div id="user-display" class="prompt" style="font-size: 0.8rem;">User: </div>
-            <button class="btn btn-outline" style="padding: 5px 10px; font-size: 0.7rem;" onclick="logout()">Logout</button>
+    <div id="vaultSection" style="display:none;">
+        <div style="display: flex; justify-content: space-between;">
+            <h2>Welcome, <span id="userEmail"></span></h2>
+            <button id="signOutBtn">Sign Out</button>
         </div>
-
-        <div class="summary-grid">
-            <div class="summary-item">
-                <div class="summary-label">Total Balance</div>
-                <div id="total-balance" class="summary-value">$0.00</div>
-            </div>
-            <div class="summary-item">
-                <div class="summary-label">Income</div>
-                <div id="total-income" class="summary-value" style="color: #00ff41;">$0.00</div>
-            </div>
-            <div class="summary-item">
-                <div class="summary-label">Expenses</div>
-                <div id="total-expense" class="summary-value" style="color: #ff4141;">$0.00</div>
-            </div>
+        <div style="background: #1a1a1a; padding: 15px; border-radius: 12px; margin: 20px 0;">
+            <h3>Add Transaction</h3>
+            <input type="text" id="desc" placeholder="Description">
+            <input type="number" id="amount" placeholder="Amount">
+            <select id="type">
+                <option value="income">Income</option>
+                <option value="expense">Expense</option>
+            </select>
+            <input type="date" id="date">
+            <button id="addBtn">Add Entry</button>
         </div>
-
-        <div class="card">
-            <h2>[ NEW TRANSACTION ]</h2>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
-                <div class="form-group">
-                    <label>Description</label>
-                    <input type="text" id="t-desc" placeholder="Rent, Salary, etc.">
-                </div>
-                <div class="form-group">
-                    <label>Amount</label>
-                    <input type="number" id="t-amount" step="0.01" placeholder="0.00">
-                </div>
-                <div class="form-group">
-                    <label>Type</label>
-                    <select id="t-type">
-                        <option value="expense">Expense</option>
-                        <option value="income">Income</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Date</label>
-                    <input type="date" id="t-date">
-                </div>
-            </div>
-            <button class="btn" onclick="addTransaction()">Execute Transaction</button>
-            <div id="t-msg" class="status-msg"></div>
-        </div>
-
-        <div class="card">
-            <h2>[ TRANSACTION LOG ]</h2>
-            <div style="overflow-x: auto;">
-                <table id="transaction-table">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Description</th>
-                            <th>Type</th>
-                            <th>Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody id="transaction-body">
-                        <!-- Transactions will be loaded here -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
+        <table>
+            <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th></tr></thead>
+            <tbody id="txTable"></tbody>
+        </table>
     </div>
 </div>
 
 <script>
-    let supabase;
-    let isSignup = false;
+    // ==================== REPLACE WITH YOUR SUPABASE CREDENTIALS ====================
+    const SUPABASE_URL = 'https://YOUR_PROJECT.supabase.co';   // <-- change this
+    const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';                 // <-- change this
+    // =============================================================================
 
-    // Initialize Supabase from inputs or localStorage
-    window.onload = function() {
-        const savedKey = localStorage.getItem('supabase_anon_key');
-        if (savedKey) {
-            document.getElementById('supabase-key').value = savedKey;
-            initSupabase();
-        }
-    };
+    // Initialize Supabase client once
+    const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    function initSupabase() {
-        const url = document.getElementById('supabase-url').value.trim();
-        const key = document.getElementById('supabase-key').value.trim();
-        
-        if (!url || !key) return alert("Please enter both URL and Key.");
-        
-        try {
-            // Save key for next time
-            localStorage.setItem('supabase_anon_key', key);
-            supabase = supabase.createClient(url, key);
-            document.getElementById('config-overlay').style.display = 'none';
-            checkSession();
-        } catch (e) {
-            alert("Connection failed: " + e.message);
-        }
+    // Helper to show messages
+    function showMessage(text, isError = true) {
+        const msgDiv = document.getElementById('message');
+        msgDiv.innerHTML = `<div class="${isError ? 'error' : 'success'}">${text}</div>`;
+        setTimeout(() => msgDiv.innerHTML = '', 5000);
     }
 
-    // Auth logic
-    async function handleAuth() {
-        const email = document.getElementById('auth-email').value;
-        const password = document.getElementById('auth-password').value;
-        const msg = document.getElementById('auth-msg');
-        
-        if (!email || !password) {
-            msg.textContent = "Error: Email and password required.";
-            msg.className = "status-msg error";
-            return;
-        }
-
-        msg.textContent = isSignup ? "Creating account..." : "Authenticating...";
-        msg.className = "status-msg";
-
-        const { data, error } = isSignup 
-            ? await supabase.auth.signUp({ email, password })
-            : await supabase.auth.signInWithPassword({ email, password });
-
-        if (error) {
-            msg.textContent = "Error: " + error.message;
-            msg.className = "status-msg error";
-        } else {
-            if (isSignup && !data.session) {
-                msg.textContent = "Signup successful! Please check your email for confirmation.";
-            } else {
-                checkSession();
-            }
-        }
-    }
-
-    function toggleAuthMode() {
-        isSignup = !isSignup;
-        document.getElementById('auth-title').textContent = isSignup ? "[ SIGNUP ]" : "[ LOGIN ]";
-        document.getElementById('auth-btn').textContent = isSignup ? "Signup" : "Login";
-        document.querySelector('.btn-outline').textContent = isSignup ? "Switch to Login" : "Switch to Signup";
-    }
-
-    async function checkSession() {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-            document.getElementById('auth-section').classList.remove('active');
-            document.getElementById('app-section').classList.add('active');
-            document.getElementById('user-display').textContent = "User: " + session.user.email;
-            document.getElementById('t-date').valueAsDate = new Date();
-            loadTransactions();
-        } else {
-            document.getElementById('auth-section').classList.add('active');
-            document.getElementById('app-section').classList.remove('active');
-        }
-    }
-
-    async function logout() {
-        await supabase.auth.signOut();
-        localStorage.removeItem('supabase_anon_key'); // Optional: clear key on logout for security
-        location.reload();
-    }
-
-    // Transaction logic
-    async function addTransaction() {
-        const description = document.getElementById('t-desc').value;
-        const amount = parseFloat(document.getElementById('t-amount').value);
-        const type = document.getElementById('t-type').value;
-        const date = document.getElementById('t-date').value;
-        const msg = document.getElementById('t-msg');
-
-        if (!description || !amount || !date) {
-            msg.textContent = "Error: All fields required.";
-            msg.className = "status-msg error";
-            return;
-        }
-
-        msg.textContent = "Processing...";
-        const { error } = await supabase.from('transactions').insert([
-            { description, amount, type, date }
-        ]);
-
-        if (error) {
-            msg.textContent = "Error: " + error.message;
-            msg.className = "status-msg error";
-            if (error.message.includes("not found")) {
-                msg.textContent += " (Did you create the 'transactions' table in Supabase?)";
-            }
-        } else {
-            msg.textContent = "Transaction logged successfully.";
-            msg.className = "status-msg";
-            document.getElementById('t-desc').value = '';
-            document.getElementById('t-amount').value = '';
-            loadTransactions();
-        }
-    }
-
+    // Load transactions into table
     async function loadTransactions() {
-        const { data, error } = await supabase
+        const { data, error } = await _supabase
             .from('transactions')
             .select('*')
             .order('date', { ascending: false });
-
         if (error) {
-            console.error(error);
-            const body = document.getElementById('transaction-body');
-            body.innerHTML = `<tr><td colspan="4" style="color:red; text-align:center;">Error loading data: ${error.message}</td></tr>`;
+            showMessage('Load error: ' + error.message);
             return;
         }
-
-        const body = document.getElementById('transaction-body');
-        body.innerHTML = '';
-        
-        let income = 0;
-        let expense = 0;
-
-        if (data.length === 0) {
-            body.innerHTML = '<tr><td colspan="4" style="text-align:center; opacity:0.5;">No transactions found.</td></tr>';
+        const tbody = document.getElementById('txTable');
+        tbody.innerHTML = '';
+        for (let tx of data) {
+            const row = tbody.insertRow();
+            row.insertCell(0).innerText = tx.date;
+            row.insertCell(1).innerText = tx.description;
+            row.insertCell(2).innerText = `$${Number(tx.amount).toFixed(2)}`;
+            row.insertCell(3).innerHTML = `<span class="${tx.type}">${tx.type === 'income' ? '💰 +' : '💸 -'}</span>`;
         }
-
-        data.forEach(t => {
-            const row = document.createElement('tr');
-            const amt = parseFloat(t.amount);
-            if (t.type === 'income') income += amt;
-            else expense += amt;
-
-            row.innerHTML = `
-                <td>${t.date}</td>
-                <td>${t.description}</td>
-                <td class="type-${t.type}">${t.type.toUpperCase()}</td>
-                <td>$${amt.toFixed(2)}</td>
-            `;
-            body.appendChild(row);
-        });
-
-        document.getElementById('total-income').textContent = `$${income.toFixed(2)}`;
-        document.getElementById('total-expense').textContent = `$${expense.toFixed(2)}`;
-        document.getElementById('total-balance').textContent = `$${(income - expense).toFixed(2)}`;
     }
 
-    // Register Service Worker
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('sw.js').then(reg => {
-                console.log('SW registered:', reg);
-            }).catch(err => {
-                console.log('SW registration failed:', err);
-            });
-        });
+    // Add transaction
+    async function addTransaction() {
+        const desc = document.getElementById('desc').value.trim();
+        const amount = parseFloat(document.getElementById('amount').value);
+        const type = document.getElementById('type').value;
+        let date = document.getElementById('date').value;
+        if (!date) date = new Date().toISOString().split('T')[0];
+        if (!desc || isNaN(amount)) {
+            showMessage('Description and valid amount required');
+            return;
+        }
+        const { error } = await _supabase.from('transactions').insert([{
+            description: desc,
+            amount: amount,
+            type: type,
+            date: date
+        }]);
+        if (error) {
+            showMessage('Add error: ' + error.message);
+        } else {
+            showMessage('Transaction added', false);
+            document.getElementById('desc').value = '';
+            document.getElementById('amount').value = '';
+            document.getElementById('date').value = '';
+            loadTransactions();
+        }
     }
 
-    // Listen for auth changes
-    setTimeout(() => {
-        if (supabase) {
-            supabase.auth.onAuthStateChange((event, session) => {
-                checkSession();
-            });
+    // Sign up
+    async function signUp() {
+        const email = document.getElementById('email').value;
+        const pwd = document.getElementById('password').value;
+        if (!email || !pwd) {
+            showMessage('Email and password required');
+            return;
         }
-    }, 1000);
+        const { error } = await _supabase.auth.signUp({ email, password: pwd });
+        if (error) showMessage('Sign up error: ' + error.message);
+        else showMessage('Sign up successful! You can now sign in.', false);
+    }
+
+    // Sign in
+    async function signIn() {
+        const email = document.getElementById('email').value;
+        const pwd = document.getElementById('password').value;
+        const { data, error } = await _supabase.auth.signInWithPassword({ email, password: pwd });
+        if (error) {
+            showMessage('Sign in error: ' + error.message);
+        } else {
+            showMessage('Signed in as ' + data.user.email, false);
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('vaultSection').style.display = 'block';
+            document.getElementById('userEmail').innerText = data.user.email;
+            loadTransactions();
+        }
+    }
+
+    // Sign out
+    async function signOut() {
+        await _supabase.auth.signOut();
+        document.getElementById('authSection').style.display = 'block';
+        document.getElementById('vaultSection').style.display = 'none';
+        showMessage('Signed out', false);
+    }
+
+    // Check existing session on page load
+    (async function() {
+        const { data } = await _supabase.auth.getSession();
+        if (data.session) {
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('vaultSection').style.display = 'block';
+            document.getElementById('userEmail').innerText = data.session.user.email;
+            loadTransactions();
+        }
+    })();
+
+    // Attach event listeners (no inline onclick to avoid conflicts)
+    document.getElementById('signUpBtn').onclick = signUp;
+    document.getElementById('signInBtn').onclick = signIn;
+    document.getElementById('signOutBtn').onclick = signOut;
+    document.getElementById('addBtn').onclick = addTransaction;
 </script>
 </body>
 </html>
