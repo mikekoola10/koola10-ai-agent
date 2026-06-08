@@ -1,0 +1,16 @@
+{
+  "name": "Koola10 Vault",
+  "short_name": "Vault",
+  "description": "Personal Finance Command Center",
+  "start_url": "vault.html",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#00ff41",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/nolan/512/safe.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

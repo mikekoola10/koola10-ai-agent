@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Koola10 AI Agent — Command Center</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#00ff41">
+    <link rel="apple-touch-icon" href="https://img.icons8.com/nolan/512/safe.png">
     <style>
         :root {
             --primary: #00ff41;
@@ -163,6 +166,11 @@
     </div>
 
     <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js');
+            });
+        }
         const canvas = document.getElementById('matrix');
         const ctx = canvas.getContext('2d');
 

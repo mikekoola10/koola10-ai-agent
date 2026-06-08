@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Koola10 Vault — Personal Finance</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#00ff41">
+    <link rel="apple-touch-icon" href="https://img.icons8.com/nolan/512/safe.png">
     <style>
         :root {
             --primary: #00ff41;
@@ -374,6 +377,17 @@
         document.getElementById('total-income').textContent = `$${income.toFixed(2)}`;
         document.getElementById('total-expense').textContent = `$${expense.toFixed(2)}`;
         document.getElementById('total-balance').textContent = `$${(income - expense).toFixed(2)}`;
+    }
+
+    // Register Service Worker
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js').then(reg => {
+                console.log('SW registered:', reg);
+            }).catch(err => {
+                console.log('SW registration failed:', err);
+            });
+        });
     }
 
     // Listen for auth changes
