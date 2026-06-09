@@ -3,216 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koola Vault - Final Working</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <title>Koola Vault – Live</title>
     <style>
-        body {
-            background: #0a0a0a;
-            color: #0f0;
-            font-family: 'Courier New', monospace;
-            padding: 20px;
-            margin: 0;
-        }
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        .error {
-            color: #f55;
-            background: #311;
-            padding: 10px;
-            margin: 10px 0;
-            border-left: 4px solid #f55;
-        }
-        .success {
-            color: #0f0;
-            background: #131;
-            padding: 10px;
-            margin: 10px 0;
-            border-left: 4px solid #0f0;
-        }
-        input, select, button {
-            background: #1e1e1e;
-            border: 1px solid #0f0;
-            color: #0f0;
-            padding: 8px 12px;
-            margin: 5px;
-            border-radius: 8px;
-            font-family: monospace;
-        }
-        button {
-            background: #0f0;
-            color: #000;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        th, td {
-            border: 1px solid #2a2a2a;
-            padding: 8px;
-            text-align: left;
-        }
-        .income { color: #0f0; }
-        .expense { color: #f55; }
+        body { background: #0a0a0a; color: #0f0; font-family: monospace; padding: 20px; }
+        .container { max-width: 1000px; margin: auto; }
+        input, select, button { background: #1e1e1e; border: 1px solid #0f0; color: #0f0; padding: 8px; margin: 5px; border-radius: 8px; }
+        button { background: #0f0; color: #000; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #2a2a2a; padding: 8px; text-align: left; }
+        .income { color: #0f0; } .expense { color: #f55; } .trade { color: #ff0; } .profit { color: #0ff; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>🌀 Koola Vault</h1>
+    <h1>🌀 Koola Vault · Google Sheets Backend</h1>
     <div id="message"></div>
-
-    <div id="authSection">
-        <h2>Access Vault</h2>
-        <input type="email" id="email" placeholder="Email"><br>
-        <input type="password" id="password" placeholder="Password"><br>
-        <button id="signUpBtn">Sign Up</button>
-        <button id="signInBtn">Sign In</button>
+    <div>
+        <input type="text" id="desc" placeholder="Description (e.g., BTC trade)">
+        <input type="number" id="amount" placeholder="Amount (USD)">
+        <select id="type">
+            <option value="income">Income</option>
+            <option value="expense">Expense</option>
+            <option value="trade">Trade</option>
+            <option value="profit">Profit Sweep</option>
+        </select>
+        <input type="text" id="notes" placeholder="Notes (optional)">
+        <button id="addBtn">Add Entry</button>
     </div>
-
-    <div id="vaultSection" style="display:none;">
-        <div style="display: flex; justify-content: space-between;">
-            <h2>Welcome, <span id="userEmail"></span></h2>
-            <button id="signOutBtn">Sign Out</button>
-        </div>
-        <div style="background: #1a1a1a; padding: 15px; border-radius: 12px; margin: 20px 0;">
-            <h3>Add Transaction</h3>
-            <input type="text" id="desc" placeholder="Description">
-            <input type="number" id="amount" placeholder="Amount">
-            <select id="type">
-                <option value="income">Income</option>
-                <option value="expense">Expense</option>
-            </select>
-            <input type="date" id="date">
-            <button id="addBtn">Add Entry</button>
-        </div>
-        <table>
-            <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th></tr></thead>
-            <tbody id="txTable"></tbody>
-        </table>
-    </div>
+    <table id="txTable">
+        <thead><tr><th>Timestamp</th><th>Description</th><th>Amount</th><th>Type</th><th>Notes</th></tr></thead>
+        <tbody></tbody>
+    </table>
 </div>
 
 <script>
-    // ==================== VAULT CONFIGURATION ====================
     const API_URL = 'https://script.google.com/macros/s/AKfycbxFFviECwZcWEZy9HLo2aEUlAqB-brL5MZFcn1OtTe8wYurw4G7AJltd5dHAE6bQRRg/exec';
-    // =============================================================================
 
-    // Initialize Supabase client once
-    const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-    // Helper to show messages
-    function showMessage(text, isError = true) {
+    async function showMessage(text, isError = true) {
         const msgDiv = document.getElementById('message');
-        msgDiv.innerHTML = `<div class="${isError ? 'error' : 'success'}">${text}</div>`;
-        setTimeout(() => msgDiv.innerHTML = '', 5000);
+        msgDiv.innerHTML = `<div style="background:${isError ? '#311' : '#131'}; border-left:4px solid ${isError ? '#f55' : '#0f0'}; padding:10px; margin:10px 0;">${text}</div>`;
+        setTimeout(() => msgDiv.innerHTML = '', 4000);
     }
 
-    // Load transactions into table
     async function loadTransactions() {
-        const { data, error } = await _supabase
-            .from('transactions')
-            .select('*')
-            .order('date', { ascending: false });
-        if (error) {
-            showMessage('Load error: ' + error.message);
-            return;
-        }
-        const tbody = document.getElementById('txTable');
-        tbody.innerHTML = '';
-        for (let tx of data) {
-            const row = tbody.insertRow();
-            row.insertCell(0).innerText = tx.date;
-            row.insertCell(1).innerText = tx.description;
-            row.insertCell(2).innerText = `$${Number(tx.amount).toFixed(2)}`;
-            row.insertCell(3).innerHTML = `<span class="${tx.type}">${tx.type === 'income' ? '💰 +' : '💸 -'}</span>`;
+        try {
+            const res = await fetch(`${API_URL}?action=get`);
+            const data = await res.json();
+            const tbody = document.querySelector('#txTable tbody');
+            tbody.innerHTML = '';
+            data.reverse().forEach(tx => {
+                const row = tbody.insertRow();
+                row.insertCell(0).innerText = new Date(tx.timestamp).toLocaleString();
+                row.insertCell(1).innerText = tx.description;
+                row.insertCell(2).innerText = `$${parseFloat(tx.amount).toFixed(2)}`;
+                row.insertCell(3).innerHTML = `<span class="${tx.type}">${tx.type}</span>`;
+                row.insertCell(4).innerText = tx.notes || '';
+            });
+        } catch (err) {
+            showMessage('Load error: ' + err.message);
         }
     }
 
-    // Add transaction
     async function addTransaction() {
-        const desc = document.getElementById('desc').value.trim();
-        const amount = parseFloat(document.getElementById('amount').value);
+        const description = document.getElementById('desc').value.trim();
+        const amount = document.getElementById('amount').value;
         const type = document.getElementById('type').value;
-        let date = document.getElementById('date').value;
-        if (!date) date = new Date().toISOString().split('T')[0];
-        if (!desc || isNaN(amount)) {
-            showMessage('Description and valid amount required');
-            return;
-        }
-        const { error } = await _supabase.from('transactions').insert([{
-            description: desc,
-            amount: amount,
-            type: type,
-            date: date
-        }]);
-        if (error) {
-            showMessage('Add error: ' + error.message);
-        } else {
-            showMessage('Transaction added', false);
-            document.getElementById('desc').value = '';
-            document.getElementById('amount').value = '';
-            document.getElementById('date').value = '';
-            loadTransactions();
-        }
-    }
-
-    // Sign up
-    async function signUp() {
-        const email = document.getElementById('email').value;
-        const pwd = document.getElementById('password').value;
-        if (!email || !pwd) {
-            showMessage('Email and password required');
-            return;
-        }
-        const { error } = await _supabase.auth.signUp({ email, password: pwd });
-        if (error) showMessage('Sign up error: ' + error.message);
-        else showMessage('Sign up successful! You can now sign in.', false);
-    }
-
-    // Sign in
-    async function signIn() {
-        const email = document.getElementById('email').value;
-        const pwd = document.getElementById('password').value;
-        const { data, error } = await _supabase.auth.signInWithPassword({ email, password: pwd });
-        if (error) {
-            showMessage('Sign in error: ' + error.message);
-        } else {
-            showMessage('Signed in as ' + data.user.email, false);
-            document.getElementById('authSection').style.display = 'none';
-            document.getElementById('vaultSection').style.display = 'block';
-            document.getElementById('userEmail').innerText = data.user.email;
-            loadTransactions();
+        const notes = document.getElementById('notes').value.trim();
+        if (!description || !amount) return showMessage('Description and amount required');
+        const params = new URLSearchParams();
+        params.append('action', 'add');
+        params.append('description', description);
+        params.append('amount', amount);
+        params.append('type', type);
+        params.append('notes', notes);
+        try {
+            const res = await fetch(`${API_URL}?${params.toString()}`);
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showMessage('Entry added', false);
+                document.getElementById('desc').value = '';
+                document.getElementById('amount').value = '';
+                document.getElementById('notes').value = '';
+                loadTransactions();
+            } else {
+                showMessage('Error: ' + JSON.stringify(result));
+            }
+        } catch (err) {
+            showMessage('Add error: ' + err.message);
         }
     }
 
-    // Sign out
-    async function signOut() {
-        await _supabase.auth.signOut();
-        document.getElementById('authSection').style.display = 'block';
-        document.getElementById('vaultSection').style.display = 'none';
-        showMessage('Signed out', false);
-    }
-
-    // Check existing session on page load
-    (async function() {
-        const { data } = await _supabase.auth.getSession();
-        if (data.session) {
-            document.getElementById('authSection').style.display = 'none';
-            document.getElementById('vaultSection').style.display = 'block';
-            document.getElementById('userEmail').innerText = data.session.user.email;
-            loadTransactions();
-        }
-    })();
-
-    // Attach event listeners (no inline onclick to avoid conflicts)
-    document.getElementById('signUpBtn').onclick = signUp;
-    document.getElementById('signInBtn').onclick = signIn;
-    document.getElementById('signOutBtn').onclick = signOut;
     document.getElementById('addBtn').onclick = addTransaction;
+    loadTransactions();
 </script>
 </body>
 </html>
