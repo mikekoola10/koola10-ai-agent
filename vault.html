@@ -18,6 +18,17 @@
 <div class="container">
     <h1>🌀 Koola Vault · Google Sheets Backend</h1>
     <div id="message"></div>
+
+    <!-- Subscription Health Widget -->
+    <div id="healthSection" style="background: #0a0a0a; border: 1px solid #0f0; border-radius: 12px; padding: 15px; margin-bottom: 20px;">
+        <h2>💳 Subscription Health</h2>
+        <div id="healthContent">Loading health data...</div>
+    </div>
+
+    <div id="forecastSection" style="background: #0a0a0a; border: 1px solid #0ff; border-radius: 12px; padding: 15px; margin-bottom: 20px;">
+        <h3>📈 30-Day Ops Fund Forecast</h3>
+        <div id="forecastContent">Loading forecast...</div>
+    </div>
     <div>
         <input type="text" id="desc" placeholder="Description (e.g., BTC trade)">
         <input type="number" id="amount" placeholder="Amount (USD)">
@@ -93,8 +104,76 @@
         }
     }
 
+    async function loadSubscriptionHealth() {
+        const container = document.getElementById('healthContent');
+        try {
+            const res = await fetch('/api/subscription-health');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            let html = '';
+
+            // Upcoming bills
+            html += `<div style="margin-bottom: 15px;"><strong>📅 Upcoming (next 7 days)</strong><ul>`;
+            if (data.upcoming.length === 0) html += '<li>None</li>';
+            for (const b of data.upcoming) {
+                const due = new Date(b.due_date).toLocaleDateString();
+                html += `<li>${b.vendor} – $${b.amount.toFixed(2)} (due ${due})</li>`;
+            }
+            html += `</ul></div>`;
+
+            // Failed payments
+            html += `<div style="margin-bottom: 15px;"><strong>⚠️ Failed / Overdue</strong><ul>`;
+            if (data.failed.length === 0) html += '<li>None</li>';
+            for (const b of data.failed) {
+                html += `<li style="color:#f55;">${b.vendor} – $${b.amount.toFixed(2)} (overdue)</li>`;
+            }
+            html += `</ul></div>`;
+
+            // Total monthly recurring
+            html += `<div><strong>💰 Total Monthly Recurring:</strong> $${data.total_monthly.toFixed(2)}</div>`;
+
+            // Cards info
+            html += `<div><strong>💳 Active Virtual Cards:</strong> ${data.cards.length} active</div>`;
+
+            container.innerHTML = html;
+        } catch (err) {
+            container.innerHTML = `<span style="color:#f55;">Error loading health: ${err.message}</span>`;
+        }
+    }
+
+    async function loadForecast() {
+        const container = document.getElementById('forecastContent');
+        try {
+            const res = await fetch('/api/forecast');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            let html = '<ul>';
+            for (let i = 0; i < data.length; i += 7) { // weekly
+                const date = new Date(data[i].date).toLocaleDateString();
+                html += `<li>${date}: <strong>$${data[i].balance.toFixed(2)}</strong></li>`;
+            }
+            // Add final day
+            if (data.length > 0 && (data.length - 1) % 7 !== 0) {
+                const last = data[data.length - 1];
+                html += `<li>${new Date(last.date).toLocaleDateString()}: <strong>$${last.balance.toFixed(2)}</strong></li>`;
+            }
+            html += '</ul>';
+            container.innerHTML = html;
+        } catch (err) {
+            container.innerHTML = `<span style="color:#f55;">Error loading forecast: ${err.message}</span>`;
+        }
+    }
+
     document.getElementById('addBtn').onclick = addTransaction;
     loadTransactions();
+    loadSubscriptionHealth();
+    loadForecast();
+    setInterval(() => {
+        loadSubscriptionHealth();
+        loadForecast();
+    }, 60 * 1000);
 </script>
 </body>
 </html>
