@@ -6,6 +6,7 @@ import re
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
+from signup_automation import SIGNUP_HANDLERS
 from browser_use import Agent, Browser, BrowserProfile
 from langchain_openai import ChatOpenAI
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
@@ -47,6 +48,12 @@ class ExtractRequest(BaseModel):
 
 class StripeKeysRequest(BaseModel):
     otp: Optional[str] = None
+
+class SignupRequest(BaseModel):
+    service: str
+    email: str
+    password: Optional[str] = None
+    card_info: Dict[str, Any]
 
 async def get_screenshot_base64(page):
     try:
@@ -144,6 +151,27 @@ async def submit_form(req: FormRequest):
         "confirmation": str(result),
         "screenshot": screenshot_b64
     }
+
+@app.post("/signup_ai_service")
+async def signup_ai_service(req: SignupRequest):
+    handler = SIGNUP_HANDLERS.get(req.service.lower())
+    if not handler:
+        raise HTTPException(status_code=400, detail=f"No handler for service: {req.service}")
+
+    async with async_playwright() as p:
+        browser_pw = await p.chromium.launch(
+            headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
+            args=["--disable-blink-features=AutomationControlled"]
+        )
+        page = await browser_pw.new_page()
+        try:
+            result = await handler(page, req.email, req.card_info, req.password)
+            return result
+        except Exception as e:
+            logger.error(f"Signup error: {e}")
+            return {"status": "error", "message": str(e)}
+        finally:
+            await browser_pw.close()
 
 @app.post("/browser/extract")
 async def extract(req: ExtractRequest):
