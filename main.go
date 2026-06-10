@@ -25,6 +25,7 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/internal/swarms"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -308,6 +309,8 @@ var (
 
 	globalSwarmManager = agents.NewSwarmManager()
 
+	globalVaultKeeper *swarms.VaultKeeper
+
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
@@ -357,6 +360,9 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
+	globalVaultKeeper = swarms.NewVaultKeeper()
+	defer globalVaultKeeper.Shutdown()
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -478,6 +484,8 @@ func main() {
 	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+
+	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -997,17 +1005,43 @@ func (l *EconomicLedger) Load() {
 	if err == nil { json.Unmarshal(data, l) }; if l.Transactions == nil { l.Transactions = []Transaction{} }
 }
 func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
-	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
+	l.mu.Lock()
+	l.Balance -= amount
+	l.TotalCosts += amount
 	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
+	l.mu.Unlock()
+	l.Save()
+	AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
+
+	if globalVaultKeeper != nil {
+		globalVaultKeeper.LogEvent(swarms.LedgerEvent{
+			Description: description,
+			Amount:      amount,
+			Type:        "expense",
+			Notes:       fmt.Sprintf("Category: %s, Vertical: %s", category, vertical),
+		})
+	}
 }
 func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
 	l.RecordRevenueWithVertical("", amount, source)
 }
 func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
-	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
+	l.mu.Lock()
+	l.Balance += amount
+	l.TotalRevenue += amount
 	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+	l.mu.Unlock()
+	l.Save()
+	AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+
+	if globalVaultKeeper != nil {
+		globalVaultKeeper.LogEvent(swarms.LedgerEvent{
+			Description: "Revenue: " + source,
+			Amount:      amount,
+			Type:        "income",
+			Notes:       fmt.Sprintf("Vertical: %s", vertical),
+		})
+	}
 }
 
 // --- Financial Handlers ---
@@ -1117,7 +1151,7 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var req struct { ApplicationID string; Status string }; json.NewDecoder(r.Body).Decode(&req)
 	id := filepath.Base(req.ApplicationID); data, _ := os.ReadFile(filepath.Join(appsDir, id+".json")); var d ApplicationDraft; json.Unmarshal(data, &d)
 	prev := d.Status; d.Status = req.Status; updated, _ := json.Marshal(d); os.WriteFile(filepath.Join(appsDir, id+".json"), updated, 0644)
-	if req.Status == "approved" && prev != "approved" { globalLedger.RecordRevenueWithVertical("", 500.0, "Grant success: "+id) }
+	if req.Status == "approved" && prev != "approved" { fundManager.RouteRevenue(500.0, "grant_success:"+id) }
 	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(d)
 }
 func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
@@ -1597,6 +1631,42 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+type VaultSummaryResponse struct {
+	TotalRevenue   float64 `json:"total_revenue"`
+	OperationsFund float64 `json:"operations_fund"` // 30%
+	SpendableFund  float64 `json:"spendable_fund"`  // 70%
+}
+
+func handleVaultSummary(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	totalRevInLedger := globalLedger.TotalRevenue
+	globalLedger.mu.RUnlock()
+
+	status := fundManager.GetStatus()
+	_ = status.TotalEarned // This is 30% of what went through fundManager
+
+	// Total revenue is (TotalEarned / 0.3) if all revenue went through fundManager.
+	// But some might have gone directly to ledger in the past.
+	// The most accurate is: Ledger.TotalRevenue was the 70% split.
+	// So Total = Ledger.TotalRevenue / 0.7
+	totalRevenue := 0.0
+	if totalRevInLedger > 0 {
+		totalRevenue = totalRevInLedger / 0.7
+	}
+
+	ops := totalRevenue * 0.3
+	spend := totalRevenue * 0.7
+
+	resp := VaultSummaryResponse{
+		TotalRevenue:   totalRevenue,
+		OperationsFund: ops,
+		SpendableFund:  spend,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func generateID() string {
