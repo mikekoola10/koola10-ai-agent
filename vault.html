@@ -24,6 +24,11 @@
         <h2>💳 Subscription Health</h2>
         <div id="healthContent">Loading health data...</div>
     </div>
+
+    <div id="forecastSection" style="background: #0a0a0a; border: 1px solid #0ff; border-radius: 12px; padding: 15px; margin-bottom: 20px;">
+        <h3>📈 30-Day Ops Fund Forecast</h3>
+        <div id="forecastContent">Loading forecast...</div>
+    </div>
     <div>
         <input type="text" id="desc" placeholder="Description (e.g., BTC trade)">
         <input type="number" id="amount" placeholder="Amount (USD)">
@@ -137,10 +142,38 @@
         }
     }
 
+    async function loadForecast() {
+        const container = document.getElementById('forecastContent');
+        try {
+            const res = await fetch('/api/forecast');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            let html = '<ul>';
+            for (let i = 0; i < data.length; i += 7) { // weekly
+                const date = new Date(data[i].date).toLocaleDateString();
+                html += `<li>${date}: <strong>$${data[i].balance.toFixed(2)}</strong></li>`;
+            }
+            // Add final day
+            if (data.length > 0 && (data.length - 1) % 7 !== 0) {
+                const last = data[data.length - 1];
+                html += `<li>${new Date(last.date).toLocaleDateString()}: <strong>$${last.balance.toFixed(2)}</strong></li>`;
+            }
+            html += '</ul>';
+            container.innerHTML = html;
+        } catch (err) {
+            container.innerHTML = `<span style="color:#f55;">Error loading forecast: ${err.message}</span>`;
+        }
+    }
+
     document.getElementById('addBtn').onclick = addTransaction;
     loadTransactions();
     loadSubscriptionHealth();
-    setInterval(loadSubscriptionHealth, 60 * 1000);
+    loadForecast();
+    setInterval(() => {
+        loadSubscriptionHealth();
+        loadForecast();
+    }, 60 * 1000);
 </script>
 </body>
 </html>

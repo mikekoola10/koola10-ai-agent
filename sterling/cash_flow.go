@@ -77,14 +77,23 @@ func (cf *CashFlow) AddBill(vendor string, amount float64, dueDate time.Time, re
 	cf.save()
 }
 
-func (cf *CashFlow) RunDailyPayer() {
+func (cf *CashFlow) RunDailyPayer(tracker *UsageTracker) {
 	ticker := time.NewTicker(24 * time.Hour)
 	go func() {
 		// Run once on start
 		cf.payDueBills()
+		if tracker != nil {
+			cf.CancelIdleSubscriptions(tracker)
+		}
+		cf.CheckForecastAndWarn()
+
 		for {
 			<-ticker.C
 			cf.payDueBills()
+			if tracker != nil {
+				cf.CancelIdleSubscriptions(tracker)
+			}
+			cf.CheckForecastAndWarn()
 		}
 	}()
 }

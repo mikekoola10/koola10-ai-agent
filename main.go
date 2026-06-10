@@ -278,6 +278,7 @@ var (
 	agentCardClient *sterling.AgentCardClient
 	cashFlow *sterling.CashFlow
 	subManager *orchestrator.SubscriptionsManager
+	usageTracker *sterling.UsageTracker
 
 	globalSwarmManager = agents.NewSwarmManager()
 
@@ -341,6 +342,7 @@ func main() {
 	agentCardClient = sterling.NewAgentCardClient()
 	cashFlow = sterling.NewCashFlow(globalLedger, agentCardClient, billsPath)
 	subManager = orchestrator.NewSubscriptionsManager(agentCardClient, cashFlow)
+	usageTracker = sterling.NewUsageTracker("/data/usage.json")
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -352,7 +354,7 @@ func main() {
 	}()
 
 	// Daily bill payment
-	cashFlow.RunDailyPayer()
+	cashFlow.RunDailyPayer(usageTracker)
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
@@ -463,6 +465,7 @@ func main() {
 	r.Post("/admin/subscribe_all", corsMiddleware(handleSubscribeAll))
 	r.Post("/admin/auto_subscribe", corsMiddleware(handleAutoSubscribe))
 	r.Get("/api/subscription-health", corsMiddleware(handleSubscriptionHealth))
+	r.Get("/api/forecast", corsMiddleware(handleForecast))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
@@ -1655,6 +1658,16 @@ func handleSubscriptionHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func handleForecast(w http.ResponseWriter, r *http.Request) {
+	forecasts, err := cashFlow.ForecastOpsFund(30)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(forecasts)
 }
 
 func handleAutoSubscribe(w http.ResponseWriter, r *http.Request) {
