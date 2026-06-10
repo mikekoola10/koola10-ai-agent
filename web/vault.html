@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koola Vault</title>
+    <style>
+        body { background: #0a0a0a; color: #0f0; font-family: monospace; padding: 20px; }
+        .container { max-width: 1200px; margin: auto; }
+        input, select, button { background: #1e1e1e; border: 1px solid #0f0; color: #0f0; padding: 8px; margin: 5px; border-radius: 8px; }
+        button { background: #0f0; color: #000; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #2a2a2a; padding: 8px; text-align: left; }
+        .brief-box { background: #1a1a1a; padding: 15px; border-radius: 12px; margin-bottom: 20px; border-left: 4px solid #0f0; }
+        .error { color: #f55; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🌀 Koola Vault</h1>
+
+    <!-- Morning Brief Section (fetched from /vault/brief) -->
+    <div class="brief-box">
+        <h3>🌅 Morning Brief</h3>
+        <div id="briefContent">Loading latest brief...</div>
+        <div id="briefError" class="error" style="display:none;"></div>
+    </div>
+
+    <!-- Add Transaction -->
+    <div style="background: #111; padding: 15px; border-radius: 12px; margin: 20px 0;">
+        <h3>➕ Add transaction</h3>
+        <input type="text" id="desc" placeholder="Description">
+        <input type="number" id="amount" placeholder="Amount">
+        <select id="type">
+            <option value="income">Income</option>
+            <option value="expense">Expense</option>
+            <option value="trade">Trade</option>
+            <option value="profit">Profit Sweep</option>
+        </select>
+        <input type="date" id="date">
+        <button onclick="addTransaction()">Add Entry</button>
+    </div>
+
+    <!-- Transactions Table -->
+    <table id="txTable">
+        <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th></tr></thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+<script>
+    // ==================== CONFIGURATION ====================
+    // Use relative path – the Go proxy will forward to the same origin
+    const API_BASE = '';  // empty means same origin
+
+    // ==================== MORNING BRIEF ====================
+    async function loadMorningBrief() {
+        const briefDiv = document.getElementById('briefContent');
+        const errorDiv = document.getElementById('briefError');
+        try {
+            const res = await fetch('/vault/brief');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            briefDiv.innerText = data.content || 'No brief available.';
+            errorDiv.style.display = 'none';
+        } catch (err) {
+            briefDiv.innerText = '';
+            errorDiv.innerText = 'Failed to load brief: ' + err.message;
+            errorDiv.style.display = 'block';
+        }
+    }
+
+    // ==================== TRANSACTIONS ====================
+    async function loadTransactions() {
+        // This should call your existing transaction endpoint
+        // For demo, assume you have /transactions endpoint. Adjust as needed.
+        try {
+            const res = await fetch('/transactions');
+            const data = await res.json();
+            const tbody = document.querySelector('#txTable tbody');
+            tbody.innerHTML = '';
+            data.forEach(tx => {
+                const row = tbody.insertRow();
+                row.insertCell(0).innerText = tx.date;
+                row.insertCell(1).innerText = tx.description;
+                row.insertCell(2).innerText = `$${tx.amount}`;
+                row.insertCell(3).innerText = tx.type;
+            });
+        } catch(err) {
+            console.error('Load transactions error', err);
+        }
+    }
+
+    async function addTransaction() {
+        const desc = document.getElementById('desc').value;
+        const amount = parseFloat(document.getElementById('amount').value);
+        const type = document.getElementById('type').value;
+        const date = document.getElementById('date').value || new Date().toISOString().split('T')[0];
+        if (!desc || isNaN(amount)) return alert('Description and amount required');
+        // POST to your ledger endpoint
+        const res = await fetch('/ledger/record', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({description: desc, amount, type, date})
+        });
+        if (res.ok) {
+            document.getElementById('desc').value = '';
+            document.getElementById('amount').value = '';
+            loadTransactions();
+        } else {
+            alert('Failed to add transaction');
+        }
+    }
+
+    // Initial load
+    loadMorningBrief();
+    loadTransactions();
+    setInterval(loadMorningBrief, 10 * 60 * 1000);
+</script>
+</body>
+</html>

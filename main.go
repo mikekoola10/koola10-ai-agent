@@ -324,6 +324,9 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+
+	//go:embed web/vault.html
+	vaultHTML string
 )
 
 // --- Middleware ---
@@ -407,6 +410,8 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/vault", corsMiddleware(handleVault))
+	r.Get("/vault.html", corsMiddleware(handleVault))
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -447,6 +452,10 @@ func main() {
 	r.Post("/compliance/kill-switch", corsMiddleware(handleComplianceKillSwitch))
 	r.Post("/compliance/kill-switch/reset", corsMiddleware(handleComplianceKillSwitchReset))
 	r.Get("/compliance/usage", corsMiddleware(handleComplianceUsage))
+
+	r.Get("/vault/brief", corsMiddleware(handleVaultBrief))
+	r.Get("/transactions", corsMiddleware(handleTransactionsList))
+	r.Post("/ledger/record", corsMiddleware(handleLedgerRecord))
 
 	r.Post("/economic/ledger/cost", corsMiddleware(handleEconomicLedgerCost))
 	r.Post("/economic/ledger/revenue", corsMiddleware(handleEconomicLedgerRevenue))
@@ -1353,6 +1362,83 @@ func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
 }
 
+func handleVaultBrief(w http.ResponseWriter, r *http.Request) {
+	briefPath := "/data/last_brief.txt"
+	if _, err := os.Stat(briefPath); os.IsNotExist(err) {
+		briefPath = "data/last_brief.txt"
+	}
+	content, err := os.ReadFile(briefPath)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"content": "No brief available."})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"content": string(content)})
+}
+
+func handleTransactionsList(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+
+	// Convert internal Transaction to frontend format
+	type FrontendTx struct {
+		Date        string  `json:"date"`
+		Description string  `json:"description"`
+		Amount      float64 `json:"amount"`
+		Type        string  `json:"type"`
+	}
+
+	var res []FrontendTx
+	for _, tx := range globalLedger.Transactions {
+		res = append(res, FrontendTx{
+			Date:        tx.Timestamp,
+			Description: tx.Description,
+			Amount:      tx.Amount,
+			Type:        tx.Type,
+		})
+	}
+
+	// Sort by date descending
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Date > res[j].Date
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleLedgerRecord(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Description string  `json:"description"`
+		Amount      float64 `json:"amount"`
+		Type        string  `json:"type"`
+		Date        string  `json:"date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	globalLedger.mu.Lock()
+	globalLedger.Transactions = append(globalLedger.Transactions, Transaction{
+		Timestamp:   req.Date,
+		Type:        req.Type,
+		Amount:      req.Amount,
+		Description: req.Description,
+	})
+	if req.Type == "income" || req.Type == "profit" {
+		globalLedger.Balance += req.Amount
+		globalLedger.TotalRevenue += req.Amount
+	} else {
+		globalLedger.Balance -= req.Amount
+		globalLedger.TotalCosts += req.Amount
+	}
+	globalLedger.mu.Unlock()
+	globalLedger.Save()
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
 	globalSwarmManager.Mu.RLock()
 	defer globalSwarmManager.Mu.RUnlock()
@@ -1597,6 +1683,11 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleVault(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(vaultHTML))
 }
 
 func generateID() string {
