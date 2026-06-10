@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"io"
+	"koola10/sterling"
 	"net/http"
 	"sync"
 )
@@ -11,6 +12,25 @@ var (
 	registry = make(map[string]ToolFunc)
 	regMu    sync.RWMutex
 )
+
+func init() {
+	RegisterTool("create_virtual_card", func(args map[string]interface{}) ToolResult {
+		memo, ok := args["memo"].(string)
+		if !ok {
+			return ToolResult{Success: false, Error: "Missing memo"}
+		}
+		spendLimit, ok := args["spend_limit"].(float64)
+		if !ok {
+			return ToolResult{Success: false, Error: "Missing spend_limit"}
+		}
+		client := sterling.NewPrivacyClient()
+		card, err := client.CreateVirtualCard(memo, int(spendLimit))
+		if err != nil {
+			return ToolResult{Success: false, Error: err.Error()}
+		}
+		return ToolResult{Success: true, Data: card}
+	})
+}
 
 func RegisterTool(name string, fn ToolFunc) {
 	regMu.Lock()

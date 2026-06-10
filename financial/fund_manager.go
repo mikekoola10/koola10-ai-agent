@@ -22,6 +22,15 @@ type Transaction struct {
 	Description string    `json:"description"`
 }
 
+type Bill struct {
+	ID          string    `json:"id"`
+	Vendor      string    `json:"vendor"`
+	Amount      float64   `json:"amount"`
+	DueDate     time.Time `json:"due_date"`
+	Paid        bool      `json:"paid"`
+	PaymentTxID string    `json:"payment_tx_id,omitempty"`
+}
+
 type FundStatus struct {
 	Balance             float64  `json:"balance"`
 	TotalEarned         float64  `json:"total_earned"`
@@ -256,4 +265,58 @@ func (fm *FundManager) GetHistory(days int) []Transaction {
 		}
 	}
 	return history
+}
+
+func (fm *FundManager) GetOperationsFund() float64 {
+	fm.mu.RLock()
+	defer fm.mu.RUnlock()
+	return fm.Balance
+}
+
+func (fm *FundManager) RecordTransaction(description string, amount float64, txType string, category string) (string, error) {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+
+	fm.Balance += amount
+	if amount < 0 {
+		fm.TotalSpent += -amount
+	} else {
+		fm.TotalEarned += amount
+	}
+
+	tx := Transaction{
+		Timestamp:   time.Now(),
+		Amount:      amount,
+		Source:      category,
+		Type:        txType,
+		Description: description,
+	}
+	fm.Transactions = append(fm.Transactions, tx)
+	fm.save()
+	return fmt.Sprintf("tx_%d", time.Now().UnixNano()), nil
+}
+
+func (fm *FundManager) GetRevenueSplit() (float64, float64, float64) {
+	fm.mu.RLock()
+	defer fm.mu.RUnlock()
+	// Total Revenue, Operations Fund, Spendable Fund
+	totalRevenue := 0.0
+	if fm.TotalEarned > 0 {
+		totalRevenue = fm.TotalEarned / 0.3
+	}
+	spendable := totalRevenue * 0.7
+	return totalRevenue, fm.Balance, spendable
+}
+
+func (fm *FundManager) GetRecentTransactions(duration time.Duration) []Transaction {
+	fm.mu.RLock()
+	defer fm.mu.RUnlock()
+	var recent []Transaction
+	cutoff := time.Now().Add(-duration)
+	for _, tx := range fm.Transactions {
+		if tx.Timestamp.After(cutoff) {
+			recent = append(recent, tx)
+		}
+	}
+	return recent
 }
