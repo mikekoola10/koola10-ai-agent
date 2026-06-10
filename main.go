@@ -26,7 +26,6 @@ import (
 	"koola10/agents"
 	"koola10/financial"
 	"koola10/internal/swarms"
-	"koola10/pkg/vault"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -1152,7 +1151,7 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var req struct { ApplicationID string; Status string }; json.NewDecoder(r.Body).Decode(&req)
 	id := filepath.Base(req.ApplicationID); data, _ := os.ReadFile(filepath.Join(appsDir, id+".json")); var d ApplicationDraft; json.Unmarshal(data, &d)
 	prev := d.Status; d.Status = req.Status; updated, _ := json.Marshal(d); os.WriteFile(filepath.Join(appsDir, id+".json"), updated, 0644)
-	if req.Status == "approved" && prev != "approved" { globalLedger.RecordRevenueWithVertical("", 500.0, "Grant success: "+id) }
+	if req.Status == "approved" && prev != "approved" { fundManager.RouteRevenue(500.0, "grant_success:"+id) }
 	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(d)
 }
 func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
@@ -1634,14 +1633,40 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(dashboardHTML))
 }
 
+type VaultSummaryResponse struct {
+	TotalRevenue   float64 `json:"total_revenue"`
+	OperationsFund float64 `json:"operations_fund"` // 30%
+	SpendableFund  float64 `json:"spendable_fund"`  // 70%
+}
+
 func handleVaultSummary(w http.ResponseWriter, r *http.Request) {
-	client := vault.NewVaultClient()
-	summary, err := client.GetSummary()
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
+	globalLedger.mu.RLock()
+	totalRevInLedger := globalLedger.TotalRevenue
+	globalLedger.mu.RUnlock()
+
+	status := fundManager.GetStatus()
+	_ = status.TotalEarned // This is 30% of what went through fundManager
+
+	// Total revenue is (TotalEarned / 0.3) if all revenue went through fundManager.
+	// But some might have gone directly to ledger in the past.
+	// The most accurate is: Ledger.TotalRevenue was the 70% split.
+	// So Total = Ledger.TotalRevenue / 0.7
+	totalRevenue := 0.0
+	if totalRevInLedger > 0 {
+		totalRevenue = totalRevInLedger / 0.7
 	}
-	w.Write([]byte(summary))
+
+	ops := totalRevenue * 0.3
+	spend := totalRevenue * 0.7
+
+	resp := VaultSummaryResponse{
+		TotalRevenue:   totalRevenue,
+		OperationsFund: ops,
+		SpendableFund:  spend,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func generateID() string {
