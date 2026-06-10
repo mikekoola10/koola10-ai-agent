@@ -25,6 +25,8 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/internal/swarms"
+	"koola10/pkg/vault"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -308,6 +310,8 @@ var (
 
 	globalSwarmManager = agents.NewSwarmManager()
 
+	globalVaultKeeper *swarms.VaultKeeper
+
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
@@ -357,6 +361,9 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
+	globalVaultKeeper = swarms.NewVaultKeeper()
+	defer globalVaultKeeper.Shutdown()
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -478,6 +485,8 @@ func main() {
 	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+
+	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -997,17 +1006,43 @@ func (l *EconomicLedger) Load() {
 	if err == nil { json.Unmarshal(data, l) }; if l.Transactions == nil { l.Transactions = []Transaction{} }
 }
 func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
-	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
+	l.mu.Lock()
+	l.Balance -= amount
+	l.TotalCosts += amount
 	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
+	l.mu.Unlock()
+	l.Save()
+	AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
+
+	if globalVaultKeeper != nil {
+		globalVaultKeeper.LogEvent(swarms.LedgerEvent{
+			Description: description,
+			Amount:      amount,
+			Type:        "expense",
+			Notes:       fmt.Sprintf("Category: %s, Vertical: %s", category, vertical),
+		})
+	}
 }
 func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
 	l.RecordRevenueWithVertical("", amount, source)
 }
 func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
-	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
+	l.mu.Lock()
+	l.Balance += amount
+	l.TotalRevenue += amount
 	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+	l.mu.Unlock()
+	l.Save()
+	AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+
+	if globalVaultKeeper != nil {
+		globalVaultKeeper.LogEvent(swarms.LedgerEvent{
+			Description: "Revenue: " + source,
+			Amount:      amount,
+			Type:        "income",
+			Notes:       fmt.Sprintf("Vertical: %s", vertical),
+		})
+	}
 }
 
 // --- Financial Handlers ---
@@ -1597,6 +1632,16 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleVaultSummary(w http.ResponseWriter, r *http.Request) {
+	client := vault.NewVaultClient()
+	summary, err := client.GetSummary()
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Write([]byte(summary))
 }
 
 func generateID() string {
