@@ -6,8 +6,8 @@ import re
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
-from browser_use import Agent, Browser, BrowserProfile
-from langchain_openai import ChatOpenAI
+from browser_use import Agent, Browser
+from agent_core import get_llm, get_browser_profile
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
 # Configure logging
@@ -20,17 +20,8 @@ os.makedirs(PROFILE_DIR, exist_ok=True)
 app = FastAPI()
 
 # Configure LLM
-api_key = os.getenv("DEEPSEEK_API_KEY")
-llm = ChatOpenAI(
-    model='deepseek-chat',
-    openai_api_key=api_key,
-    openai_api_base='https://api.deepseek.com',
-)
-
-browser_profile = BrowserProfile(
-    headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
-    disable_security=True,
-)
+llm = get_llm()
+browser_profile = get_browser_profile()
 # We'll create a new browser instance for each task to ensure clean state and session persistence within task
 # browser = Browser(config=browser_config)
 
