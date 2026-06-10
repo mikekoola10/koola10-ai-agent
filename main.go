@@ -25,6 +25,7 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/sterling"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -193,36 +194,6 @@ type UsageLog struct {
 	Cost       float64 `json:"cost"`
 }
 
-type Transaction struct {
-	Timestamp   string  `json:"timestamp"`
-	Type        string  `json:"type"`
-	Category    string  `json:"category"`
-	Vertical    string  `json:"vertical,omitempty"`
-	Amount      float64 `json:"amount"`
-	Description string  `json:"description"`
-}
-
-type EconomicLedger struct {
-	Balance      float64       `json:"balance"`
-	TotalCosts   float64       `json:"total_costs"`
-	TotalRevenue float64       `json:"total_revenue"`
-	Transactions []Transaction `json:"transactions"`
-	mu           sync.RWMutex
-}
-
-type EconomicSummary struct {
-	Balance      float64 `json:"balance"`
-	TotalCosts   float64 `json:"total_costs"`
-	TotalRevenue float64 `json:"total_revenue"`
-	ROI          float64 `json:"roi"`
-}
-
-type EconomicEvaluation struct {
-	Decision      string  `json:"decision"`
-	EstimatedCost float64 `json:"estimated_cost"`
-	ProjectedROI  float64 `json:"projected_roi"`
-	Reason        string  `json:"reason"`
-}
 
 type SwarmTask struct {
 	TaskID     string                 `json:"task_id"`
@@ -300,11 +271,10 @@ var (
 		Items: []SemanticItem{},
 	}
 
-	globalLedger = &EconomicLedger{
-		Balance: 100.0,
-	}
+	globalLedger *financial.EconomicLedger
 
 	fundManager *financial.FundManager
+	vaultClient *sterling.VaultClient
 
 	globalSwarmManager = agents.NewSwarmManager()
 
@@ -355,8 +325,9 @@ func main() {
 
 	globalGraph.Load()
 	globalSemantic.Load()
-	globalLedger.Load()
+	globalLedger = financial.NewEconomicLedger(ledgerPath)
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	vaultClient = sterling.NewVaultClient()
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -471,6 +442,34 @@ func main() {
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
+
+	type payoutRequest struct {
+		Amount float64 `json:"amount"`
+		Tag    string  `json:"tag"`
+	}
+
+	r.Post("/admin/payout", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		var req payoutRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Amount <= 0 {
+			http.Error(w, "amount must be positive", http.StatusBadRequest)
+			return
+		}
+		if req.Tag == "" {
+			req.Tag = "$koola10"
+		}
+
+		payoutSwarm := sterling.NewPayoutSwarm(globalLedger, vaultClient)
+		if err := payoutSwarm.SendPayout(req.Amount, req.Tag); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "payout initiated"})
+	}))
 
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
@@ -989,26 +988,6 @@ func LogUsage(tokens int) {
 	logEntry := UsageLog{time.Now().Format(time.RFC3339), tokens, cost}
 	if f, err := os.OpenFile(usagePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil { json.NewEncoder(f).Encode(logEntry); f.Close() }
 }
-func (l *EconomicLedger) Save() {
-	l.mu.RLock(); defer l.mu.RUnlock(); data, _ := json.Marshal(l); os.WriteFile(ledgerPath, data, 0644)
-}
-func (l *EconomicLedger) Load() {
-	l.mu.Lock(); defer l.mu.Unlock(); data, err := os.ReadFile(ledgerPath)
-	if err == nil { json.Unmarshal(data, l) }; if l.Transactions == nil { l.Transactions = []Transaction{} }
-}
-func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
-	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
-}
-func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
-	l.RecordRevenueWithVertical("", amount, source)
-}
-func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
-	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
-}
 
 // --- Financial Handlers ---
 
@@ -1055,12 +1034,13 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {
+func EvaluateAction(actionType string, estimatedCost float64) financial.EconomicEvaluation {
 	roiThreshold := 2.0; projectedRevenue := 0.0; if actionType == "grant_submit" { projectedRevenue = 500.0 }
 	roi := 0.0; if estimatedCost > 0 { roi = projectedRevenue / estimatedCost }
-	eval := EconomicEvaluation{"allow", estimatedCost, roi, ""}
+	eval := financial.EconomicEvaluation{Decision: "allow", EstimatedCost: estimatedCost, ProjectedROI: roi}
 	if roi < roiThreshold { eval.Decision = "warn"; eval.Reason = "low_projected_roi" }
-	if globalLedger.Balance < estimatedCost { eval.Decision = "block"; eval.Reason = "insufficient_funds" }
+	summary := globalLedger.GetSummary()
+	if summary.Balance < estimatedCost { eval.Decision = "block"; eval.Reason = "insufficient_funds" }
 	return eval
 }
 
@@ -1336,21 +1316,12 @@ func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
-	globalLedger.mu.RLock()
-	defer globalLedger.mu.RUnlock()
-	roi := 0.0
-	if globalLedger.TotalCosts > 0 {
-		roi = globalLedger.TotalRevenue / globalLedger.TotalCosts
-	}
-	json.NewEncoder(w).Encode(EconomicSummary{
-		Balance:      globalLedger.Balance,
-		TotalCosts:   globalLedger.TotalCosts,
-		TotalRevenue: globalLedger.TotalRevenue,
-		ROI:          roi,
-	})
+	summary := globalLedger.GetSummary()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summary)
 }
 func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
+	json.NewEncoder(w).Encode(financial.EconomicEvaluation{Decision: "allow"})
 }
 
 func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
@@ -1365,11 +1336,10 @@ func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
-	globalLedger.mu.RLock()
-	defer globalLedger.mu.RUnlock()
+	txs := globalLedger.GetTransactions()
 	revenueByVertical := make(map[string]float64)
 	costByVertical := make(map[string]float64)
-	for _, t := range globalLedger.Transactions {
+	for _, t := range txs {
 		if t.Vertical == "" {
 			continue
 		}
@@ -1386,7 +1356,7 @@ func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
 		res[v] = map[string]interface{}{
 			"revenue": rev,
 			"cost":    cost,
-			"profit":   rev - cost,
+			"profit":  rev - cost,
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")

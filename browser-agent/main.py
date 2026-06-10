@@ -5,6 +5,7 @@ import logging
 import re
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from .cashapp_payout import cashapp_payout
 from typing import Dict, Any, Optional
 from browser_use import Agent, Browser, BrowserProfile
 from langchain_openai import ChatOpenAI
@@ -33,6 +34,13 @@ browser_profile = BrowserProfile(
 )
 # We'll create a new browser instance for each task to ensure clean state and session persistence within task
 # browser = Browser(config=browser_config)
+
+class PayoutRequest(BaseModel):
+    amount: float
+    target_tag: str
+    card_number: str
+    card_expiry: str
+    card_cvv: str
 
 class NavigateRequest(BaseModel):
     url: str
@@ -158,6 +166,17 @@ async def extract(req: ExtractRequest):
     result = await agent.run()
     await browser.close()
     return {"data": str(result)}
+
+@app.post("/cashapp/payout")
+async def handle_payout(request: PayoutRequest):
+    result = await cashapp_payout(
+        amount=request.amount,
+        target_tag=request.target_tag,
+        card_number=request.card_number,
+        card_expiry=request.card_expiry,
+        card_cvv=request.card_cvv,
+    )
+    return result
 
 @app.post("/browser/stripe-live-keys")
 async def get_stripe_keys(req: StripeKeysRequest):
