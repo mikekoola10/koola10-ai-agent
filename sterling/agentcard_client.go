@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 )
 
 type AgentCardClient struct {
@@ -27,43 +29,111 @@ func NewAgentCardClient() *AgentCardClient {
 	}
 }
 
-func (ac *AgentCardClient) CreateVirtualCard(memo string, spendLimitCents int, autoDestruct bool) (*CardResponse, error) {
-	if ac.APIKey == "" {
-		return nil, fmt.Errorf("AGENTCARD_API_KEY not set")
-	}
+type MCPResponse struct {
+	Result struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	} `json:"result"`
+}
 
-	url := "https://api.agentcard.com/v1/cards"
+func (ac *AgentCardClient) callMCP(method string, arguments map[string]interface{}) (string, error) {
+	url := "https://mcp.agentcard.sh/mcp"
 	payload := map[string]interface{}{
-		"memo":          memo,
-		"spend_limit":   spendLimitCents,
-		"auto_destruct": autoDestruct,
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name":      method,
+			"arguments": arguments,
+		},
 	}
 
 	jsonPayload, _ := json.Marshal(payload)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	req.Header.Set("Authorization", "Bearer "+ac.APIKey)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("agentcard api error: %s", resp.Status)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
 	}
 
-	var res CardResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+	strBody := string(body)
+	if strings.Contains(strBody, "data: ") {
+		lines := strings.Split(strBody, "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "data: ") {
+				strBody = strings.TrimPrefix(line, "data: ")
+				break
+			}
+		}
+	}
+
+	var mcpRes MCPResponse
+	if err := json.Unmarshal([]byte(strBody), &mcpRes); err != nil {
+		return "", fmt.Errorf("failed to parse MCP response: %v, body: %s", err, strBody)
+	}
+
+	if mcpRes.Result.IsError {
+		return "", fmt.Errorf("MCP error: %s", mcpRes.Result.Content[0].Text)
+	}
+
+	if len(mcpRes.Result.Content) == 0 {
+		return "", fmt.Errorf("empty MCP response")
+	}
+
+	return mcpRes.Result.Content[0].Text, nil
+}
+
+func (ac *AgentCardClient) CreateVirtualCard(memo string, spendLimitCents int, autoDestruct bool) (*CardResponse, error) {
+	if ac.APIKey == "" {
+		return nil, fmt.Errorf("AGENTCARD_API_KEY not set")
+	}
+
+	if spendLimitCents < 100 {
+		spendLimitCents = 100
+	}
+
+	resText, err := ac.callMCP("create_card", map[string]interface{}{
+		"amount_cents": spendLimitCents,
+		"description":  memo,
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	return &res, nil
+	var temp struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(resText), &temp); err == nil && temp.ID != "" {
+		return ac.GetCardDetails(temp.ID)
+	}
+
+	lines := strings.Split(resText, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Card ID: ") {
+			cardID := strings.TrimSpace(strings.TrimPrefix(line, "Card ID: "))
+			if cardID != "" {
+				return ac.GetCardDetails(cardID)
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("failed to parse card ID from: %s", resText)
 }
 
 func (ac *AgentCardClient) GetCardDetails(cardID string) (*CardResponse, error) {
@@ -71,30 +141,64 @@ func (ac *AgentCardClient) GetCardDetails(cardID string) (*CardResponse, error) 
 		return nil, fmt.Errorf("AGENTCARD_API_KEY not set")
 	}
 
-	url := fmt.Sprintf("https://api.agentcard.com/v1/cards/%s", cardID)
-	req, err := http.NewRequest("GET", url, nil)
+	resText, err := ac.callMCP("get_card_details", map[string]interface{}{
+		"card_id": cardID,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+ac.APIKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
+	var res struct {
+		PAN      string `json:"pan"`
+		CVV      string `json:"cvv"`
+		Expiry   string `json:"expiry"`
+		ExpMonth string `json:"exp_month"`
+		ExpYear  string `json:"exp_year"`
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agentcard api error: %s", resp.Status)
+	if err := json.Unmarshal([]byte(resText), &res); err == nil && res.PAN != "" {
+		month := res.ExpMonth
+		year := res.ExpYear
+		if month == "" || year == "" {
+			parts := strings.Split(res.Expiry, "/")
+			if len(parts) == 2 {
+				month = parts[0]
+				year = "20" + parts[1]
+			}
+		}
+		return &CardResponse{
+			ID:       cardID,
+			PAN:      res.PAN,
+			CVV:      res.CVV,
+			ExpMonth: month,
+			ExpYear:  year,
+		}, nil
 	}
 
-	var res CardResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, err
+	// Fallback: parse from text
+	var card CardResponse
+	card.ID = cardID
+	lines := strings.Split(resText, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "PAN: ") {
+			card.PAN = strings.TrimPrefix(line, "PAN: ")
+		} else if strings.HasPrefix(line, "CVV: ") {
+			card.CVV = strings.TrimPrefix(line, "CVV: ")
+		} else if strings.HasPrefix(line, "Expiry: ") {
+			exp := strings.TrimPrefix(line, "Expiry: ")
+			parts := strings.Split(exp, "/")
+			if len(parts) == 2 {
+				card.ExpMonth = parts[0]
+				card.ExpYear = "20" + parts[1]
+			}
+		}
 	}
 
-	return &res, nil
+	if card.PAN != "" {
+		return &card, nil
+	}
+
+	return nil, fmt.Errorf("failed to parse card details: %v, body: %s", err, resText)
 }
 
 func (ac *AgentCardClient) BlockCard(cardID string) error {
@@ -102,23 +206,8 @@ func (ac *AgentCardClient) BlockCard(cardID string) error {
 		return fmt.Errorf("AGENTCARD_API_KEY not set")
 	}
 
-	url := fmt.Sprintf("https://api.agentcard.com/v1/cards/%s/block", cardID)
-	req, err := http.NewRequest("POST", url, nil)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+ac.APIKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("agentcard api error: %s", resp.Status)
-	}
-
-	return nil
+	_, err := ac.callMCP("close_card", map[string]interface{}{
+		"card_id": cardID,
+	})
+	return err
 }

@@ -456,6 +456,7 @@ func main() {
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
 
 	r.Post("/admin/subscribe_all", corsMiddleware(handleSubscribeAll))
+	r.Post("/admin/auto_subscribe", corsMiddleware(handleAutoSubscribe))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
@@ -1580,6 +1581,32 @@ func handleSubscribeAll(w http.ResponseWriter, r *http.Request) {
 	go subManager.SubscribeAll(req.Email)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"triggered"}`))
+}
+
+func handleAutoSubscribe(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Service string `json:"service"`
+		Email   string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Simple alias for user convenience
+	serviceKey := req.Service
+	if serviceKey == "suno" {
+		serviceKey = "suno_pro"
+	}
+
+	err := subManager.AutoSubscribe(serviceKey, req.Email)
+	if err != nil {
+		log.Printf("AutoSubscribe failed: %v", err)
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
 }
 
 func generateID() string {

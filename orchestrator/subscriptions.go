@@ -45,8 +45,9 @@ type SubscriptionsManager struct {
 
 func NewSubscriptionsManager(acc *sterling.AgentCardClient, cf *sterling.CashFlow) *SubscriptionsManager {
 	url := os.Getenv("BROWSER_AGENT_URL")
-	if url == "" {
-		url = "https://koola10-browser-agent.fly.dev"
+	if url == "" || url == "http://localhost:8081" {
+		// Fallback to a sensible default if not set or explicitly set to localhost in prod
+		url = "https://koola10-browser.fly.dev"
 	}
 	return &SubscriptionsManager{
 		agentCardClient: acc,
