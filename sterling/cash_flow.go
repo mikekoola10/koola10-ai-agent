@@ -81,13 +81,13 @@ func (cf *CashFlow) AddBill(vendor string, amount float64, dueDate time.Time, re
 func (cf *CashFlow) RunDailyPayer() {
 	ticker := time.NewTicker(24 * time.Hour)
 	go func() {
+		// Run once on start
+		cf.payDueBills()
 		for {
-			cf.payDueBills()
 			<-ticker.C
+			cf.payDueBills()
 		}
 	}()
-	// Run once on start
-	cf.payDueBills()
 }
 
 func (cf *CashFlow) GetLedger() *financial.EconomicLedger {
