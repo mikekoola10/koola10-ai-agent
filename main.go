@@ -24,8 +24,12 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"koola10/agents"
+	"koola10/api"
 	"koola10/financial"
+	"koola10/solara"
+	"koola10/sterling"
 	"koola10/tools"
+	"koola10/vault"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v76"
@@ -358,6 +362,17 @@ func main() {
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
+	vaultClient := vault.NewVaultClient()
+	cashFlow := sterling.NewCashFlow(globalLedger, vaultClient)
+	// These are default/sample bills. Persistence in cashFlow will prevent duplicates if they already exist.
+	cashFlow.AddBill("Fly.io", 25.00, time.Now().AddDate(0, 0, 5))
+	cashFlow.AddBill("OpenAI API", 20.00, time.Now().AddDate(0, 0, 10))
+	go cashFlow.RunDailyPayer(context.Background())
+
+	deepseekAPIKey := os.Getenv("DEEPSEEK_API_KEY")
+	briefSwarmer := solara.NewDailyBrief(globalLedger, vaultClient, deepseekAPIKey)
+	go briefSwarmer.StartScheduler(context.Background())
+
 	// Automated invoice payment check (every 24h)
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
@@ -417,6 +432,7 @@ func main() {
 	r.Post("/grants/apply", corsMiddleware(handleApply))
 	r.Get("/grants/status", corsMiddleware(handleStatus))
 	r.Get("/grants/applications", corsMiddleware(handleApplicationsList))
+	r.Get("/vault/brief", api.GetLatestBriefHandler(briefSwarmer))
 	r.Post("/grants/monitor", corsMiddleware(handleMonitor))
 	r.Post("/grants/update-status", corsMiddleware(handleUpdateStatus))
 	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
@@ -1008,6 +1024,61 @@ func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float
 	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
 	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
 	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+}
+
+func (l *EconomicLedger) RecordTransaction(description string, amount float64, txType string, category string) (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.Balance += amount // amount is negative for expenses
+	if amount < 0 {
+		l.TotalCosts -= amount
+	} else {
+		l.TotalRevenue += amount
+	}
+	id := generateID()
+	l.Transactions = append(l.Transactions, Transaction{
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Type:        txType,
+		Category:    category,
+		Amount:      amount,
+		Description: description,
+	})
+	l.Save()
+	return id, nil
+}
+
+func (l *EconomicLedger) GetOperationsFund() float64 {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.TotalRevenue * 0.3
+}
+
+func (l *EconomicLedger) GetRevenueSplit() (total, ops, spend float64) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	total = l.TotalRevenue
+	ops = total * 0.3
+	spend = total * 0.7
+	return
+}
+
+func (l *EconomicLedger) GetRecentTransactions(duration time.Duration) []financial.Transaction {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	var res []financial.Transaction
+	cutoff := time.Now().Add(-duration)
+	for _, tx := range l.Transactions {
+		t, err := time.Parse(time.RFC3339, tx.Timestamp)
+		if err == nil && t.After(cutoff) {
+			res = append(res, financial.Transaction{
+				Timestamp:   t,
+				Amount:      tx.Amount,
+				Type:        tx.Type,
+				Description: tx.Description,
+			})
+		}
+	}
+	return res
 }
 
 // --- Financial Handlers ---
