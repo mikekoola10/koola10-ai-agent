@@ -21,13 +21,14 @@ type Transaction struct {
 }
 
 type EconomicLedger struct {
-	Balance      float64       `json:"balance"`
-	TotalCosts   float64       `json:"total_costs"`
-	TotalRevenue float64       `json:"total_revenue"`
-	Transactions []Transaction `json:"transactions"`
-	ledgerPath   string
-	mu           sync.RWMutex
-	AuditLogger  func(action string, details map[string]interface{}) `json:"-"`
+	Balance           float64       `json:"balance"`
+	TotalCosts        float64       `json:"total_costs"`
+	TotalRevenue      float64       `json:"total_revenue"`
+	OperationsSpent   float64       `json:"operations_spent"`
+	Transactions      []Transaction `json:"transactions"`
+	ledgerPath        string
+	mu                sync.RWMutex
+	AuditLogger       func(action string, details map[string]interface{}) `json:"-"`
 }
 
 type EconomicSummary struct {
@@ -79,7 +80,10 @@ func (l *EconomicLedger) GetTotalRevenue() float64 {
 }
 
 func (l *EconomicLedger) GetOperationsFund() float64 {
-	return l.GetTotalRevenue() * 0.3
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	// 30% of lifetime revenue minus what we spent operationally
+	return (l.TotalRevenue * 0.3) - l.OperationsSpent
 }
 
 func (l *EconomicLedger) GetBalance() float64 {
@@ -98,8 +102,8 @@ func (l *EconomicLedger) GetRevenueSplit() (total, ops, spend float64) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	total = l.TotalRevenue
-	ops = total * 0.3
-	spend = total * 0.7
+	ops = (total * 0.3) - l.OperationsSpent
+	spend = l.Balance - ops
 	return
 }
 
@@ -127,13 +131,22 @@ func (l *EconomicLedger) RecordTransaction(desc string, amount float64, txType s
 		Description: desc,
 	}
 	l.Transactions = append(l.Transactions, t)
+
 	if txType == "revenue" {
 		l.Balance += amount
 		l.TotalRevenue += amount
+	} else if txType == "cost" {
+		l.Balance -= amount
+		l.TotalCosts += amount
+		// If it's a bill pay, it's operational
+		if len(desc) >= 13 && desc[:13] == "Auto Bill Pay" {
+			l.OperationsSpent += amount
+		}
 	} else if txType != "brief" {
 		l.Balance -= amount
 		l.TotalCosts += amount
 	}
+
 	l.mu.Unlock()
 	l.Save()
 	if l.AuditLogger != nil {

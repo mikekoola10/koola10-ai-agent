@@ -465,6 +465,7 @@ func main() {
 	r.Get("/transactions", corsMiddleware(handleTransactions))
 	r.Post("/ledger/record", corsMiddleware(handleLedgerRecord))
 	r.Post("/admin/auto_subscribe", corsMiddleware(handleAutoSubscribe))
+	r.Post("/admin/subscribe_all", corsMiddleware(handleSubscribeAll))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
@@ -1636,6 +1637,19 @@ func handleAutoSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
+}
+
+func handleSubscribeAll(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	go subManager.SubscribeAll(req.Email)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"triggered"}`))
 }
 
 func generateID() string {

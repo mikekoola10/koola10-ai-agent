@@ -46,7 +46,6 @@ func (pc *PrivacyClient) CreateVirtualCard(memo string, spendLimitCents int) (*C
 		return nil, err
 	}
 
-	// Basic Auth as requested: API key as username, empty password
 	req.SetBasicAuth(pc.APIKey, "")
 	req.Header.Set("Content-Type", "application/json")
 
@@ -61,26 +60,20 @@ func (pc *PrivacyClient) CreateVirtualCard(memo string, spendLimitCents int) (*C
 	}
 
 	var res struct {
-		PAN string `json:"pan"`
-		Exp string `json:"exp"` // MM/YY
-		CVV string `json:"cvv"`
+		PAN      string `json:"pan"`
+		ExpMonth int    `json:"exp_month"`
+		ExpYear  int    `json:"exp_year"`
+		CVV      string `json:"cvv"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
 		return nil, err
 	}
 
-	// Basic parsing of exp
-	var expMonth, expYear string
-	if len(res.Exp) == 5 {
-		expMonth = res.Exp[0:2]
-		expYear = "20" + res.Exp[3:5]
-	}
-
 	return &CardResponse{
 		CardNumber: res.PAN,
-		ExpMonth:   expMonth,
-		ExpYear:    expYear,
+		ExpMonth:   fmt.Sprintf("%02d", res.ExpMonth),
+		ExpYear:    fmt.Sprintf("%d", res.ExpYear),
 		CVV:        res.CVV,
 		Memo:       memo,
 	}, nil
