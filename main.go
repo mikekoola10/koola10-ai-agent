@@ -25,6 +25,7 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/sterling"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -357,6 +358,32 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
+	vaultClient := sterling.NewVaultClient()
+	deepseekAPIKey := os.Getenv("DEEPSEEK_API_KEY")
+	bountyHunter := sterling.NewBountyHunter(globalLedger, vaultClient, deepseekAPIKey)
+	contentGen := sterling.NewContentGenerator(globalLedger, vaultClient, deepseekAPIKey)
+
+	// Run bounty hunter daily (e.g., at 2 AM)
+	go func() {
+		for {
+			bountyHunter.RunDailyScan()
+			time.Sleep(24 * time.Hour)
+		}
+	}()
+
+	// Run content generator daily (e.g., at 10 AM)
+	go func() {
+		for {
+			now := time.Now()
+			next := time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, now.Location())
+			if now.After(next) {
+				next = next.Add(24 * time.Hour)
+			}
+			time.Sleep(time.Until(next))
+			contentGen.RunDailyContentCreation()
+		}
+	}()
 
 	// Automated invoice payment check (every 24h)
 	go func() {

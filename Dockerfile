@@ -12,7 +12,11 @@ RUN go build -o agent main.go
 FROM alpine:latest
 
 # Install necessary runtime dependencies
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates wget unzip && \
+    wget https://github.com/projectdiscovery/nuclei/releases/download/v3.0.0/nuclei_3.0.0_linux_amd64.zip && \
+    unzip nuclei_3.0.0_linux_amd64.zip && \
+    mv nuclei /usr/local/bin/ && \
+    rm nuclei_3.0.0_linux_amd64.zip
 
 WORKDIR /app
 COPY --from=builder /app/agent .
