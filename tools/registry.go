@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"io"
+	"koola10/sterling"
 	"net/http"
 	"sync"
 )
@@ -16,6 +17,26 @@ func RegisterTool(name string, fn ToolFunc) {
 	regMu.Lock()
 	defer regMu.Unlock()
 	registry[name] = fn
+}
+
+func init() {
+	RegisterTool("create_virtual_card", func(args map[string]interface{}) ToolResult {
+		memo, ok := args["memo"].(string)
+		if !ok {
+			return ToolResult{Success: false, Error: "Missing memo"}
+		}
+		spendLimit, ok := args["spend_limit"].(float64)
+		if !ok {
+			return ToolResult{Success: false, Error: "Missing spend_limit"}
+		}
+
+		client := sterling.NewPrivacyClient()
+		resp, err := client.CreateVirtualCard(memo, int(spendLimit))
+		if err != nil {
+			return ToolResult{Success: false, Error: err.Error()}
+		}
+		return ToolResult{Success: true, Data: resp}
+	})
 }
 
 func RunTool(name string, payload map[string]interface{}) ToolResult {

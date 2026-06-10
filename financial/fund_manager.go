@@ -12,6 +12,19 @@ import (
 
 type Ledger interface {
 	RecordRevenue(amount float64, source string)
+	RecordTransaction(description string, amount float64, txType string, category string) (string, error)
+	GetOperationsFund() float64
+	GetRevenueSplit() (total, ops, spend float64)
+	GetRecentTransactions(duration time.Duration) []Transaction
+}
+
+type Bill struct {
+	ID          string    `json:"bill_id"`
+	Vendor      string    `json:"vendor"`
+	Amount      float64   `json:"amount"`
+	DueDate     time.Time `json:"due_date"`
+	Paid        bool      `json:"paid"`
+	PaymentTxID string    `json:"payment_tx_id,omitempty"`
 }
 
 type Transaction struct {
