@@ -55,14 +55,14 @@ func (cf *CashFlow) load() {
 }
 
 func (cf *CashFlow) save() {
-	cf.mu.RLock()
-	defer cf.mu.RUnlock()
+	// Assumes lock is held by caller
 	data, _ := json.MarshalIndent(cf.bills, "", "  ")
 	os.WriteFile(cf.storagePath, data, 0644)
 }
 
 func (cf *CashFlow) AddBill(vendor string, amount float64, dueDate time.Time, recurring bool, intervalDays int, cardID string) {
 	cf.mu.Lock()
+	defer cf.mu.Unlock()
 	id := fmt.Sprintf("%x", time.Now().UnixNano())
 	cf.bills = append(cf.bills, Bill{
 		ID:           id,
@@ -74,7 +74,6 @@ func (cf *CashFlow) AddBill(vendor string, amount float64, dueDate time.Time, re
 		IntervalDays: intervalDays,
 		CardID:       cardID,
 	})
-	cf.mu.Unlock()
 	cf.save()
 }
 
@@ -92,6 +91,12 @@ func (cf *CashFlow) RunDailyPayer() {
 
 func (cf *CashFlow) GetLedger() *financial.EconomicLedger {
 	return cf.ledger
+}
+
+func (cf *CashFlow) GetBills() []Bill {
+	cf.mu.RLock()
+	defer cf.mu.RUnlock()
+	return cf.bills
 }
 
 func (cf *CashFlow) payDueBills() {

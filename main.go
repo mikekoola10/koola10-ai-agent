@@ -297,6 +297,9 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+
+	//go:embed vault.html
+	vaultHTML string
 )
 
 // --- Middleware ---
@@ -391,6 +394,8 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/vault", corsMiddleware(handleVault))
+	r.Get("/vault.html", corsMiddleware(handleVault))
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -457,6 +462,7 @@ func main() {
 
 	r.Post("/admin/subscribe_all", corsMiddleware(handleSubscribeAll))
 	r.Post("/admin/auto_subscribe", corsMiddleware(handleAutoSubscribe))
+	r.Get("/api/subscription-health", corsMiddleware(handleSubscriptionHealth))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
@@ -1564,6 +1570,11 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(dashboardHTML))
 }
 
+func handleVault(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(vaultHTML))
+}
+
 func handleTransactions(w http.ResponseWriter, r *http.Request) {
 	txs := globalLedger.GetTransactions()
 	w.Header().Set("Content-Type", "application/json")
@@ -1581,6 +1592,69 @@ func handleSubscribeAll(w http.ResponseWriter, r *http.Request) {
 	go subManager.SubscribeAll(req.Email)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"triggered"}`))
+}
+
+type HealthBill struct {
+	Vendor  string    `json:"vendor"`
+	Amount  float64   `json:"amount"`
+	DueDate time.Time `json:"due_date"`
+	Paid    bool      `json:"paid"`
+	CardID  string    `json:"card_id,omitempty"`
+}
+
+type CardInfo struct {
+	ID       string `json:"id"`
+	Last4    string `json:"last4"`
+	IsActive bool   `json:"is_active"`
+}
+
+type SubscriptionHealthResponse struct {
+	Upcoming     []HealthBill `json:"upcoming"`
+	Failed       []HealthBill `json:"failed"`
+	TotalMonthly float64      `json:"total_monthly"`
+	Cards        []CardInfo   `json:"cards"`
+}
+
+func handleSubscriptionHealth(w http.ResponseWriter, r *http.Request) {
+	bills := cashFlow.GetBills()
+
+	now := time.Now()
+	upcoming := []HealthBill{}
+	failed := []HealthBill{}
+	var totalMonthly float64
+
+	for _, b := range bills {
+		if !b.Paid && b.DueDate.Before(now) {
+			failed = append(failed, HealthBill{
+				Vendor:  b.Vendor,
+				Amount:  b.Amount,
+				DueDate: b.DueDate,
+				Paid:    b.Paid,
+				CardID:  b.CardID,
+			})
+		} else if !b.Paid && b.DueDate.After(now) && b.DueDate.Before(now.Add(7*24*time.Hour)) {
+			upcoming = append(upcoming, HealthBill{
+				Vendor:  b.Vendor,
+				Amount:  b.Amount,
+				DueDate: b.DueDate,
+				Paid:    b.Paid,
+				CardID:  b.CardID,
+			})
+		}
+		if !b.Paid {
+			totalMonthly += b.Amount
+		}
+	}
+
+	resp := SubscriptionHealthResponse{
+		Upcoming:     upcoming,
+		Failed:       failed,
+		TotalMonthly: totalMonthly,
+		Cards:        []CardInfo{}, // Placeholder
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func handleAutoSubscribe(w http.ResponseWriter, r *http.Request) {

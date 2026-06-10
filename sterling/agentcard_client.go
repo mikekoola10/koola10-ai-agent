@@ -1,6 +1,7 @@
 package sterling
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -61,25 +62,54 @@ func (ac *AgentCardClient) callMCP(method string, arguments map[string]interface
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
+	var strBody string
+	reader := bufio.NewReader(resp.Body)
 
-	strBody := string(body)
-	if strings.Contains(strBody, "data: ") {
-		lines := strings.Split(strBody, "\n")
-		for _, line := range lines {
-			if strings.HasPrefix(line, "data: ") {
-				strBody = strings.TrimPrefix(line, "data: ")
+	// Read response. If it's SSE, we'll get "event: ...\ndata: ...\n\n"
+	// If it's plain JSON, we'll get "{...}"
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF && strBody != "" {
 				break
 			}
+			if err == io.EOF && strBody == "" {
+				return "", fmt.Errorf("empty response from MCP")
+			}
+			return "", err
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		if strings.HasPrefix(line, "data: ") {
+			strBody = strings.TrimPrefix(line, "data: ")
+			break // We got our data event
+		}
+
+		if strings.HasPrefix(line, "{") {
+			// Probably plain JSON
+			strBody = line
+			// Read the rest of the line if it was split? ReadString('\n') already got the full line.
+			// Just in case it's multi-line JSON, we could keep reading until EOF,
+			// but usually these are single-line or we can just try to parse what we have.
+			remaining, _ := io.ReadAll(reader)
+			strBody += string(remaining)
+			break
+		}
+
+		// If we see "event: message", we stay in the loop to get the next "data: " line
+		if strings.HasPrefix(line, "event: ") {
+			continue
 		}
 	}
 
@@ -89,11 +119,15 @@ func (ac *AgentCardClient) callMCP(method string, arguments map[string]interface
 	}
 
 	if mcpRes.Result.IsError {
-		return "", fmt.Errorf("MCP error: %s", mcpRes.Result.Content[0].Text)
+		errorMsg := "Unknown MCP error"
+		if len(mcpRes.Result.Content) > 0 {
+			errorMsg = mcpRes.Result.Content[0].Text
+		}
+		return "", fmt.Errorf("MCP error: %s", errorMsg)
 	}
 
 	if len(mcpRes.Result.Content) == 0 {
-		return "", fmt.Errorf("empty MCP response")
+		return "", fmt.Errorf("empty MCP response content")
 	}
 
 	return mcpRes.Result.Content[0].Text, nil
@@ -174,7 +208,6 @@ func (ac *AgentCardClient) GetCardDetails(cardID string) (*CardResponse, error) 
 		}, nil
 	}
 
-	// Fallback: parse from text
 	var card CardResponse
 	card.ID = cardID
 	lines := strings.Split(resText, "\n")
