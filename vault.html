@@ -3,23 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koola Vault – Live</title>
+    <title>Koola Vault – CEO Dashboard</title>
     <style>
-        body { background: #0a0a0a; color: #0f0; font-family: monospace; padding: 20px; }
-        .container { max-width: 1000px; margin: auto; }
-        input, select, button { background: #1e1e1e; border: 1px solid #0f0; color: #0f0; padding: 8px; margin: 5px; border-radius: 8px; }
-        button { background: #0f0; color: #000; cursor: pointer; }
+        * { box-sizing: border-box; }
+        body { background: #0a0a0a; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; margin: 0; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .card { background: #111; border: 1px solid #2a2a2a; border-radius: 12px; padding: 20px; }
+        .card h3 { margin-top: 0; border-bottom: 1px solid #0f0; display: inline-block; }
+        .error { color: #f55; background: #311; padding: 8px; border-radius: 8px; }
+        input, select, button { background: #1e1e1e; border: 1px solid #0f0; color: #0f0; padding: 8px 12px; margin: 5px; border-radius: 8px; font-family: monospace; }
+        button { background: #0f0; color: #000; cursor: pointer; font-weight: bold; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th, td { border: 1px solid #2a2a2a; padding: 8px; text-align: left; }
         .income { color: #0f0; } .expense { color: #f55; } .trade { color: #ff0; } .profit { color: #0ff; }
+        .brief-box { background: #1a1a1a; border-left: 4px solid #0f0; margin-bottom: 20px; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>🌀 Koola Vault · Google Sheets Backend</h1>
-    <div id="message"></div>
-    <div>
-        <input type="text" id="desc" placeholder="Description (e.g., BTC trade)">
+    <h1>🌀 Koola Vault | CEO Dashboard</h1>
+
+    <!-- Morning Brief -->
+    <div class="card brief-box">
+        <h3>🌅 Morning Brief</h3>
+        <div id="briefContent">Loading latest brief...</div>
+        <div id="briefError" class="error" style="display:none;"></div>
+    </div>
+
+    <div class="grid">
+        <!-- Subscription Health -->
+        <div class="card">
+            <h3>💳 Subscription Health</h3>
+            <div id="healthContent">Loading health data...</div>
+        </div>
+
+        <!-- Forecast -->
+        <div class="card">
+            <h3>📈 30‑Day Ops Fund Forecast</h3>
+            <div id="forecastContent">Loading forecast...</div>
+        </div>
+    </div>
+
+    <!-- Add Transaction -->
+    <div class="card" style="margin-bottom: 20px;">
+        <h3>➕ Add Transaction</h3>
+        <input type="text" id="desc" placeholder="Description">
         <input type="number" id="amount" placeholder="Amount (USD)">
         <select id="type">
             <option value="income">Income</option>
@@ -27,74 +56,133 @@
             <option value="trade">Trade</option>
             <option value="profit">Profit Sweep</option>
         </select>
-        <input type="text" id="notes" placeholder="Notes (optional)">
-        <button id="addBtn">Add Entry</button>
+        <input type="date" id="date">
+        <button onclick="addTransaction()">Add Entry</button>
     </div>
-    <table id="txTable">
-        <thead><tr><th>Timestamp</th><th>Description</th><th>Amount</th><th>Type</th><th>Notes</th></tr></thead>
-        <tbody></tbody>
-    </table>
+
+    <!-- Transactions Table -->
+    <div class="card">
+        <h3>📜 Transaction Ledger</h3>
+        <table id="txTable">
+            <thead><tr><th>Timestamp</th><th>Description</th><th>Amount</th><th>Type</th><th>Notes</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
 </div>
 
 <script>
-    const API_URL = 'https://script.google.com/macros/s/AKfycbxFFviECwZcWEZy9HLo2aEUlAqB-brL5MZFcn1OtTe8wYurw4G7AJltd5dHAE6bQRRg/exec';
-
-    async function showMessage(text, isError = true) {
-        const msgDiv = document.getElementById('message');
-        msgDiv.innerHTML = `<div style="background:${isError ? '#311' : '#131'}; border-left:4px solid ${isError ? '#f55' : '#0f0'}; padding:10px; margin:10px 0;">${text}</div>`;
-        setTimeout(() => msgDiv.innerHTML = '', 4000);
+    // ========== Helper ==========
+    async function apiCall(url, options = {}) {
+        const res = await fetch(url, options);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
     }
 
-    async function loadTransactions() {
+    // ========== Morning Brief ==========
+    async function loadMorningBrief() {
+        const briefDiv = document.getElementById('briefContent');
+        const errorDiv = document.getElementById('briefError');
         try {
-            const res = await fetch(`${API_URL}?action=get`);
-            const data = await res.json();
-            const tbody = document.querySelector('#txTable tbody');
-            tbody.innerHTML = '';
-            data.reverse().forEach(tx => {
-                const row = tbody.insertRow();
-                row.insertCell(0).innerText = new Date(tx.timestamp).toLocaleString();
-                row.insertCell(1).innerText = tx.description;
-                row.insertCell(2).innerText = `$${parseFloat(tx.amount).toFixed(2)}`;
-                row.insertCell(3).innerHTML = `<span class="${tx.type}">${tx.type}</span>`;
-                row.insertCell(4).innerText = tx.notes || '';
-            });
+            const data = await apiCall('/vault/brief');
+            briefDiv.innerText = data.content || 'No brief available.';
+            errorDiv.style.display = 'none';
         } catch (err) {
-            showMessage('Load error: ' + err.message);
+            briefDiv.innerText = '';
+            errorDiv.innerText = 'Failed to load brief: ' + err.message;
+            errorDiv.style.display = 'block';
+        }
+    }
+
+    // ========== Subscription Health ==========
+    async function loadSubscriptionHealth() {
+        const container = document.getElementById('healthContent');
+        try {
+            const data = await apiCall('/api/subscription-health');
+            let html = '<ul>';
+            html += '<li><strong>Upcoming (7 days)</strong>: ' + (data.upcoming?.length ? data.upcoming.map(b => `${b.vendor} $${b.amount}`).join(', ') : 'None') + '</li>';
+            html += '<li><strong>Failed / Overdue</strong>: ' + (data.failed?.length ? data.failed.map(b => `${b.vendor} $${b.amount}`).join(', ') : 'None') + '</li>';
+            html += '<li><strong>Total Monthly Recurring</strong>: $' + (data.total_monthly || 0).toFixed(2) + '</li>';
+            html += '<li><strong>Active Virtual Cards</strong>: ' + (data.cards?.length || 0) + '</li>';
+            html += '</ul>';
+            container.innerHTML = html;
+        } catch (err) {
+            container.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+        }
+    }
+
+    // ========== Forecast ==========
+    async function loadForecast() {
+        const container = document.getElementById('forecastContent');
+        try {
+            const data = await apiCall('/api/forecast');
+            if (!Array.isArray(data)) throw new Error('Invalid forecast data');
+            // show weekly points
+            let html = '<ul>';
+            for (let i = 0; i < data.length; i += 7) {
+                const d = new Date(data[i].date);
+                html += `<li>${d.toLocaleDateString()}: $${data[i].balance.toFixed(2)}</li>`;
+            }
+            html += '</ul>';
+            container.innerHTML = html;
+        } catch (err) {
+            container.innerHTML = `<span class="error">Forecast error: ${err.message}</span>`;
+        }
+    }
+
+    // ========== Transactions ==========
+    async function loadTransactions() {
+        const tbody = document.querySelector('#txTable tbody');
+        try {
+            const data = await apiCall('/transactions');
+            if (!Array.isArray(data)) return;
+            tbody.innerHTML = '';
+            for (const tx of data) {
+                const row = tbody.insertRow();
+                const date = tx.date || tx.timestamp ? new Date(tx.date || tx.timestamp).toLocaleString() : 'No date';
+                row.insertCell(0).innerText = date;
+                row.insertCell(1).innerText = tx.description || tx.Description || '';
+                const amount = tx.amount !== undefined ? tx.amount : (tx.Amount !== undefined ? tx.Amount : 0);
+                row.insertCell(2).innerText = `$${Number(amount).toFixed(2)}`;
+                row.insertCell(3).innerText = tx.type || tx.Type || '';
+                row.insertCell(4).innerText = tx.notes || tx.Notes || '';
+            }
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="5">Error loading transactions: ${err.message}</td></tr>`;
         }
     }
 
     async function addTransaction() {
-        const description = document.getElementById('desc').value.trim();
-        const amount = document.getElementById('amount').value;
+        const desc = document.getElementById('desc').value.trim();
+        const amount = parseFloat(document.getElementById('amount').value);
         const type = document.getElementById('type').value;
-        const notes = document.getElementById('notes').value.trim();
-        if (!description || !amount) return showMessage('Description and amount required');
-        const params = new URLSearchParams();
-        params.append('action', 'add');
-        params.append('description', description);
-        params.append('amount', amount);
-        params.append('type', type);
-        params.append('notes', notes);
+        let date = document.getElementById('date').value;
+        if (!date) date = new Date().toISOString().split('T')[0];
+        if (!desc || isNaN(amount)) return alert('Description and valid amount required');
         try {
-            const res = await fetch(`${API_URL}?${params.toString()}`);
-            const result = await res.json();
-            if (result.status === 'ok') {
-                showMessage('Entry added', false);
-                document.getElementById('desc').value = '';
-                document.getElementById('amount').value = '';
-                document.getElementById('notes').value = '';
-                loadTransactions();
-            } else {
-                showMessage('Error: ' + JSON.stringify(result));
-            }
+            const res = await fetch('/ledger/record', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({description: desc, amount, type, date})
+            });
+            if (!res.ok) throw new Error(await res.text());
+            document.getElementById('desc').value = '';
+            document.getElementById('amount').value = '';
+            document.getElementById('date').value = '';
+            loadTransactions();
+            loadSubscriptionHealth(); // refresh health in case bill changed
         } catch (err) {
-            showMessage('Add error: ' + err.message);
+            alert('Add transaction failed: ' + err.message);
         }
     }
 
-    document.getElementById('addBtn').onclick = addTransaction;
+    // Initial load & periodic refresh
+    loadMorningBrief();
+    loadSubscriptionHealth();
+    loadForecast();
     loadTransactions();
+    setInterval(loadSubscriptionHealth, 60 * 1000);
+    setInterval(loadForecast, 5 * 60 * 1000);
+    setInterval(loadTransactions, 30 * 1000);
 </script>
 </body>
 </html>
