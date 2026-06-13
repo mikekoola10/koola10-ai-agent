@@ -14,14 +14,6 @@ type Ledger interface {
 	RecordRevenue(amount float64, source string)
 }
 
-type Transaction struct {
-	Timestamp   time.Time `json:"timestamp"`
-	Amount      float64   `json:"amount"`
-	Source      string    `json:"source"`
-	Type        string    `json:"type"` // "revenue_split", "expense", "reinvestment"
-	Description string    `json:"description"`
-}
-
 type FundStatus struct {
 	Balance             float64  `json:"balance"`
 	TotalEarned         float64  `json:"total_earned"`

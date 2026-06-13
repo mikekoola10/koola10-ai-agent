@@ -25,6 +25,9 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/orchestrator"
+	"koola10/solara"
+	"koola10/sterling"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -193,36 +196,6 @@ type UsageLog struct {
 	Cost       float64 `json:"cost"`
 }
 
-type Transaction struct {
-	Timestamp   string  `json:"timestamp"`
-	Type        string  `json:"type"`
-	Category    string  `json:"category"`
-	Vertical    string  `json:"vertical,omitempty"`
-	Amount      float64 `json:"amount"`
-	Description string  `json:"description"`
-}
-
-type EconomicLedger struct {
-	Balance      float64       `json:"balance"`
-	TotalCosts   float64       `json:"total_costs"`
-	TotalRevenue float64       `json:"total_revenue"`
-	Transactions []Transaction `json:"transactions"`
-	mu           sync.RWMutex
-}
-
-type EconomicSummary struct {
-	Balance      float64 `json:"balance"`
-	TotalCosts   float64 `json:"total_costs"`
-	TotalRevenue float64 `json:"total_revenue"`
-	ROI          float64 `json:"roi"`
-}
-
-type EconomicEvaluation struct {
-	Decision      string  `json:"decision"`
-	EstimatedCost float64 `json:"estimated_cost"`
-	ProjectedROI  float64 `json:"projected_roi"`
-	Reason        string  `json:"reason"`
-}
 
 type SwarmTask struct {
 	TaskID     string                 `json:"task_id"`
@@ -289,6 +262,8 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	billsPath      = "/data/bills.json"
+	briefPath      = "/data/last_brief.txt"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -300,11 +275,12 @@ var (
 		Items: []SemanticItem{},
 	}
 
-	globalLedger = &EconomicLedger{
-		Balance: 100.0,
-	}
+	globalLedger *financial.EconomicLedger
 
 	fundManager *financial.FundManager
+	cashFlow    *sterling.CashFlow
+	dailyBrief  *solara.DailyBrief
+	subManager  *orchestrator.SubscriptionsManager
 
 	globalSwarmManager = agents.NewSwarmManager()
 
@@ -324,6 +300,9 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+
+	//go:embed web/vault.html
+	vaultHTML string
 )
 
 // --- Middleware ---
@@ -355,8 +334,18 @@ func main() {
 
 	globalGraph.Load()
 	globalSemantic.Load()
-	globalLedger.Load()
+	globalLedger = financial.NewEconomicLedger(ledgerPath)
+	globalLedger.AuditLogger = AddAuditEntry
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
+	cashFlow = sterling.NewCashFlow(globalLedger, billsPath)
+	cashFlow.RunDailyPayer()
+
+	dailyBrief = solara.NewDailyBrief(globalLedger, briefPath)
+	dailyBrief.StartScheduler()
+
+	privacyClient := sterling.NewPrivacyClient()
+	subManager = orchestrator.NewSubscriptionsManager(privacyClient, cashFlow)
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -469,6 +458,14 @@ func main() {
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
+
+	r.Get("/vault", corsMiddleware(handleVault))
+	r.Get("/vault.html", corsMiddleware(handleVault))
+	r.Get("/vault/brief", corsMiddleware(handleVaultBrief))
+	r.Get("/transactions", corsMiddleware(handleTransactions))
+	r.Post("/ledger/record", corsMiddleware(handleLedgerRecord))
+	r.Post("/admin/auto_subscribe", corsMiddleware(handleAutoSubscribe))
+	r.Post("/admin/subscribe_all", corsMiddleware(handleSubscribeAll))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
@@ -989,26 +986,6 @@ func LogUsage(tokens int) {
 	logEntry := UsageLog{time.Now().Format(time.RFC3339), tokens, cost}
 	if f, err := os.OpenFile(usagePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil { json.NewEncoder(f).Encode(logEntry); f.Close() }
 }
-func (l *EconomicLedger) Save() {
-	l.mu.RLock(); defer l.mu.RUnlock(); data, _ := json.Marshal(l); os.WriteFile(ledgerPath, data, 0644)
-}
-func (l *EconomicLedger) Load() {
-	l.mu.Lock(); defer l.mu.Unlock(); data, err := os.ReadFile(ledgerPath)
-	if err == nil { json.Unmarshal(data, l) }; if l.Transactions == nil { l.Transactions = []Transaction{} }
-}
-func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
-	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
-}
-func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
-	l.RecordRevenueWithVertical("", amount, source)
-}
-func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
-	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
-}
 
 // --- Financial Handlers ---
 
@@ -1055,12 +1032,25 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {
-	roiThreshold := 2.0; projectedRevenue := 0.0; if actionType == "grant_submit" { projectedRevenue = 500.0 }
-	roi := 0.0; if estimatedCost > 0 { roi = projectedRevenue / estimatedCost }
-	eval := EconomicEvaluation{"allow", estimatedCost, roi, ""}
-	if roi < roiThreshold { eval.Decision = "warn"; eval.Reason = "low_projected_roi" }
-	if globalLedger.Balance < estimatedCost { eval.Decision = "block"; eval.Reason = "insufficient_funds" }
+func EvaluateAction(actionType string, estimatedCost float64) financial.EconomicEvaluation {
+	roiThreshold := 2.0
+	projectedRevenue := 0.0
+	if actionType == "grant_submit" {
+		projectedRevenue = 500.0
+	}
+	roi := 0.0
+	if estimatedCost > 0 {
+		roi = projectedRevenue / estimatedCost
+	}
+	eval := financial.EconomicEvaluation{Decision: "allow", EstimatedCost: estimatedCost, ProjectedROI: roi}
+	if roi < roiThreshold {
+		eval.Decision = "warn"
+		eval.Reason = "low_projected_roi"
+	}
+	if globalLedger.GetBalance() < estimatedCost {
+		eval.Decision = "block"
+		eval.Reason = "insufficient_funds"
+	}
 	return eval
 }
 
@@ -1336,21 +1326,20 @@ func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
-	globalLedger.mu.RLock()
-	defer globalLedger.mu.RUnlock()
-	roi := 0.0
-	if globalLedger.TotalCosts > 0 {
-		roi = globalLedger.TotalRevenue / globalLedger.TotalCosts
+	totalCosts := globalLedger.GetTotalCosts()
+	totalRevenue := globalLedger.GetTotalRevenue()
+	summary := financial.EconomicSummary{
+		Balance:      globalLedger.GetBalance(),
+		TotalCosts:   totalCosts,
+		TotalRevenue: totalRevenue,
 	}
-	json.NewEncoder(w).Encode(EconomicSummary{
-		Balance:      globalLedger.Balance,
-		TotalCosts:   globalLedger.TotalCosts,
-		TotalRevenue: globalLedger.TotalRevenue,
-		ROI:          roi,
-	})
+	if totalCosts > 0 {
+		summary.ROI = totalRevenue / totalCosts
+	}
+	json.NewEncoder(w).Encode(summary)
 }
 func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
+	json.NewEncoder(w).Encode(financial.EconomicEvaluation{Decision: "allow"})
 }
 
 func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
@@ -1365,11 +1354,9 @@ func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
-	globalLedger.mu.RLock()
-	defer globalLedger.mu.RUnlock()
 	revenueByVertical := make(map[string]float64)
 	costByVertical := make(map[string]float64)
-	for _, t := range globalLedger.Transactions {
+	for _, t := range globalLedger.GetTransactions() {
 		if t.Vertical == "" {
 			continue
 		}
@@ -1597,6 +1584,72 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleVault(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(vaultHTML))
+}
+
+func handleVaultBrief(w http.ResponseWriter, r *http.Request) {
+	content := dailyBrief.GetLatestBrief()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"date":    time.Now().Format("2006-01-02"),
+		"content": content,
+	})
+}
+
+func handleTransactions(w http.ResponseWriter, r *http.Request) {
+	txs := globalLedger.GetTransactions()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(txs)
+}
+
+func handleLedgerRecord(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Description string  `json:"description"`
+		Amount      float64 `json:"amount"`
+		Type        string  `json:"type"`
+		Notes       string  `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	globalLedger.RecordTransaction(req.Description, req.Amount, req.Type, req.Notes)
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleAutoSubscribe(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Service string `json:"service"`
+		Email   string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	err := subManager.AutoSubscribe(req.Service, req.Email)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
+}
+
+func handleSubscribeAll(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	go subManager.SubscribeAll(req.Email)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"triggered"}`))
 }
 
 func generateID() string {

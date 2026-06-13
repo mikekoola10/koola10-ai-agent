@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koola-10 | Vault Dashboard</title>
+    <style>
+        body {
+            background-color: #0a0a0a;
+            color: #0f0;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1, h2 {
+            border-bottom: 1px solid #0f0;
+            padding-bottom: 10px;
+        }
+        .brief-box {
+            border: 1px solid #0f0;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #111;
+        }
+        .form-box {
+            border: 1px solid #0f0;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #0f0;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #003300;
+        }
+        input, select, button {
+            background-color: #000;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 5px;
+            margin: 5px 0;
+            font-family: inherit;
+        }
+        button {
+            cursor: pointer;
+            padding: 5px 15px;
+        }
+        button:hover {
+            background-color: #0f0;
+            color: #000;
+        }
+        .refresh-tag {
+            font-size: 0.8em;
+            color: #008800;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>KOOLA-10 // VAULT_DASHBOARD</h1>
+
+        <div class="brief-box">
+            <h2>MORNING_BRIEF <span id="brief-date" class="refresh-tag"></span></h2>
+            <p id="brief-content">Loading daily briefing...</p>
+            <span class="refresh-tag">Auto-refresh every 10m</span>
+        </div>
+
+        <div class="form-box">
+            <h2>RECORD_TRANSACTION</h2>
+            <form id="tx-form">
+                <input type="text" id="desc" placeholder="Description" required>
+                <input type="number" step="0.01" id="amount" placeholder="Amount" required>
+                <select id="type">
+                    <option value="revenue">Revenue</option>
+                    <option value="cost">Cost</option>
+                </select>
+                <input type="text" id="notes" placeholder="Notes">
+                <button type="submit">SUBMIT_TO_LEDGER</button>
+            </form>
+        </div>
+
+        <h2>RECENT_TRANSACTIONS</h2>
+        <table id="tx-table">
+            <thead>
+                <tr>
+                    <th>TIMESTAMP</th>
+                    <th>DESCRIPTION</th>
+                    <th>TYPE</th>
+                    <th>AMOUNT</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Data will be loaded here -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        async function fetchBrief() {
+            try {
+                const resp = await fetch('/vault/brief');
+                const data = await resp.json();
+                document.getElementById('brief-content').innerText = data.content;
+                document.getElementById('brief-date').innerText = `[${data.date}]`;
+            } catch (err) {
+                console.error('Failed to fetch brief', err);
+            }
+        }
+
+        async function fetchTransactions() {
+            try {
+                const resp = await fetch('/transactions');
+                const data = await resp.json();
+                const tbody = document.querySelector('#tx-table tbody');
+                tbody.innerHTML = '';
+
+                // Sort by timestamp descending
+                data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+                data.slice(0, 20).forEach(tx => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${new Date(tx.timestamp).toLocaleString()}</td>
+                        <td>${tx.description}</td>
+                        <td style="color: ${tx.type === 'revenue' ? '#0f0' : '#f00'}">${tx.type.toUpperCase()}</td>
+                        <td>${tx.amount.toFixed(2)}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } catch (err) {
+                console.error('Failed to fetch transactions', err);
+            }
+        }
+
+        document.getElementById('tx-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                description: document.getElementById('desc').value,
+                amount: parseFloat(document.getElementById('amount').value),
+                type: document.getElementById('type').value,
+                notes: document.getElementById('notes').value
+            };
+
+            try {
+                const resp = await fetch('/ledger/record', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (resp.ok) {
+                    document.getElementById('tx-form').reset();
+                    fetchTransactions();
+                }
+            } catch (err) {
+                alert('Failed to record transaction');
+            }
+        });
+
+        // Initial load
+        fetchBrief();
+        fetchTransactions();
+
+        // Intervals
+        setInterval(fetchBrief, 600000); // 10 minutes
+        setInterval(fetchTransactions, 30000); // 30 seconds
+    </script>
+</body>
+</html>
