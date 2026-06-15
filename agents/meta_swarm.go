@@ -21,6 +21,7 @@ func MetaSwarmFactory() []SpecialistAgent {
 		"Evolutionary Scout", "Prompt Optimizer", "Feedback Analyzer",
 		"GitHub Idea Hunter", "Roadmap Architect", "Audit Reviewer",
 		"Self-Healing Strategist", "Tool Designer", "Architecture Critic", "E2E Oversight",
+		"Style Weaver", "Code Conjurer",
 	}
 	agents := make([]SpecialistAgent, 0, len(specialties))
 	for _, s := range specialties {

@@ -16,6 +16,7 @@ Koola10 is designed for **continuous, multi-device autonomy**. It leverages thre
 - **Infrastructure Monitoring:** The `DependencyWatchdog` pings critical services. If a dependency is down, it reports to the `Supervisor` and logs a `CRITICAL_INFRASTRUCTURE_FAILURE` in the audit chain.
 - **Self-Evolution:** The `MetaSwarm` is responsible for scouting GitHub for future upgrade ideas and analyzing system performance to optimize Koola10's roadmap and code.
 - **Financial Autonomy:** All actions costing > $0.05 must be cleared by the `EconomicLedger` via `EvaluateAction`. Revenue must be gross-recorded to the Global Ledger.
+- **The Wizard's Code (UI/UX):** All frontend development must adhere to the "High-Fidelity Cyberpunk" aesthetic established in the Master Command Portal. Use neon accents, glitch effects, and real-time telemetry.
 - **Cross-Device Coordination:**
     - **Desktop Swarm:** Controls the host OS for local environment setup and long-running scripts.
     - **Mobile Swarm (Droid Run):** Handles mobile-specific automation (SMS OTPs, app-based payouts).
@@ -25,6 +26,7 @@ Koola10 is designed for **continuous, multi-device autonomy**. It leverages thre
 
 - **Asynchronous Tasking:** When you receive a complex task, focus on creating a robust plan and implementing the core logic.
 - **Tool Creation:** You are encouraged to create Python-based tools in `/home/jules/self_created_tools` to aid your workflow.
+- **Google Jules Magic:** Use the "Idea -> Prototype -> Validate -> Merge" workflow. Meta-agents (Idea Hunter) propose features, Jules prototypes them, the E2E Watchdog validates, and the Senior Architect (Jules) merges.
 - **Context Awareness:** Always read the `EconomicLedger` state before proposing financial operations.
 - **Reliability Check:** Before starting high-stakes or long-running tasks, agents should verify system health via `GET /system/health`.
 - **Verification:** Every code change must be verified with `go build` or `go test`. Frontend changes require Playwright screenshots.

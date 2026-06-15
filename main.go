@@ -309,6 +309,8 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+	//go:embed web/master_portal.html
+	masterPortalHTML string
 )
 
 // --- Middleware ---
@@ -396,6 +398,7 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/portal", corsMiddleware(handlePortal))
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/system/health", corsMiddleware(handleSystemHealth))
@@ -1658,7 +1661,12 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(dashboardHTML))
+	w.Write([]byte(masterPortalHTML))
+}
+
+func handlePortal(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(masterPortalHTML))
 }
 
 func generateID() string {

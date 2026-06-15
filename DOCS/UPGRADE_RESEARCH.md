@@ -29,7 +29,12 @@ This document outlines the GitHub repositories and technologies identified to up
 - **Capability:** Self-healing AI system that detects crashes, diagnoses root causes, and validates fixes.
 - **Integration Strategy:** Incorporate the "diagnose -> fix -> validate" loop into the Go orchestrator's `Supervisor`.
 
-## 4. Self-Improvement & Meta-Analysis
+## 4. Google Jules Integration
+
+- **Capability:** Asynchronous coding agent that can handle long-running tasks (writing tests, fixing bugs) in the background.
+- **Integration Strategy:** Delegate complex codebase upgrades and bug fixes to Google Jules while the Go orchestrator manages real-time operations and financial ledgers. This creates a "Senior Dev" (Jules) + "Operations Manager" (Go Orchestrator) workflow.
+
+## 5. Self-Improvement & Meta-Analysis
 
 ### [SIA: Self Improving AI](https://github.com/hexo-ai/sia)
 - **Capability:** Framework for autonomous performance improvement via harness and weight updates. It uses a Meta-Agent, Target Agent, and Feedback Agent loop.
@@ -39,7 +44,7 @@ This document outlines the GitHub repositories and technologies identified to up
 - **Capability:** Agents that run experiments autonomously (modify code, train, check result).
 - **Integration Strategy:** Use this "programming the program.md" approach for Koola10's roadmap. Agents can propose changes to `AGENTS.md` and `main.go` after validating them in a sandbox.
 
-## 5. AI Mapping & GitHub Discovery
+## 6. AI Mapping & GitHub Discovery
 
 ### [DataFlowMapper](https://dataflowmapper.com/blog/ai-agents-data-onboarding)
 - **Capability:** Five-role agentic system for data mapping with an Evaluator-Optimizer loop.
