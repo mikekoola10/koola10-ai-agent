@@ -57,6 +57,7 @@ type Engine struct {
 	OnEvent          func(Event)     `json:"-"`
 	RecoveryMap      *RecoveryMap    `json:"recovery_map"`
 	AttemptRecovery  func(string, string) bool `json:"-"`
+	Notify           func(string, string)      `json:"-"`
 	mu               sync.RWMutex
 	eventChan        chan Event
 }
@@ -113,7 +114,8 @@ func (e *Engine) ReportEvent(source, eventType, message string, details map[stri
 	// Manual Approval Gate for financial logic and protected paths
 	isSensitive := strings.Contains(message, "financial/") ||
 				   strings.Contains(eventType, "payout") ||
-				   strings.Contains(eventType, "ledger")
+				   strings.Contains(eventType, "ledger") ||
+				   strings.Contains(eventType, "email_sent")
 
 	if det, ok := details["files"].([]interface{}); ok {
 		for _, f := range det {
@@ -185,8 +187,13 @@ func (e *Engine) handleEvent(event Event) {
 		} else {
 			e.Status = StateSafeMode
 			e.mu.Unlock()
-			log.Printf("[Engine] CIRCUIT BREAKER TRIGGERED for %s. Entering SAFE MODE.", taskID)
-			e.ReportEvent("engine", "circuit_breaker", "Circuit breaker triggered. System entering safe mode.", map[string]interface{}{"task_id": taskID})
+			msg := "CIRCUIT BREAKER TRIGGERED for " + taskID + ". Entering SAFE MODE."
+			log.Printf("[Engine] %s", msg)
+			e.ReportEvent("engine", "circuit_breaker", msg, map[string]interface{}{"task_id": taskID})
+
+			if e.Notify != nil {
+				e.Notify("CRITICAL: Circuit Breaker Triggered", msg)
+			}
 		}
 	} else {
 		e.mu.Lock()

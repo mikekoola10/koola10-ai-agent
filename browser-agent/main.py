@@ -9,6 +9,8 @@ from typing import Dict, Any, Optional
 from browser_use import Agent, Browser, BrowserProfile
 from langchain_openai import ChatOpenAI
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+from agentmail import AgentMail
+from langchain_agentmail import AgentMailToolkit
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +33,11 @@ browser_profile = BrowserProfile(
     headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
     disable_security=True,
 )
+
+# Configure AgentMail
+agentmail_api_key = os.getenv("AGENTMAIL_API_KEY")
+agentmail = AgentMail(api_key=agentmail_api_key)
+agentmail_toolkit = AgentMailToolkit(api_key=agentmail_api_key)
 # We'll create a new browser instance for each task to ensure clean state and session persistence within task
 # browser = Browser(config=browser_config)
 
@@ -59,6 +66,22 @@ async def get_screenshot_base64(page):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+@app.post("/email/create-inbox")
+async def create_inbox():
+    try:
+        inbox = agentmail.create_inbox()
+        return {"id": inbox.id, "email": inbox.email_address}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/email/send")
+async def send_email(to: str, subject: str, body: str):
+    try:
+        agentmail.send_email(to=to, subject=subject, body=body)
+        return {"status": "sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/browser/navigate")
 async def navigate(req: NavigateRequest):

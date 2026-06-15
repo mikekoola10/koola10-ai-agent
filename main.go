@@ -131,8 +131,25 @@ func verifyRecovery(failureName string) bool {
 }
 
 func escalateFailure(failureName, details string) {
-	log.Printf("[Recovery] Escalating failure %s: %s", failureName, details)
-	engine.ReportEvent("recovery_engine", "escalation", "Recovery failed for "+failureName, map[string]interface{}{"details": details})
+	msg := fmt.Sprintf("Recovery failed for %s: %s", failureName, details)
+	log.Printf("[Recovery] Escalating failure: %s", msg)
+	engine.ReportEvent("recovery_engine", "escalation", msg, map[string]interface{}{"details": details})
+
+	sendAlertEmail("RECOVERY_ESCALATION: "+failureName, msg)
+}
+
+func sendAlertEmail(subject, body string) {
+	to := "mikekoola10@agentmail.to"
+	res := tools.RunTool("agentmail", map[string]interface{}{
+		"to":      to,
+		"subject": "[KOOLA10] " + subject,
+		"body":    body,
+	})
+	if !res.Success {
+		log.Printf("[Alert] Failed to send notification email: %s", res.Error)
+	} else {
+		log.Printf("[Alert] Notification email sent to %s", to)
+	}
 }
 
 type Grant struct {
@@ -355,8 +372,9 @@ type VideoJob struct {
 // --- Global States ---
 
 var (
-	engine      = orchestrator.NewEngine()
-	julesClient = services.NewJulesClient("https://jules.google.com/api")
+	engine          = orchestrator.NewEngine()
+	julesClient     = services.NewJulesClient("https://jules.google.com/api")
+	agentMailClient *services.AgentMailClient
 
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
@@ -449,15 +467,21 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	loadRecoveryMap()
+	agentMailClient = services.NewAgentMailClient(os.Getenv("AGENTMAIL_API_KEY"))
 	globalLedger = financial.NewEconomicLedger(ledgerPath)
 	globalLedger.AuditLogger = AddAuditEntry
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
-	// Automated invoice payment check (every 24h)
+	// Automated reporting & payment check (every 24h)
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		for {
 			fundManager.PayFlyInvoice()
+
+			// Send daily financial summary via AgentMail
+			summary := globalLedger.GetSummary()
+			agentMailClient.SendEmail("mikekoola10@agentmail.to", "Daily Financial Summary", fmt.Sprintf("Balance: %.2f, Total Revenue: %.2f", summary.Balance, summary.TotalRevenue))
+
 			<-ticker.C
 		}
 	}()
@@ -515,6 +539,7 @@ func main() {
 	r.Post("/system/recover", corsMiddleware(handleSystemRecover))
 	r.Get("/ws", handleWebSocket)
 	r.Post("/jules/suggest", corsMiddleware(handleJulesSuggest))
+	r.Post("/webhook/agentmail", handleAgentMailWebhook)
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
@@ -589,6 +614,9 @@ func main() {
 
 	engine.OnEvent = broadcastEvent
 	engine.AttemptRecovery = attemptRecovery
+	engine.Notify = func(subj, body string) {
+		sendAlertEmail(subj, body)
+	}
 	go engine.Start()
 	go runDependencyWatchdog()
 
@@ -1867,6 +1895,19 @@ func handleJulesSuggest(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 	w.Write([]byte(`{"proposal": "` + proposal + `"}`))
+}
+
+func handleAgentMailWebhook(w http.ResponseWriter, r *http.Request) {
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	msg := fmt.Sprintf("New email received from %v: %v", payload["from"], payload["subject"])
+	engine.ReportEvent("agentmail", "email_received", msg, payload)
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
