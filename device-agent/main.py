@@ -34,6 +34,12 @@ async def execute_command(cmd: DeviceCommand):
     else:
         raise HTTPException(status_code=400, detail="Invalid device_type")
 
+@app.post("/diagnose")
+async def diagnose(req: Dict[str, Any]):
+    logger.info(f"Diagnosing error: {req.get('error')}")
+    # Placeholder for self-healing diagnosis logic
+    return {"status": "success", "diagnosis": "System check complete. Ready for retry."}
+
 @app.get("/device/screen")
 async def get_screen(device_type: str):
     # Placeholder for capturing screenshot of desktop or mobile

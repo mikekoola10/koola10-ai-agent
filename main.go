@@ -216,6 +216,12 @@ type ErrorReport struct {
 	Context   string `json:"context"`
 }
 
+type SystemHealth struct {
+	Status      string            `json:"status"`
+	Timestamp   string            `json:"timestamp"`
+	Dependencies map[string]string `json:"dependencies"`
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -391,6 +397,7 @@ func main() {
 	r.Get("/", corsMiddleware(handleRoot))
 
 	r.Get("/health", corsMiddleware(handleHealth))
+	r.Get("/system/health", corsMiddleware(handleSystemHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
@@ -464,6 +471,7 @@ func main() {
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
 	go startSupervisor()
+	go runDependencyWatchdog()
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -1531,6 +1539,76 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"ok"}`))
 }
 
+func handleSystemHealth(w http.ResponseWriter, r *http.Request) {
+	health := checkSystemHealth()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(health)
+}
+
+func checkSystemHealth() SystemHealth {
+	health := SystemHealth{
+		Status:      "healthy",
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Dependencies: make(map[string]string),
+	}
+
+	// Check Redis
+	if redisClient != nil {
+		if err := redisClient.Ping(context.Background()).Err(); err != nil {
+			health.Dependencies["redis"] = "down: " + err.Error()
+			health.Status = "degraded"
+		} else {
+			health.Dependencies["redis"] = "up"
+		}
+	} else {
+		health.Dependencies["redis"] = "not_configured"
+	}
+
+	// Check Browser Agent
+	browserURL := os.Getenv("BROWSER_AGENT_URL")
+	if browserURL == "" { browserURL = "http://localhost:8080" }
+	if resp, err := http.Get(browserURL + "/health"); err != nil {
+		health.Dependencies["browser_agent"] = "down: " + err.Error()
+		health.Status = "degraded"
+	} else {
+		resp.Body.Close()
+		health.Dependencies["browser_agent"] = "up"
+	}
+
+	// Check Semantic Agent
+	semanticURL := os.Getenv("SEMANTIC_AGENT_URL")
+	if semanticURL == "" { semanticURL = "https://koola10-semantic.fly.dev" }
+	if resp, err := http.Get(semanticURL + "/health"); err != nil {
+		health.Dependencies["semantic_agent"] = "down: " + err.Error()
+		health.Status = "degraded"
+	} else {
+		resp.Body.Close()
+		health.Dependencies["semantic_agent"] = "up"
+	}
+
+	return health
+}
+
+func runDependencyWatchdog() {
+	log.Printf("[Watchdog] Starting dependency monitoring...")
+	ticker := time.NewTicker(5 * time.Minute)
+	for range ticker.C {
+		health := checkSystemHealth()
+		if health.Status != "healthy" {
+			log.Printf("[Watchdog] System degraded! Reporting to supervisor...")
+			for dep, status := range health.Dependencies {
+				if strings.HasPrefix(status, "down") {
+					errorChan <- ErrorReport{
+						AgentRole: "infrastructure",
+						Error:     fmt.Sprintf("Dependency %s is down: %s", dep, status),
+						Context:   "DependencyWatchdog",
+					}
+				}
+			}
+		}
+	}
+}
+
 func handleDailyReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/markdown")
 	w.Write([]byte("# Daily Report\n\nAll systems operational."))
@@ -1577,6 +1655,14 @@ func startSupervisor() {
 		if count < 3 {
 			retryCounts[report.TaskID] = count + 1
 			retryMutex.Unlock()
+
+			if report.AgentRole == "infrastructure" {
+				log.Printf("[Supervisor] Critical infrastructure failure: %s. Logging as high-priority audit entry.", report.Error)
+				AddAuditEntry("CRITICAL_INFRASTRUCTURE_FAILURE", map[string]interface{}{
+					"error":   report.Error,
+					"context": report.Context,
+				})
+			}
 
 			log.Printf("[Supervisor] Attempting auto-fix for task %s (Attempt %d/3)...", report.TaskID, count+1)
 			go attemptAutoFix(report)
