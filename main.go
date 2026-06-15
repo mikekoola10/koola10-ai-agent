@@ -544,6 +544,8 @@ func main() {
 	globalSwarmManager.Factories["desktop"] = agents.DesktopFactory
 	globalSwarmManager.Factories["mobile"] = agents.MobileFactory
 	globalSwarmManager.Factories["meta"] = agents.MetaSwarmFactory
+	globalSwarmManager.Factories["arbitrage"] = agents.ArbitrageFactory
+	globalSwarmManager.Factories["saas_builder"] = agents.SaaSBuilderFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -632,6 +634,7 @@ func main() {
 	r.Post("/economic/ledger/revenue", corsMiddleware(handleEconomicLedgerRevenue))
 	r.Get("/economic/ledger/summary", corsMiddleware(handleEconomicLedgerSummary))
 	r.Post("/economic/evaluate", corsMiddleware(handleEconomicEvaluate))
+	r.Get("/economic/flywheel/status", corsMiddleware(handleEconomicFlywheelStatus))
 
 	r.Post("/swarm/start", corsMiddleware(handleSwarmStart))
 	r.Get("/swarm/task-status", corsMiddleware(handleSwarmStatus))
@@ -1514,6 +1517,17 @@ func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
 	eval := globalLedger.EvaluateAction(req.Action, req.Cost)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(eval)
+}
+
+func handleEconomicFlywheelStatus(w http.ResponseWriter, r *http.Request) {
+	// Mock flywheel state for initial telemetry
+	status := map[string]interface{}{
+		"momentum":     4.2,
+		"active_cycles": 12,
+		"total_output":  globalLedger.GetTotalRevenue(),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
 }
 
 func handleTransactions(w http.ResponseWriter, r *http.Request) {
