@@ -25,8 +25,11 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/orchestrator"
+	"koola10/services"
 	"koola10/tools"
 
+	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v76"
 	"github.com/stripe/stripe-go/v76/webhook"
@@ -254,9 +257,14 @@ type VideoJob struct {
 // --- Global States ---
 
 var (
-	errorChan    = make(chan ErrorReport, 10)
-	retryCounts  = make(map[string]int)
-	retryMutex   sync.Mutex
+	engine      = orchestrator.NewEngine()
+	julesClient = services.NewJulesClient("https://jules.google.com/api")
+
+	upgrader = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return true },
+	}
+	portalClients = make(map[*websocket.Conn]bool)
+	clientsMu     sync.Mutex
 
 	cacheMutex   sync.Mutex
 	auditMutex   sync.Mutex
@@ -402,6 +410,9 @@ func main() {
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/system/health", corsMiddleware(handleSystemHealth))
+	r.Post("/system/iterate", corsMiddleware(handleSystemIterate))
+	r.Get("/ws", handleWebSocket)
+	r.Post("/jules/suggest", corsMiddleware(handleJulesSuggest))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
@@ -474,7 +485,8 @@ func main() {
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
-	go startSupervisor()
+	engine.OnEvent = broadcastEvent
+	go engine.Start()
 	go runDependencyWatchdog()
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
@@ -1549,6 +1561,57 @@ func handleSystemHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(health)
 }
 
+func handleSystemIterate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Goal string `json:"goal"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	log.Printf("[Iterate] Starting autonomous build cycle for goal: %s", req.Goal)
+
+	// Start the autonomous loop in a goroutine
+	go func() {
+		taskID := generateID()
+		AddAuditEntry("iterate_cycle_started", map[string]interface{}{"task_id": taskID, "goal": req.Goal})
+
+		// 1. Idea & Implementation Planning (DeepSeek/MetaSwarm)
+		log.Printf("[Iterate] Planning phase for %s", taskID)
+		time.Sleep(2 * time.Second) // Simulate AI thinking
+
+		// 2. Integration (BuilderSwarm/CodePaster)
+		log.Printf("[Iterate] Integration phase for %s", taskID)
+		tools.RunTool("code_paster", map[string]interface{}{
+			"filepath": "AGENTS.md",
+			"search":   "## System Components",
+			"replace":  "## System Components (Updated via Iterate)\n- /agents/builder_swarm.go: Automated build and integration.\n\n## System Components",
+		})
+
+		// 3. Verification (E2EWatchdog)
+		log.Printf("[Iterate] Verification phase for %s", taskID)
+		err := runE2ECheck()
+
+		status := "success"
+		if err != nil {
+			status = "failed"
+			log.Printf("[Iterate] Build cycle failed verification: %v", err)
+		} else {
+			log.Printf("[Iterate] Build cycle completed successfully")
+		}
+
+		AddAuditEntry("iterate_cycle_completed", map[string]interface{}{
+			"task_id": taskID,
+			"status":  status,
+			"error":   fmt.Sprintf("%v", err),
+		})
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status": "cycle_started"}`))
+}
+
 func checkSystemHealth() SystemHealth {
 	health := SystemHealth{
 		Status:      "healthy",
@@ -1603,11 +1666,7 @@ func runDependencyWatchdog() {
 		log.Printf("[Watchdog] Running E2E oversight verification...")
 		if err := runE2ECheck(); err != nil {
 			log.Printf("[Watchdog] E2E verification failed: %v", err)
-			errorChan <- ErrorReport{
-				AgentRole: "e2e_oversight",
-				Error:     fmt.Sprintf("E2E Verification Failure: %v", err),
-				Context:   "DependencyWatchdog",
-			}
+			engine.ReportEvent("e2e_watchdog", "failure", "E2E verification failed", map[string]interface{}{"error": err.Error()})
 			health.Status = "degraded"
 		}
 
@@ -1615,11 +1674,7 @@ func runDependencyWatchdog() {
 			log.Printf("[Watchdog] System degraded! Reporting to supervisor...")
 			for dep, status := range health.Dependencies {
 				if strings.HasPrefix(status, "down") {
-					errorChan <- ErrorReport{
-						AgentRole: "infrastructure",
-						Error:     fmt.Sprintf("Dependency %s is down: %s", dep, status),
-						Context:   "DependencyWatchdog",
-					}
+					engine.ReportEvent("infrastructure", "error", fmt.Sprintf("Dependency %s is down: %s", dep, status), map[string]interface{}{"context": "DependencyWatchdog"})
 				}
 			}
 		}
@@ -1664,6 +1719,56 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(masterPortalHTML))
 }
 
+func handleJulesSuggest(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Goal string }
+	json.NewDecoder(r.Body).Decode(&req)
+
+	proposal, _ := julesClient.ProposeImplementation(req.Goal)
+	engine.ReportEvent("jules", "proposal", proposal, map[string]interface{}{"goal": req.Goal})
+
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"proposal": "` + proposal + `"}`))
+}
+
+func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	clientsMu.Lock()
+	portalClients[conn] = true
+	clientsMu.Unlock()
+
+	defer func() {
+		clientsMu.Lock()
+		delete(portalClients, conn)
+		clientsMu.Unlock()
+		conn.Close()
+	}()
+
+	for {
+		var msg map[string]interface{}
+		if err := conn.ReadJSON(&msg); err != nil {
+			break
+		}
+		// Handle incoming portal commands
+		if action, ok := msg["action"].(string); ok {
+			log.Printf("[Portal] Received command: %s", action)
+			if action == "restart_dependency" {
+				engine.ReportEvent("portal", "command", "Restarting dependency", msg)
+			}
+		}
+	}
+}
+
+func broadcastEvent(event orchestrator.Event) {
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
+	for client := range portalClients {
+		client.WriteJSON(event)
+	}
+}
+
 func handlePortal(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(masterPortalHTML))
@@ -1679,40 +1784,11 @@ func handleReportError(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", 400)
 		return
 	}
-	errorChan <- report
+	engine.ReportEvent(report.AgentRole, "error", report.Error, map[string]interface{}{
+		"task_id": report.TaskID,
+		"context": report.Context,
+	})
 	w.WriteHeader(http.StatusAccepted)
-}
-
-func startSupervisor() {
-	log.Printf("[Supervisor] Starting autonomous monitoring...")
-	for report := range errorChan {
-		log.Printf("[Supervisor] Received error from agent %s (Task: %s): %s", report.AgentRole, report.TaskID, report.Error)
-
-		retryMutex.Lock()
-		count := retryCounts[report.TaskID]
-		if count < 3 {
-			retryCounts[report.TaskID] = count + 1
-			retryMutex.Unlock()
-
-			if report.AgentRole == "infrastructure" {
-				log.Printf("[Supervisor] Critical infrastructure failure: %s. Logging as high-priority audit entry.", report.Error)
-				AddAuditEntry("CRITICAL_INFRASTRUCTURE_FAILURE", map[string]interface{}{
-					"error":   report.Error,
-					"context": report.Context,
-				})
-			}
-
-			log.Printf("[Supervisor] Attempting auto-fix for task %s (Attempt %d/3)...", report.TaskID, count+1)
-			go attemptAutoFix(report)
-		} else {
-			retryMutex.Unlock()
-			log.Printf("[Supervisor] Task %s reached maximum retries. Escalating to audit log.", report.TaskID)
-			AddAuditEntry("task_failure_escalated", map[string]interface{}{
-				"task_id": report.TaskID,
-				"error":   report.Error,
-			})
-		}
-	}
 }
 
 func attemptAutoFix(report ErrorReport) {

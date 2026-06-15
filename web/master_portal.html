@@ -262,6 +262,26 @@
     </div>
 
     <script>
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            const logList = document.getElementById('audit-log');
+            const li = document.createElement('li');
+            li.style.borderLeft = data.type === 'error' ? '2px solid var(--neon-pink)' : '2px solid var(--neon-blue)';
+            li.innerHTML = `[${new Date(data.timestamp).toLocaleTimeString()}] ${data.source.toUpperCase()}: ${data.message}`;
+            logList.insertBefore(li, logList.firstChild);
+            if (logList.children.length > 50) logList.lastChild.remove();
+        };
+
+        function restartDependency(name) {
+            ws.send(JSON.stringify({action: "restart_dependency", target: name}));
+        }
+
+        function triggerManualCheck() {
+            updateTelemetry();
+        }
+
         function switchView(viewId) {
             document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
             document.getElementById(viewId).classList.add('active');

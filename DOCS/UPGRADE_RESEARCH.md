@@ -57,8 +57,3 @@ This document outlines the GitHub repositories and technologies identified to up
 ### [DeepSeek Workflow Automation](https://chat-deep.ai/guide/deepseek-workflow-automation/)
 - **Capability:** Practical guide for building reliable DeepSeek-driven agents.
 - **Integration Strategy:** Implement structured JSON output requirements and confidence scoring to handle 24/7 operations without constant human oversight.
-
-## 4. Google Jules Integration
-
-- **Capability:** Asynchronous coding agent that can handle long-running tasks (writing tests, fixing bugs) in the background.
-- **Integration Strategy:** Delegate complex codebase upgrades and bug fixes to Google Jules while the Go orchestrator manages real-time operations and financial ledgers. This creates a "Senior Dev" (Jules) + "Operations Manager" (Go Orchestrator) workflow.
