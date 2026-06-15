@@ -29,6 +29,26 @@ This document outlines the GitHub repositories and technologies identified to up
 - **Capability:** Self-healing AI system that detects crashes, diagnoses root causes, and validates fixes.
 - **Integration Strategy:** Incorporate the "diagnose -> fix -> validate" loop into the Go orchestrator's `Supervisor`.
 
+## 4. Self-Improvement & Meta-Analysis
+
+### [SIA: Self Improving AI](https://github.com/hexo-ai/sia)
+- **Capability:** Framework for autonomous performance improvement via harness and weight updates. It uses a Meta-Agent, Target Agent, and Feedback Agent loop.
+- **Integration Strategy:** Implement a `MetaSwarm` that reviews `AuditLogs` and `EconomicLedger` data to optimize system prompts and agent specialties automatically.
+
+### [Autonomous Research Agents (nanochat)](https://github.com/karpathy/autoresearch)
+- **Capability:** Agents that run experiments autonomously (modify code, train, check result).
+- **Integration Strategy:** Use this "programming the program.md" approach for Koola10's roadmap. Agents can propose changes to `AGENTS.md` and `main.go` after validating them in a sandbox.
+
+## 5. AI Mapping & GitHub Discovery
+
+### [DataFlowMapper](https://dataflowmapper.com/blog/ai-agents-data-onboarding)
+- **Capability:** Five-role agentic system for data mapping with an Evaluator-Optimizer loop.
+- **Integration Strategy:** Use for onboarding new data sources and mapping them to the `MemoryGraph` and `EconomicLedger` schemas automatically.
+
+### [AgentSearch](https://github.com/brcrusoe72/agent-search)
+- **Capability:** Self-hosted search API for AI agents.
+- **Integration Strategy:** Replace or augment the direct GitHub/Google search with a specialized search agent that deduplicates and filters for "Future Upgrade Ideas".
+
 ### [DeepSeek Workflow Automation](https://chat-deep.ai/guide/deepseek-workflow-automation/)
 - **Capability:** Practical guide for building reliable DeepSeek-driven agents.
 - **Integration Strategy:** Implement structured JSON output requirements and confidence scoring to handle 24/7 operations without constant human oversight.

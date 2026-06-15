@@ -364,6 +364,7 @@ func main() {
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
 	globalSwarmManager.Factories["desktop"] = agents.DesktopFactory
 	globalSwarmManager.Factories["mobile"] = agents.MobileFactory
+	globalSwarmManager.Factories["meta"] = agents.MetaSwarmFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -1594,6 +1595,19 @@ func runDependencyWatchdog() {
 	ticker := time.NewTicker(5 * time.Minute)
 	for range ticker.C {
 		health := checkSystemHealth()
+
+		// Run E2E Oversight Check
+		log.Printf("[Watchdog] Running E2E oversight verification...")
+		if err := runE2ECheck(); err != nil {
+			log.Printf("[Watchdog] E2E verification failed: %v", err)
+			errorChan <- ErrorReport{
+				AgentRole: "e2e_oversight",
+				Error:     fmt.Sprintf("E2E Verification Failure: %v", err),
+				Context:   "DependencyWatchdog",
+			}
+			health.Status = "degraded"
+		}
+
 		if health.Status != "healthy" {
 			log.Printf("[Watchdog] System degraded! Reporting to supervisor...")
 			for dep, status := range health.Dependencies {
@@ -1607,6 +1621,22 @@ func runDependencyWatchdog() {
 			}
 		}
 	}
+}
+
+func runE2ECheck() error {
+	// 1. Verify we can still access the EconomicLedger summary
+	summary := globalLedger.GetSummary()
+	if summary.Balance < 0 && summary.TotalCosts == 0 {
+		return fmt.Errorf("EconomicLedger state appears corrupted")
+	}
+
+	// 2. Verify we can execute a simple tool (e.g., github_search)
+	res := tools.RunTool("github_search", map[string]interface{}{"query": "koola10"})
+	if !res.Success {
+		return fmt.Errorf("tool execution test failed: %s", res.Error)
+	}
+
+	return nil
 }
 
 func handleDailyReport(w http.ResponseWriter, r *http.Request) {
