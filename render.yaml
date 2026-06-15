@@ -10,6 +10,25 @@ services:
     envVars:
       - key: PORT
         value: 8080
+      - key: RECOVERY_WEBHOOK_SECRET
+        sync: false
+
+  # 4. Sentry Agent (The Eye - Independent Monitor)
+  - type: worker
+    name: koola10-sentry
+    runtime: python
+    buildCommand: pip install -r sentry-agent/requirements.txt
+    startCommand: python sentry-agent/main.py
+    envVars:
+      - key: TARGET_URL
+        fromService:
+          name: koola10-orchestrator
+          type: web
+          property: hostport
+      - key: RECOVERY_URL
+        value: "http://koola10-orchestrator:8080/system/webhook/recovery"
+      - key: RECOVERY_WEBHOOK_SECRET
+        sync: false
       - key: BROWSER_AGENT_URL
         fromService:
           name: koola10-browser-agent

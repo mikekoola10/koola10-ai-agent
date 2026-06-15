@@ -41,8 +41,9 @@ Koola10 is designed for **continuous, multi-device autonomy**. It leverages thre
     - **Render:** Deploy using the root `render.yaml`. Use the Master Command Portal to monitor cross-service telemetry.
     - **Fly.io:** Managed autonomously by the `Engine` using `flyctl`. Ensure `metaclaw_data` volume is attached.
 - **Deployment Reliability (Wizard's Sentry):**
-    - **External Liveness:** Use external monitoring (UptimeRobot, etc.) to hit `/system/health`.
-    - **Recovery Webhook:** External failures should trigger `POST /system/webhook/recovery` with the `RECOVERY_WEBHOOK_SECRET`.
+    - **Isolation Proof:** The `sentry-agent` runs as an independent process/worker, breaking the circular dependency.
+    - **External Liveness:** The Sentry hits `/health` every 30s. 3 failures trigger the recovery webhook.
+    - **Recovery Webhook:** Securely triggers `POST /system/webhook/recovery` using the `RECOVERY_WEBHOOK_SECRET`.
     - **Smoke Tests:** Hourly internal verification runs via `smoke_test.sh`. Failure triggers automated rollback.
     - **Deployment Lock:** The `data/DEPLOYMENT_LOCK` file stores the last known-good commit hash for `flyctl` restoration.
 - **Verification:** Every code change must be verified with `go build` or `go test`. Frontend changes require Playwright screenshots.
