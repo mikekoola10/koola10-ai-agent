@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -36,6 +37,103 @@ import (
 )
 
 // --- Structs ---
+
+
+var recoveryMap *orchestrator.RecoveryMap
+
+func loadRecoveryMap() error {
+	// Try multiple locations for persistence
+	paths := []string{"/data/recovery_map.json", "data/recovery_map.json"}
+	var data []byte
+	var err error
+	for _, p := range paths {
+		data, err = os.ReadFile(p)
+		if err == nil { break }
+	}
+
+	if err != nil {
+		// Fallback to default map embedded in binary
+		return loadDefaultRecoveryMap()
+	}
+	return json.Unmarshal(data, &recoveryMap)
+}
+
+func loadDefaultRecoveryMap() error {
+	recoveryMap = &orchestrator.RecoveryMap{
+		Failures: []orchestrator.FailureDefinition{
+			{
+				Name:       "fly_app_down",
+				Detection:  "health_check_timeout",
+				RootCauses: []string{"no_machines", "oom", "dependency_unreachable"},
+				RecoveryActions: []orchestrator.RecoveryAction{
+					{Name: "rollback_deploy", Command: "fly", Params: []string{"deploy", "--image", "$(fly releases -a koola10 -j | jq -r '.[0].Image')"}, TimeoutSecs: 120},
+					{Name: "scale_memory", Command: "fly", Params: []string{"scale", "memory", "2048", "-a", "koola10"}, TimeoutSecs: 60},
+					{Name: "restart_dependencies", Command: "fly", Params: []string{"restart", "-a", "koola10-redis"}, TimeoutSecs: 30},
+				},
+				Verification: "health_200",
+				Escalation:   "create_github_issue",
+			},
+		},
+	}
+	return nil
+}
+
+// attemptRecovery executes the recovery actions for a given failure name.
+func attemptRecovery(failureName string, details string) bool {
+	var rec orchestrator.FailureDefinition
+	found := false
+	if recoveryMap != nil {
+		for _, f := range recoveryMap.Failures {
+			if f.Name == failureName {
+				rec = f
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		log.Printf("[Recovery] No recovery map for %s", failureName)
+		return false
+	}
+
+	log.Printf("[Recovery] Attempting to recover from %s (root causes: %v)", failureName, rec.RootCauses)
+
+	for _, action := range rec.RecoveryActions {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(action.TimeoutSecs)*time.Second)
+		defer cancel()
+
+		// Use shell to support sub-expressions and pipes if needed
+		fullCmd := action.Command + " " + strings.Join(action.Params, " ")
+		cmd := exec.CommandContext(ctx, "sh", "-c", fullCmd)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("[Recovery] Action %s failed: %v, output: %s", action.Name, err, output)
+			continue // try next action
+		}
+		log.Printf("[Recovery] Action %s succeeded", action.Name)
+
+		if verifyRecovery(failureName) {
+			log.Printf("[Recovery] Recovery verified for %s", failureName)
+			return true
+		}
+	}
+
+	escalateFailure(failureName, details)
+	return false
+}
+
+func verifyRecovery(failureName string) bool {
+	resp, err := http.Get("http://localhost:8080/health")
+	if err == nil && resp.StatusCode == 200 {
+		return true
+	}
+	return false
+}
+
+func escalateFailure(failureName, details string) {
+	log.Printf("[Recovery] Escalating failure %s: %s", failureName, details)
+	engine.ReportEvent("recovery_engine", "escalation", "Recovery failed for "+failureName, map[string]interface{}{"details": details})
+}
 
 type Grant struct {
 	ID          string `json:"grant_id"`
@@ -350,6 +448,7 @@ func main() {
 
 	globalGraph.Load()
 	globalSemantic.Load()
+	loadRecoveryMap()
 	globalLedger = financial.NewEconomicLedger(ledgerPath)
 	globalLedger.AuditLogger = AddAuditEntry
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
@@ -487,6 +586,7 @@ func main() {
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
 	engine.OnEvent = broadcastEvent
+	engine.AttemptRecovery = attemptRecovery
 	go engine.Start()
 	go runDependencyWatchdog()
 
@@ -1805,36 +1905,4 @@ func handleReportError(w http.ResponseWriter, r *http.Request) {
 		"context": report.Context,
 	})
 	w.WriteHeader(http.StatusAccepted)
-}
-
-func attemptAutoFix(report ErrorReport) {
-	// Call browser agent or device agent diagnose endpoint
-	targetURL := os.Getenv("BROWSER_AGENT_URL")
-	if targetURL == "" {
-		targetURL = "http://localhost:8080"
-	}
-
-	diagReq := map[string]string{
-		"task_id": report.TaskID,
-		"error":   report.Error,
-		"context": report.Context,
-	}
-	body, _ := json.Marshal(diagReq)
-	resp, err := http.Post(targetURL+"/diagnose", "application/json", bytes.NewBuffer(body))
-	if err != nil {
-		log.Printf("[Supervisor] Failed to contact diagnostic service: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		log.Printf("[Supervisor] Diagnosis complete for task %s. Triggering retry...", report.TaskID)
-		// Trigger task re-run via Redis or API
-		if redisClient != nil {
-			v, _ := redisClient.Get(context.Background(), "task:"+report.TaskID).Result()
-			if v != "" {
-				redisClient.Publish(context.Background(), "tasks:orchestrator", v)
-			}
-		}
-	}
 }

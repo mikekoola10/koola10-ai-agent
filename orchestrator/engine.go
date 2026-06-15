@@ -30,13 +30,20 @@ type Event struct {
 	Timestamp        time.Time              `json:"timestamp"`
 }
 
+type RecoveryAction struct {
+	Name        string   `json:"name"`
+	Command     string   `json:"command"`
+	Params      []string `json:"params"`
+	TimeoutSecs int      `json:"timeout_secs"`
+}
+
 type FailureDefinition struct {
-	Name            string   `json:"name"`
-	Detection       string   `json:"detection"`
-	RootCauses      []string `json:"root_causes"`
-	RecoveryActions []string `json:"recovery_actions"`
-	Verification    string   `json:"verification"`
-	Escalation      string   `json:"escalation"`
+	Name            string           `json:"name"`
+	Detection       string           `json:"detection"`
+	RootCauses      []string         `json:"root_causes"`
+	RecoveryActions []RecoveryAction `json:"recovery_actions"`
+	Verification    string           `json:"verification"`
+	Escalation      string           `json:"escalation"`
 }
 
 type RecoveryMap struct {
@@ -44,13 +51,14 @@ type RecoveryMap struct {
 }
 
 type Engine struct {
-	Status        ComponentStatus `json:"status"`
-	RetryCounts   map[string]int  `json:"retry_counts"`
-	Events        []Event         `json:"events"`
-	OnEvent       func(Event)     `json:"-"`
-	RecoveryMap   *RecoveryMap    `json:"recovery_map"`
-	mu            sync.RWMutex
-	eventChan     chan Event
+	Status           ComponentStatus `json:"status"`
+	RetryCounts      map[string]int  `json:"retry_counts"`
+	Events           []Event         `json:"events"`
+	OnEvent          func(Event)     `json:"-"`
+	RecoveryMap      *RecoveryMap    `json:"recovery_map"`
+	AttemptRecovery  func(string, string) bool `json:"-"`
+	mu               sync.RWMutex
+	eventChan        chan Event
 }
 
 func NewEngine() *Engine {
@@ -65,9 +73,17 @@ func NewEngine() *Engine {
 }
 
 func (e *Engine) LoadRecoveryMap(path string) {
-	data, err := os.ReadFile(path)
+	paths := []string{path, "/data/recovery_map.json"}
+	var data []byte
+	var err error
+	for _, p := range paths {
+		data, err = os.ReadFile(p)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
-		log.Printf("[Engine] Warning: Recovery map not found at %s", path)
+		log.Printf("[Engine] Warning: Recovery map not found in any standard location")
 		return
 	}
 	var rMap RecoveryMap
@@ -129,26 +145,29 @@ func (e *Engine) handleEvent(event Event) {
 			e.mu.Unlock()
 
 			// Select strategy from Recovery Map
-			var recoveryActions []string
+			var failureName string
 			if e.RecoveryMap != nil {
 				for _, f := range e.RecoveryMap.Failures {
 					if strings.Contains(strings.ToLower(event.Message), strings.ToLower(f.Name)) ||
 					   strings.Contains(strings.ToLower(event.Source), strings.ToLower(f.Name)) {
-						recoveryActions = f.RecoveryActions
+						failureName = f.Name
 						break
 					}
 				}
 			}
 
-			log.Printf("[Engine] Initiating self-healing loop for %s (Attempt %d/5). Actions: %v", taskID, count+1, recoveryActions)
+			log.Printf("[Engine] Initiating self-healing loop for %s (Attempt %d/5). Failure: %s", taskID, count+1, failureName)
 
 			// Automated Healing Flow
-			if event.Source == "e2e_watchdog" || len(recoveryActions) > 0 {
+			if e.AttemptRecovery != nil && failureName != "" {
+				log.Printf("[Engine] Triggering targeted recovery actions for: %s", failureName)
+				go e.AttemptRecovery(failureName, event.Message)
+			} else if event.Source == "e2e_watchdog" {
 				env := os.Getenv("DEVICE_AGENT_ENV")
 				if env == "" { env = "staging" }
 
-				log.Printf("[Engine] Invoking MetaSwarm and DeviceAgent (Env: %s) to apply: %v", env, recoveryActions)
-				// Execute recovery actions...
+				log.Printf("[Engine] Invoking MetaSwarm and DeviceAgent (Env: %s) to apply fix...", env)
+				// Execute meta-swarm healing...
 			}
 		} else {
 			e.Status = StateSafeMode
