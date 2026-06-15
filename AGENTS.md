@@ -35,6 +35,8 @@ Koola10 is designed for **continuous, multi-device autonomy**. It leverages thre
 - **Reliability Check:** Before starting high-stakes or long-running tasks, agents should verify system health via `GET /system/health`.
 - **AgentMail Notifications:** The `agentmail` tool is available for sending reports and alerts. The system uses it for escalation when autonomous recovery fails.
 - **Two-Way Email Protocol:** Agents can now receive and act on emails. Inbound emails trigger the `E2E Watchdog` via `/webhook/agentmail`. Sensitive outgoing emails are held for manual approval.
+- **Global Communication Grid:** Agents are connected via Email, Slack, and the A2A Bridge. Critical alerts are automatically cross-posted. Use the `messaging` tool for Slack/SMS.
+- **A2A Interoperability:** Use `/a2a/delegate` to hand off tasks to external peer agents (e.g., Spiral). Ensure the payload follows the `A2AMessage` schema.
 - **Verification:** Every code change must be verified with `go build` or `go test`. Frontend changes require Playwright screenshots.
 
 ## System Components

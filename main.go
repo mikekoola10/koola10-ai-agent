@@ -139,16 +139,24 @@ func escalateFailure(failureName, details string) {
 }
 
 func sendAlertEmail(subject, body string) {
+	// Send to Email
 	to := "mikekoola10@agentmail.to"
 	res := tools.RunTool("agentmail", map[string]interface{}{
 		"to":      to,
 		"subject": "[KOOLA10] " + subject,
 		"body":    body,
 	})
-	if !res.Success {
-		log.Printf("[Alert] Failed to send notification email: %s", res.Error)
-	} else {
+	if res.Success {
 		log.Printf("[Alert] Notification email sent to %s", to)
+	}
+
+	// Send to Slack
+	res = tools.RunTool("messaging", map[string]interface{}{
+		"channel": "slack",
+		"message": fmt.Sprintf("*[KOOLA10 ALERT]* %s\n%s", subject, body),
+	})
+	if res.Success {
+		log.Printf("[Alert] Slack notification sent")
 	}
 }
 
@@ -375,6 +383,7 @@ var (
 	engine          = orchestrator.NewEngine()
 	julesClient     = services.NewJulesClient("https://jules.google.com/api")
 	agentMailClient *services.AgentMailClient
+	a2aBridge       *orchestrator.A2ABridge
 
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
@@ -468,6 +477,7 @@ func main() {
 	globalSemantic.Load()
 	loadRecoveryMap()
 	agentMailClient = services.NewAgentMailClient(os.Getenv("AGENTMAIL_API_KEY"))
+	a2aBridge = orchestrator.NewA2ABridge(engine)
 	globalLedger = financial.NewEconomicLedger(ledgerPath)
 	globalLedger.AuditLogger = AddAuditEntry
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
@@ -540,6 +550,8 @@ func main() {
 	r.Get("/ws", handleWebSocket)
 	r.Post("/jules/suggest", corsMiddleware(handleJulesSuggest))
 	r.Post("/webhook/agentmail", handleAgentMailWebhook)
+	r.Get("/a2a/discovery", a2aBridge.HandleDiscovery)
+	r.Post("/a2a/delegate", a2aBridge.HandleDelegate)
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))

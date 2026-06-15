@@ -205,6 +205,7 @@
             <a href="#" class="nav-link" onclick="switchView('swarm')">🐝 SWARM_MONITOR</a>
             <a href="#" class="nav-link" onclick="switchView('studio')">🎨 NOVA_STUDIO</a>
             <a href="#" class="nav-link" onclick="switchView('meta')">🧬 META_EVOLVE</a>
+            <a href="#" class="nav-link" onclick="switchView('comm')">📡 COMM_GRID</a>
             <div style="margin-top: auto; border-top: 1px solid var(--neon-green); padding-top: 15px;">
                 <button onclick="triggerEmergencyReset()" style="width: 100%; padding: 10px; background: rgba(255,0,0,0.2); color: #ff0000; border: 1px solid #ff0000; font-family: inherit; cursor: pointer;">EMERGENCY_SHUTDOWN</button>
             </div>
@@ -254,6 +255,28 @@
                     <div id="approvals-list" style="margin-top: 10px;"></div>
                 </div>
             </section>
+
+            <section id="comm" class="view-section">
+                <h2>GLOBAL_COMMUNICATION_GRID</h2>
+                <div class="dashboard-grid" style="margin-top: 20px;">
+                    <div class="stat-card">
+                        <h3>EMAIL_TRAFFIC</h3>
+                        <div id="email-stats">INBOUND: 0 // OUTBOUND: 0</div>
+                    </div>
+                    <div class="stat-card" style="border-color: var(--neon-pink)">
+                        <h3>SLACK_BRIDGE</h3>
+                        <div id="slack-status">STATUS: ONLINE</div>
+                    </div>
+                    <div class="stat-card" style="border-color: var(--neon-blue)">
+                        <h3>A2A_PEERS</h3>
+                        <div id="a2a-peers">PEERS: [SPIRAL]</div>
+                    </div>
+                </div>
+                <div style="margin-top: 20px; border: 1px solid var(--neon-green); padding: 15px;">
+                    <h3>REAL_TIME_COMM_LOGS</h3>
+                    <div id="comm-logs" style="font-size: 0.8rem; color: #aaa;"></div>
+                </div>
+            </section>
         </main>
 
         <aside class="sidebar">
@@ -274,6 +297,13 @@
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+
+            if (data.source === 'agentmail' || data.source === 'messaging' || data.source === 'a2a_bridge') {
+                const commLogs = document.getElementById('comm-logs');
+                const log = document.createElement('div');
+                log.innerHTML = `[${new Date().toLocaleTimeString()}] ${data.source.toUpperCase()}: ${data.message}`;
+                commLogs.insertBefore(log, commLogs.firstChild);
+            }
 
             if (data.requires_approval && !data.approved) {
                 const list = document.getElementById('approvals-list');
