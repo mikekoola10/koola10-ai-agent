@@ -29,6 +29,8 @@ Koola10 is designed for **continuous, multi-device autonomy**. It leverages thre
 - **Google Jules Magic:** Use the "Idea -> Prototype -> Validate -> Merge" workflow. Meta-agents (Idea Hunter) propose features, Jules prototypes them, the E2E Watchdog validates, and the Senior Architect (Jules) merges.
 - **Wizard's Shield (Safe Autonomy):** Any PR or event that modifies financial logic (`financial/*.go`) or triggers a payout is automatically held for manual approval in the Master Command Portal.
 - **Staging Verification:** Fixes are tested in a staging environment (defined by `DEVICE_AGENT_ENV`) before being proposed for production.
+- **Autonomous Recovery:** The system uses an AI-readable Recovery Map (`data/recovery_map.json`). Meta-agents should update this map when new failure patterns or recovery actions are discovered.
+- **Circuit Breaker:** If a task fails > 5 times, the Engine enters SAFE MODE. Manual intervention via the Portal is required to reset.
 - **Context Awareness:** Always read the `EconomicLedger` state before proposing financial operations.
 - **Reliability Check:** Before starting high-stakes or long-running tasks, agents should verify system health via `GET /system/health`.
 - **Verification:** Every code change must be verified with `go build` or `go test`. Frontend changes require Playwright screenshots.

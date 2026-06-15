@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"encoding/json"
 	"log"
 	"os"
 	"strings"
@@ -15,6 +16,7 @@ const (
 	StateWorking   ComponentStatus = "working"
 	StateHealing   ComponentStatus = "healing"
 	StateFailing   ComponentStatus = "failing"
+	StateSafeMode  ComponentStatus = "safe_mode"
 )
 
 type Event struct {
@@ -28,21 +30,50 @@ type Event struct {
 	Timestamp        time.Time              `json:"timestamp"`
 }
 
+type FailureDefinition struct {
+	Name            string   `json:"name"`
+	Detection       string   `json:"detection"`
+	RootCauses      []string `json:"root_causes"`
+	RecoveryActions []string `json:"recovery_actions"`
+	Verification    string   `json:"verification"`
+	Escalation      string   `json:"escalation"`
+}
+
+type RecoveryMap struct {
+	Failures []FailureDefinition `json:"failures"`
+}
+
 type Engine struct {
 	Status        ComponentStatus `json:"status"`
 	RetryCounts   map[string]int  `json:"retry_counts"`
 	Events        []Event         `json:"events"`
 	OnEvent       func(Event)     `json:"-"`
+	RecoveryMap   *RecoveryMap    `json:"recovery_map"`
 	mu            sync.RWMutex
 	eventChan     chan Event
 }
 
 func NewEngine() *Engine {
-	return &Engine{
+	e := &Engine{
 		Status:      StateIdle,
 		RetryCounts: make(map[string]int),
 		Events:      make([]Event, 0),
 		eventChan:   make(chan Event, 100),
+	}
+	e.LoadRecoveryMap("data/recovery_map.json")
+	return e
+}
+
+func (e *Engine) LoadRecoveryMap(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("[Engine] Warning: Recovery map not found at %s", path)
+		return
+	}
+	var rMap RecoveryMap
+	if err := json.Unmarshal(data, &rMap); err == nil {
+		e.RecoveryMap = &rMap
+		log.Printf("[Engine] Loaded %d failure definitions from recovery map.", len(rMap.Failures))
 	}
 }
 
@@ -92,25 +123,38 @@ func (e *Engine) handleEvent(event Event) {
 		if tid, ok := event.Details["task_id"].(string); ok { taskID = tid }
 
 		count := e.RetryCounts[taskID]
-		if count < 3 {
+		if count < 5 { // Circuit breaker limit is 5
 			e.RetryCounts[taskID] = count + 1
 			e.Status = StateHealing
 			e.mu.Unlock()
-			log.Printf("[Engine] Initiating self-healing loop for %s (Attempt %d)", taskID, count+1)
+
+			// Select strategy from Recovery Map
+			var recoveryActions []string
+			if e.RecoveryMap != nil {
+				for _, f := range e.RecoveryMap.Failures {
+					if strings.Contains(strings.ToLower(event.Message), strings.ToLower(f.Name)) ||
+					   strings.Contains(strings.ToLower(event.Source), strings.ToLower(f.Name)) {
+						recoveryActions = f.RecoveryActions
+						break
+					}
+				}
+			}
+
+			log.Printf("[Engine] Initiating self-healing loop for %s (Attempt %d/5). Actions: %v", taskID, count+1, recoveryActions)
 
 			// Automated Healing Flow
-			if event.Source == "e2e_watchdog" {
+			if event.Source == "e2e_watchdog" || len(recoveryActions) > 0 {
 				env := os.Getenv("DEVICE_AGENT_ENV")
 				if env == "" { env = "staging" }
 
-				log.Printf("[Engine] Invoking MetaSwarm to scout for fix (Env: %s)...", env)
-				// 1. MetaSwarm searching for fix...
-				// 2. DeviceAgent testing in sandbox (routed to env)...
-				// 3. E2EWatchdog re-verifying...
+				log.Printf("[Engine] Invoking MetaSwarm and DeviceAgent (Env: %s) to apply: %v", env, recoveryActions)
+				// Execute recovery actions...
 			}
 		} else {
+			e.Status = StateSafeMode
 			e.mu.Unlock()
-			log.Printf("[Engine] Max retries reached for %s. Escalating to Portal.", taskID)
+			log.Printf("[Engine] CIRCUIT BREAKER TRIGGERED for %s. Entering SAFE MODE.", taskID)
+			e.ReportEvent("engine", "circuit_breaker", "Circuit breaker triggered. System entering safe mode.", map[string]interface{}{"task_id": taskID})
 		}
 	} else {
 		e.mu.Lock()

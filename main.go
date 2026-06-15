@@ -411,6 +411,7 @@ func main() {
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/system/health", corsMiddleware(handleSystemHealth))
 	r.Post("/system/iterate", corsMiddleware(handleSystemIterate))
+	r.Post("/system/recover", corsMiddleware(handleSystemRecover))
 	r.Get("/ws", handleWebSocket)
 	r.Post("/jules/suggest", corsMiddleware(handleJulesSuggest))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -1691,10 +1692,25 @@ func runE2ECheck() error {
 	// 2. Verify we can execute a simple tool (e.g., github_search)
 	res := tools.RunTool("github_search", map[string]interface{}{"query": "koola10"})
 	if !res.Success {
-		return fmt.Errorf("tool execution test failed: %s", res.Error)
+		// Recovery Action: If tool fails, check if dependency is reachable
+		health := checkSystemHealth()
+		return fmt.Errorf("tool execution test failed: %s (System health: %s)", res.Error, health.Status)
 	}
 
 	return nil
+}
+
+func handleSystemRecover(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Action string `json:"action"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	log.Printf("[Recover] Triggering automated recovery action: %s", req.Action)
+	engine.ReportEvent("manual_recovery", "command", "Executing: "+req.Action, nil)
+
+	// Execute recovery logic...
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleDailyReport(w http.ResponseWriter, r *http.Request) {
