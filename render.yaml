@@ -1,0 +1,68 @@
+services:
+  # 1. Go Orchestrator (The Brain)
+  - type: web
+    name: koola10-orchestrator
+    runtime: docker
+    dockerfilePath: Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: BROWSER_AGENT_URL
+        fromService:
+          name: koola10-browser-agent
+          type: web
+          property: hostport
+      - key: SEMANTIC_AGENT_URL
+        fromService:
+          name: koola10-semantic-agent
+          type: web
+          property: hostport
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: AGENTMAIL_API_KEY
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: STRIPE_API_KEY
+        sync: false
+      - key: AGENTCARD_API_KEY
+        sync: false
+    disk:
+      name: koola10-data
+      mountPath: /data
+      sizeGB: 10
+
+  # 2. Browser Agent (The Hands - Playwright/browser-use)
+  - type: web
+    name: koola10-browser-agent
+    runtime: docker
+    dockerfilePath: browser-agent/Dockerfile
+    dockerContext: browser-agent
+    plan: standard # Requires more RAM for Playwright
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: AGENTMAIL_API_KEY
+        sync: false
+    disk:
+      name: browser-profile
+      mountPath: /data
+      sizeGB: 5
+
+  # 3. Semantic Agent (The Memory - Sentence-Transformers)
+  - type: web
+    name: koola10-semantic-agent
+    runtime: docker
+    dockerfilePath: semantic-agent/Dockerfile
+    dockerContext: semantic-agent
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8080
