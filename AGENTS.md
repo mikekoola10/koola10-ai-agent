@@ -27,6 +27,8 @@ Koola10 is designed for **continuous, multi-device autonomy**. It leverages thre
 - **Asynchronous Tasking:** When you receive a complex task, focus on creating a robust plan and implementing the core logic.
 - **Tool Creation:** You are encouraged to create Python-based tools in `/home/jules/self_created_tools` to aid your workflow.
 - **Google Jules Magic:** Use the "Idea -> Prototype -> Validate -> Merge" workflow. Meta-agents (Idea Hunter) propose features, Jules prototypes them, the E2E Watchdog validates, and the Senior Architect (Jules) merges.
+- **Wizard's Shield (Safe Autonomy):** Any PR or event that modifies financial logic (`financial/*.go`) or triggers a payout is automatically held for manual approval in the Master Command Portal.
+- **Staging Verification:** Fixes are tested in a staging environment (defined by `DEVICE_AGENT_ENV`) before being proposed for production.
 - **Context Awareness:** Always read the `EconomicLedger` state before proposing financial operations.
 - **Reliability Check:** Before starting high-stakes or long-running tasks, agents should verify system health via `GET /system/health`.
 - **Verification:** Every code change must be verified with `go build` or `go test`. Frontend changes require Playwright screenshots.

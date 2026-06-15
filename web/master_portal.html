@@ -246,6 +246,14 @@
                 <h2>SWARM_NETWORK_TOPOLOGY</h2>
                 <div id="swarm-nodes" class="dashboard-grid" style="margin-top: 20px;"></div>
             </section>
+
+            <section id="meta" class="view-section">
+                <h2>META_EVOLVE_CONTROL</h2>
+                <div id="pending-approvals" style="margin-top: 20px; border: 1px solid var(--neon-pink); padding: 15px;">
+                    <h3>PENDING_APPROVAL_QUEUE</h3>
+                    <div id="approvals-list" style="margin-top: 10px;"></div>
+                </div>
+            </section>
         </main>
 
         <aside class="sidebar">
@@ -266,6 +274,23 @@
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+
+            if (data.requires_approval && !data.approved) {
+                const list = document.getElementById('approvals-list');
+                const div = document.createElement('div');
+                div.className = 'stat-card';
+                div.style.borderColor = 'var(--neon-pink)';
+                div.style.marginBottom = '10px';
+                div.innerHTML = `
+                    <h4>${data.source.toUpperCase()} // ${data.message}</h4>
+                    <div style="margin-top: 10px; display: flex; gap: 10px; justify-content: center;">
+                        <button onclick="approveEvent('${data.id}')" style="border-color: var(--neon-green); color: var(--neon-green); background: none; padding: 5px 10px; cursor: pointer;">APPROVE_MERGE</button>
+                        <button onclick="rejectEvent('${data.id}')" style="border-color: var(--neon-pink); color: var(--neon-pink); background: none; padding: 5px 10px; cursor: pointer;">REJECT_ROLLBACK</button>
+                    </div>
+                `;
+                list.appendChild(div);
+            }
+
             const logList = document.getElementById('audit-log');
             const li = document.createElement('li');
             li.style.borderLeft = data.type === 'error' ? '2px solid var(--neon-pink)' : '2px solid var(--neon-blue)';
@@ -276,6 +301,16 @@
 
         function restartDependency(name) {
             ws.send(JSON.stringify({action: "restart_dependency", target: name}));
+        }
+
+        function approveEvent(id) {
+            ws.send(JSON.stringify({action: "approve_event", event_id: id}));
+            event.target.closest('.stat-card').remove();
+        }
+
+        function rejectEvent(id) {
+            ws.send(JSON.stringify({action: "reject_event", event_id: id}));
+            event.target.closest('.stat-card').remove();
         }
 
         function triggerManualCheck() {

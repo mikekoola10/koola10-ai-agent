@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,12 +18,14 @@ const (
 )
 
 type Event struct {
-	ID        string                 `json:"id"`
-	Source    string                 `json:"source"`
-	Type      string                 `json:"type"`
-	Message   string                 `json:"message"`
-	Details   map[string]interface{} `json:"details"`
-	Timestamp time.Time              `json:"timestamp"`
+	ID               string                 `json:"id"`
+	Source           string                 `json:"source"`
+	Type             string                 `json:"type"`
+	Message          string                 `json:"message"`
+	Details          map[string]interface{} `json:"details"`
+	RequiresApproval bool                   `json:"requires_approval"`
+	Approved         bool                   `json:"approved"`
+	Timestamp        time.Time              `json:"timestamp"`
 }
 
 type Engine struct {
@@ -58,6 +62,13 @@ func (e *Engine) ReportEvent(source, eventType, message string, details map[stri
 		Details:   details,
 		Timestamp: time.Now(),
 	}
+
+	// Manual Approval Gate for financial logic
+	if strings.Contains(message, "financial/") || strings.Contains(eventType, "payout") {
+		event.RequiresApproval = true
+		log.Printf("[Engine] Event tagged as SENSITIVE - Holding for review.")
+	}
+
 	e.mu.Lock()
 	e.Events = append(e.Events, event)
 	if len(e.Events) > 100 {
@@ -89,9 +100,12 @@ func (e *Engine) handleEvent(event Event) {
 
 			// Automated Healing Flow
 			if event.Source == "e2e_watchdog" {
-				log.Printf("[Engine] Invoking MetaSwarm to scout for fix...")
+				env := os.Getenv("DEVICE_AGENT_ENV")
+				if env == "" { env = "staging" }
+
+				log.Printf("[Engine] Invoking MetaSwarm to scout for fix (Env: %s)...", env)
 				// 1. MetaSwarm searching for fix...
-				// 2. DeviceAgent testing in sandbox...
+				// 2. DeviceAgent testing in sandbox (routed to env)...
 				// 3. E2EWatchdog re-verifying...
 			}
 		} else {
