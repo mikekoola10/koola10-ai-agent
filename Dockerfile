@@ -12,7 +12,11 @@ RUN go build -o agent main.go
 FROM alpine:latest
 
 # Install necessary runtime dependencies
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates curl jq
+
+# Install flyctl
+RUN curl -L https://fly.io/install.sh | sh && \
+    ln -s /root/.fly/bin/flyctl /usr/local/bin/flyctl
 
 WORKDIR /app
 COPY --from=builder /app/agent .

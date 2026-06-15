@@ -509,6 +509,8 @@ func main() {
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/system/health", corsMiddleware(handleSystemHealth))
+	r.Get("/transactions", corsMiddleware(handleTransactions))
+	r.Post("/ledger/record", corsMiddleware(handleLedgerRecord))
 	r.Post("/system/iterate", corsMiddleware(handleSystemIterate))
 	r.Post("/system/recover", corsMiddleware(handleSystemRecover))
 	r.Get("/ws", handleWebSocket)
@@ -1432,6 +1434,27 @@ func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
 	eval := globalLedger.EvaluateAction(req.Action, req.Cost)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(eval)
+}
+
+func handleTransactions(w http.ResponseWriter, r *http.Request) {
+	txs := globalLedger.GetTransactions()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(txs)
+}
+
+func handleLedgerRecord(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Description string  `json:"description"`
+		Amount      float64 `json:"amount"`
+		Type        string  `json:"type"`
+		Date        string  `json:"date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	globalLedger.RecordRevenueWithVertical("", req.Amount, req.Description)
+	w.WriteHeader(http.StatusCreated)
 }
 
 func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {

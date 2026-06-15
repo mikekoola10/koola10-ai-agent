@@ -110,10 +110,23 @@ func (e *Engine) ReportEvent(source, eventType, message string, details map[stri
 		Timestamp: time.Now(),
 	}
 
-	// Manual Approval Gate for financial logic
-	if strings.Contains(message, "financial/") || strings.Contains(eventType, "payout") {
+	// Manual Approval Gate for financial logic and protected paths
+	isSensitive := strings.Contains(message, "financial/") ||
+				   strings.Contains(eventType, "payout") ||
+				   strings.Contains(eventType, "ledger")
+
+	if det, ok := details["files"].([]interface{}); ok {
+		for _, f := range det {
+			if path, ok := f.(string); ok && strings.HasPrefix(path, "financial/") {
+				isSensitive = true
+				break
+			}
+		}
+	}
+
+	if isSensitive {
 		event.RequiresApproval = true
-		log.Printf("[Engine] Event tagged as SENSITIVE - Holding for review.")
+		log.Printf("[Engine] Event tagged as SENSITIVE - Holding for manual review.")
 	}
 
 	e.mu.Lock()
@@ -159,13 +172,13 @@ func (e *Engine) handleEvent(event Event) {
 			log.Printf("[Engine] Initiating self-healing loop for %s (Attempt %d/5). Failure: %s", taskID, count+1, failureName)
 
 			// Automated Healing Flow
+			env := os.Getenv("DEVICE_AGENT_ENV")
+			if env == "" { env = "staging" }
+
 			if e.AttemptRecovery != nil && failureName != "" {
-				log.Printf("[Engine] Triggering targeted recovery actions for: %s", failureName)
+				log.Printf("[Engine] Triggering targeted recovery actions for: %s (Env: %s)", failureName, env)
 				go e.AttemptRecovery(failureName, event.Message)
 			} else if event.Source == "e2e_watchdog" {
-				env := os.Getenv("DEVICE_AGENT_ENV")
-				if env == "" { env = "staging" }
-
 				log.Printf("[Engine] Invoking MetaSwarm and DeviceAgent (Env: %s) to apply fix...", env)
 				// Execute meta-swarm healing...
 			}
