@@ -496,6 +496,30 @@ func main() {
 		}
 	}()
 
+	// Hourly Smoke Test & Automated Rollback
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		for {
+			log.Printf("[ContinuousVerification] Running hourly smoke test...")
+			cmd := exec.Command("/bin/bash", "./smoke_test.sh")
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				log.Printf("[ContinuousVerification] Smoke test FAILED: %v, output: %s", err, output)
+				engine.ReportEvent("smoke_test", "failure", "Hourly verification failed", map[string]interface{}{"output": string(output)})
+
+				// Attempt Rollback
+				lockHash, err := os.ReadFile("data/DEPLOYMENT_LOCK")
+				if err == nil {
+					log.Printf("[ContinuousVerification] Attempting automated rollback to lock hash: %s", string(lockHash))
+					attemptRecovery("fly_app_down", "Smoke test failure triggered rollback")
+				}
+			} else {
+				log.Printf("[ContinuousVerification] Smoke test passed.")
+			}
+			<-ticker.C
+		}
+	}()
+
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory

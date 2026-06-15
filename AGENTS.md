@@ -40,6 +40,9 @@ Koola10 is designed for **continuous, multi-device autonomy**. It leverages thre
 - **Infrastructure Mastery:**
     - **Render:** Deploy using the root `render.yaml`. Use the Master Command Portal to monitor cross-service telemetry.
     - **Fly.io:** Managed autonomously by the `Engine` using `flyctl`. Ensure `metaclaw_data` volume is attached.
+- **Deployment Reliability:**
+    - **Smoke Tests:** Hourly verification runs via `smoke_test.sh`. Failure triggers automated rollback.
+    - **Deployment Lock:** The `data/DEPLOYMENT_LOCK` file stores the last known-good commit hash.
 - **Verification:** Every code change must be verified with `go build` or `go test`. Frontend changes require Playwright screenshots.
 
 ## System Components
