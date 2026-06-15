@@ -209,6 +209,13 @@ type SwarmNode struct {
 	Status   string `json:"status"`
 }
 
+type ErrorReport struct {
+	TaskID    string `json:"task_id"`
+	AgentRole string `json:"agent_role"`
+	Error     string `json:"error"`
+	Context   string `json:"context"`
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -241,6 +248,10 @@ type VideoJob struct {
 // --- Global States ---
 
 var (
+	errorChan    = make(chan ErrorReport, 10)
+	retryCounts  = make(map[string]int)
+	retryMutex   sync.Mutex
+
 	cacheMutex   sync.Mutex
 	auditMutex   sync.Mutex
 	usageMutex   sync.Mutex
@@ -345,6 +356,8 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["desktop"] = agents.DesktopFactory
+	globalSwarmManager.Factories["mobile"] = agents.MobileFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -433,6 +446,8 @@ func main() {
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
 
+	r.Post("/agent/report-error", corsMiddleware(handleReportError))
+
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
@@ -447,6 +462,8 @@ func main() {
 	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+
+	go startSupervisor()
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -1538,4 +1555,70 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func handleReportError(w http.ResponseWriter, r *http.Request) {
+	var report ErrorReport
+	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	errorChan <- report
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func startSupervisor() {
+	log.Printf("[Supervisor] Starting autonomous monitoring...")
+	for report := range errorChan {
+		log.Printf("[Supervisor] Received error from agent %s (Task: %s): %s", report.AgentRole, report.TaskID, report.Error)
+
+		retryMutex.Lock()
+		count := retryCounts[report.TaskID]
+		if count < 3 {
+			retryCounts[report.TaskID] = count + 1
+			retryMutex.Unlock()
+
+			log.Printf("[Supervisor] Attempting auto-fix for task %s (Attempt %d/3)...", report.TaskID, count+1)
+			go attemptAutoFix(report)
+		} else {
+			retryMutex.Unlock()
+			log.Printf("[Supervisor] Task %s reached maximum retries. Escalating to audit log.", report.TaskID)
+			AddAuditEntry("task_failure_escalated", map[string]interface{}{
+				"task_id": report.TaskID,
+				"error":   report.Error,
+			})
+		}
+	}
+}
+
+func attemptAutoFix(report ErrorReport) {
+	// Call browser agent or device agent diagnose endpoint
+	targetURL := os.Getenv("BROWSER_AGENT_URL")
+	if targetURL == "" {
+		targetURL = "http://localhost:8080"
+	}
+
+	diagReq := map[string]string{
+		"task_id": report.TaskID,
+		"error":   report.Error,
+		"context": report.Context,
+	}
+	body, _ := json.Marshal(diagReq)
+	resp, err := http.Post(targetURL+"/diagnose", "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		log.Printf("[Supervisor] Failed to contact diagnostic service: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		log.Printf("[Supervisor] Diagnosis complete for task %s. Triggering retry...", report.TaskID)
+		// Trigger task re-run via Redis or API
+		if redisClient != nil {
+			v, _ := redisClient.Get(context.Background(), "task:"+report.TaskID).Result()
+			if v != "" {
+				redisClient.Publish(context.Background(), "tasks:orchestrator", v)
+			}
+		}
+	}
 }
