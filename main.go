@@ -104,6 +104,18 @@ func attemptRecovery(failureName string, details string) bool {
 
 		// Use shell to support sub-expressions and pipes if needed
 		fullCmd := action.Command + " " + strings.Join(action.Params, " ")
+
+		// If this is a rollback and we have a lock, use the lock hash
+		if action.Name == "rollback_deploy" {
+			if lock, err := os.ReadFile("data/DEPLOYMENT_LOCK"); err == nil {
+				hash := strings.TrimSpace(string(lock))
+				if hash != "" {
+					log.Printf("[Recovery] Using DEPLOYMENT_LOCK hash for rollback: %s", hash)
+					fullCmd = fmt.Sprintf("fly deploy --image %s", hash)
+				}
+			}
+		}
+
 		cmd := exec.CommandContext(ctx, "sh", "-c", fullCmd)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -574,6 +586,7 @@ func main() {
 	r.Get("/ws", handleWebSocket)
 	r.Post("/jules/suggest", corsMiddleware(handleJulesSuggest))
 	r.Post("/webhook/agentmail", handleAgentMailWebhook)
+	r.Post("/system/webhook/recovery", corsMiddleware(handleExternalRecoveryWebhook))
 	r.Get("/a2a/discovery", a2aBridge.HandleDiscovery)
 	r.Post("/a2a/delegate", a2aBridge.HandleDelegate)
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -648,7 +661,10 @@ func main() {
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
-	engine.OnEvent = broadcastEvent
+	engine.OnEvent = func(e orchestrator.Event) {
+		log.Printf("[Main] Event broadcast: %s - %s", e.ID, e.Message)
+		broadcastEvent(e)
+	}
 	engine.AttemptRecovery = attemptRecovery
 	engine.Notify = func(subj, body string) {
 		sendAlertEmail(subj, body)
@@ -1946,6 +1962,29 @@ func handleAgentMailWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleExternalRecoveryWebhook(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		FailureName string `json:"failure_name"`
+		Details     string `json:"details"`
+		Secret      string `json:"secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Basic security check
+	if req.Secret != os.Getenv("RECOVERY_WEBHOOK_SECRET") {
+		http.Error(w, "unauthorized", 401)
+		return
+	}
+
+	log.Printf("[ExternalRecovery] Triggered recovery for: %s", req.FailureName)
+	go attemptRecovery(req.FailureName, req.Details)
+
+	w.WriteHeader(http.StatusAccepted)
+}
+
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -1995,11 +2034,14 @@ func generateID() string {
 }
 
 func handleReportError(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("[DEBUG] Received error report\n")
 	var report ErrorReport
 	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+		fmt.Printf("[DEBUG] Error decoding report: %v\n", err)
 		http.Error(w, "bad request", 400)
 		return
 	}
+	fmt.Printf("[DEBUG] Reporting event to engine for task: %s\n", report.TaskID)
 	engine.ReportEvent(report.AgentRole, "error", report.Error, map[string]interface{}{
 		"task_id": report.TaskID,
 		"context": report.Context,

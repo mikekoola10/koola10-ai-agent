@@ -97,13 +97,15 @@ func (e *Engine) LoadRecoveryMap(path string) {
 func (e *Engine) Start() {
 	log.Printf("[Engine] Unified Orchestration Brain operational.")
 	for event := range e.eventChan {
+		log.Printf("[Engine] Event received on channel: %s", event.ID)
 		e.handleEvent(event)
 	}
 }
 
 func (e *Engine) ReportEvent(source, eventType, message string, details map[string]interface{}) {
+	log.Printf("[Engine] Reporting event from %s: %s", source, message)
 	event := Event{
-		ID:        time.Now().Format("20060102150405"),
+		ID:        time.Now().Format("20060102150405-") + source,
 		Source:    source,
 		Type:      eventType,
 		Message:   message,
