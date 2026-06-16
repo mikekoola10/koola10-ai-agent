@@ -7,6 +7,7 @@ import (
 )
 
 type LeadGenAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }

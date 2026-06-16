@@ -6,6 +6,7 @@ import (
 )
 
 type AutomationAgent struct {
+	BaseAGISkills
 	platform  string
 	specialty string
 	status    AgentStatus

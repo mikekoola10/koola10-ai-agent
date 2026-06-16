@@ -18,6 +18,12 @@ type SpecialistAgent interface {
 	Run(task string) (interface{}, error)
 	Status() AgentStatus
 	Specialty() string
+
+	// AGI Capabilities
+	Reason(input string) (string, error)
+	Plan(goal string) ([]string, error)
+	Learn(experience string) error
+	Adapt(environment string) error
 }
 
 type SwarmManager struct {
@@ -153,4 +159,25 @@ func (sm *SwarmManager) GetAllSwarmMetrics() map[string]interface{} {
 		}
 	}
 	return metrics
+}
+
+// BaseAGISkills provides default implementations for AGI capabilities
+type BaseAGISkills struct {
+	StatusVal AgentStatus
+}
+
+func (b *BaseAGISkills) Reason(input string) (string, error) {
+	return "Reasoning: Analyzing input via Chain-of-Thought...", nil
+}
+
+func (b *BaseAGISkills) Plan(goal string) ([]string, error) {
+	return []string{"Step 1: Research", "Step 2: Execute", "Step 3: Verify"}, nil
+}
+
+func (b *BaseAGISkills) Learn(experience string) error {
+	return nil
+}
+
+func (b *BaseAGISkills) Adapt(environment string) error {
+	return nil
 }

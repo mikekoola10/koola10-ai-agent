@@ -7,6 +7,7 @@ import (
 )
 
 type DeveloperAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }

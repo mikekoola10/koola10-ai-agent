@@ -6,6 +6,7 @@ import (
 )
 
 type BuilderAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }

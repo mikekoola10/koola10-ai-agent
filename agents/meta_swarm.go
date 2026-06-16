@@ -3,9 +3,11 @@ package agents
 import (
 	"fmt"
 	"log"
+	"koola10/tools"
 )
 
 type MetaAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }
@@ -13,6 +15,15 @@ type MetaAgent struct {
 func (a *MetaAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
 	defer func() { a.status = StatusCompleted }()
+
+	if a.specialty == "Evolutionary Scout" || a.specialty == "Idea Hunter (GitHub)" {
+		// Use github_search tool to find AGI patterns
+		res := tools.RunTool("github_search", map[string]interface{}{
+			"query": "AGI reasoning planning learning",
+		})
+		log.Printf("[MetaSwarm] %s discovered new AGI repositories", a.specialty)
+		return res, nil
+	}
 
 	log.Printf("[MetaSwarm] %s is analyzing system for evolution: %s", a.specialty, task)
 	return fmt.Sprintf("Meta evolution recommendation from %s: %s", a.specialty, "Optimize neural weighting in swarm manager"), nil

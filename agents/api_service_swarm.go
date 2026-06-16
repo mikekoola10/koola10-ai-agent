@@ -1,6 +1,7 @@
 package agents
 
 type APIAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }

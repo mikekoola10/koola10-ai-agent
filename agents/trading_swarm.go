@@ -5,6 +5,7 @@ import (
 )
 
 type TradingAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }
