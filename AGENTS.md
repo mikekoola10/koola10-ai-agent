@@ -56,3 +56,6 @@ Koola10 is designed for **continuous, multi-device autonomy**. It leverages thre
 - `/device-agent`: (Planned) Desktop and mobile control service.
 - `/financial`: Ledger and fund management.
 - `/tools`: Reusable utility tools (Crypto, Stripe, etc.).
+
+- **Wizard's Shield (Approval):** Sensitive events pause the Engine. Manually approve via the Portal WebSocket 'approve_event' command.
+- **Independent Reliability:** The Go Sentry (koola10-sentry) MUST run on separate infrastructure to break circular monitoring dependencies.

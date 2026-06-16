@@ -2023,8 +2023,17 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		// Handle incoming portal commands
 		if action, ok := msg["action"].(string); ok {
 			log.Printf("[Portal] Received command: %s", action)
-			if action == "restart_dependency" {
+			switch action {
+			case "restart_dependency":
 				engine.ReportEvent("portal", "command", "Restarting dependency", msg)
+			case "approve_event":
+				if id, ok := msg["event_id"].(string); ok {
+					engine.ApproveEvent(id)
+				}
+			case "reject_event":
+				if id, ok := msg["event_id"].(string); ok {
+					engine.RejectEvent(id)
+				}
 			}
 		}
 	}

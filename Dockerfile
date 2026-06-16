@@ -1,31 +1,18 @@
-# Build stage
-FROM golang:1.22-alpine AS builder
-
+# Unified Polyglot Build
+FROM golang:1.22-alpine AS go-builder
 WORKDIR /app
-COPY go.mod ./
-# RUN go mod download
-
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
 RUN go build -o agent main.go
 
-# Run stage
-FROM alpine:latest
-
-# Install necessary runtime dependencies
-RUN apk add --no-cache ca-certificates curl jq git
-
-# Install flyctl
-RUN curl -L https://fly.io/install.sh | sh && \
-    ln -s /root/.fly/bin/flyctl /usr/local/bin/flyctl
-
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y ca-certificates curl jq git && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=builder /app/agent .
-
-# Create data directory for MetaClaw persistence
-RUN mkdir -p /data/applications && chown -R 1000:1000 /data
-
-USER 1000:1000
-
+COPY --from=go-builder /app/agent .
+COPY web/ ./web/
+COPY *.html ./
+COPY data/ ./data/
+RUN mkdir -p /data/applications && chmod -R 777 /data
 EXPOSE 8080
-
 CMD ["./agent"]

@@ -1,6 +1,10 @@
-FROM python:3.11-slim
+FROM golang:1.22-alpine AS builder
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY main.py .
-CMD ["python", "main.py"]
+COPY main.go .
+RUN go build -o sentry main.go
+
+FROM alpine:latest
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY --from=builder /app/sentry .
+CMD ["./sentry"]

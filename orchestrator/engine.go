@@ -58,16 +58,18 @@ type Engine struct {
 	RecoveryMap      *RecoveryMap    `json:"recovery_map"`
 	AttemptRecovery  func(string, string) bool `json:"-"`
 	Notify           func(string, string)      `json:"-"`
+	pendingApprovals map[string]chan bool
 	mu               sync.RWMutex
 	eventChan        chan Event
 }
 
 func NewEngine() *Engine {
 	e := &Engine{
-		Status:      StateIdle,
-		RetryCounts: make(map[string]int),
-		Events:      make([]Event, 0),
-		eventChan:   make(chan Event, 100),
+		Status:           StateIdle,
+		RetryCounts:      make(map[string]int),
+		Events:           make([]Event, 0),
+		eventChan:        make(chan Event, 100),
+		pendingApprovals: make(map[string]chan bool),
 	}
 	e.LoadRecoveryMap("data/recovery_map.json")
 	return e
@@ -102,6 +104,27 @@ func (e *Engine) Start() {
 	}
 }
 
+func (e *Engine) ApproveEvent(eventID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if ch, ok := e.pendingApprovals[eventID]; ok {
+		ch <- true
+		delete(e.pendingApprovals, eventID)
+		for i, ev := range e.Events {
+			if ev.ID == eventID { e.Events[i].Approved = true; break }
+		}
+	}
+}
+
+func (e *Engine) RejectEvent(eventID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if ch, ok := e.pendingApprovals[eventID]; ok {
+		ch <- false
+		delete(e.pendingApprovals, eventID)
+	}
+}
+
 func (e *Engine) ReportEvent(source, eventType, message string, details map[string]interface{}) {
 	log.Printf("[Engine] Reporting event from %s: %s", source, message)
 	event := Event{
@@ -131,6 +154,20 @@ func (e *Engine) ReportEvent(source, eventType, message string, details map[stri
 	if isSensitive {
 		event.RequiresApproval = true
 		log.Printf("[Engine] Event tagged as SENSITIVE - Holding for manual review.")
+
+		e.mu.Lock()
+		approvalChan := make(chan bool)
+		e.pendingApprovals[event.ID] = approvalChan
+		e.mu.Unlock()
+
+		go func(id string, ch chan bool) {
+			if approved := <-ch; approved {
+				log.Printf("[Engine] Event APPROVED: %s", id)
+				// Proceed logic could be here, but for now we just log and let handleEvent wait if needed
+			} else {
+				log.Printf("[Engine] Event REJECTED: %s", id)
+			}
+		}(event.ID, approvalChan)
 	}
 
 	e.mu.Lock()
