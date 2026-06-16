@@ -30,4 +30,13 @@ else
   exit 1
 fi
 
+# Check Blackboard Summary
+BLACKBOARD=$(curl -s http://localhost:8080/agi/blackboard)
+if [[ "$BLACKBOARD" == *"{"* ]]; then
+  echo "✅ Blackboard endpoint is active"
+else
+  echo "❌ Blackboard endpoint failed"
+  exit 1
+fi
+
 echo "Smoke Test Completed Successfully!"

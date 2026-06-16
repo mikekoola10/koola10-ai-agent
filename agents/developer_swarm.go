@@ -52,6 +52,18 @@ func (a *DeveloperAgent) Run(task string) (interface{}, error) {
 func (a *DeveloperAgent) Status() AgentStatus { return a.status }
 func (a *DeveloperAgent) Specialty() string    { return a.specialty }
 
+func (a *DeveloperAgent) Capabilities() []string {
+	return []string{"software_development", "ci_cd", "saas_building", "testing"}
+}
+
+func (a *DeveloperAgent) InputSchema() map[string]string {
+	return map[string]string{
+		"repositories": "[]string",
+		"tasks":        "[]string",
+		"auto_merge":   "bool",
+	}
+}
+
 func DeveloperFactory() []SpecialistAgent {
 	specialties := []string{
 		"Frontend (React)", "Frontend (Vue)", "Frontend (Svelte)",

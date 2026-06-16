@@ -34,6 +34,18 @@ func (a *TradingAgent) Run(task string) (interface{}, error) {
 func (a *TradingAgent) Status() AgentStatus { return a.status }
 func (a *TradingAgent) Specialty() string    { return a.specialty }
 
+func (a *TradingAgent) Capabilities() []string {
+	return []string{"market_analysis", "paper_trading", "arbitrage_scanning"}
+}
+
+func (a *TradingAgent) InputSchema() map[string]string {
+	return map[string]string{
+		"action": "string (price|buy|sell)",
+		"symbol": "string (e.g. BTC)",
+		"amount": "float64",
+	}
+}
+
 func TradingFactory() []SpecialistAgent {
 	specialties := []string{
 		"Momentum Strategy (1m)", "Momentum Strategy (5m)", "Momentum Strategy (15m)",

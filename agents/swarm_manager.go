@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -24,11 +25,17 @@ type SpecialistAgent interface {
 	Plan(goal string) ([]string, error)
 	Learn(experience string) error
 	Adapt(environment string) error
+
+	// Tight Role Metadata
+	Capabilities() []string
+	InputSchema() map[string]string
 }
 
 type SwarmManager struct {
-	Swarms map[string][]SpecialistAgent
-	Mu     sync.RWMutex
+	Swarms     map[string][]SpecialistAgent
+	Supervisor *SupervisorAgent
+	Blackboard *Blackboard
+	Mu         sync.RWMutex
 
 	// Callbacks for logging to economic ledger and compliance audit
 	AuditLogger func(action string, details map[string]interface{})
@@ -39,10 +46,13 @@ type SwarmManager struct {
 }
 
 func NewSwarmManager() *SwarmManager {
-	return &SwarmManager{
-		Swarms:    make(map[string][]SpecialistAgent),
-		Factories: make(map[string]func() []SpecialistAgent),
+	sm := &SwarmManager{
+		Swarms:     make(map[string][]SpecialistAgent),
+		Factories:  make(map[string]func() []SpecialistAgent),
+		Blackboard: NewBlackboard(),
 	}
+	sm.Supervisor = &SupervisorAgent{Manager: sm}
+	return sm
 }
 
 func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
@@ -102,11 +112,15 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 	plan, _ := target.Plan(task)
 	fmt.Printf("[%s] Plan: %v\n", target.Specialty(), plan)
 
+	// Share context via Blackboard
+	sm.Blackboard.Post(fmt.Sprintf("task:%s", vertical), target.Specialty(), task)
+
 	result, err := target.Run(task)
 
 	if err == nil {
 		target.Learn(fmt.Sprintf("Successfully completed task: %s", task))
 		target.Adapt("environment_stable")
+		sm.Blackboard.Post(fmt.Sprintf("result:%s", vertical), target.Specialty(), result)
 	}
 
 	if sm.AuditLogger != nil {
@@ -193,3 +207,33 @@ func (b *BaseAGISkills) Learn(experience string) error {
 func (b *BaseAGISkills) Adapt(environment string) error {
 	return nil
 }
+
+func (b *BaseAGISkills) Capabilities() []string {
+	return []string{"general_task_execution"}
+}
+
+func (b *BaseAGISkills) InputSchema() map[string]string {
+	return map[string]string{"task": "string"}
+}
+
+type SupervisorAgent struct {
+	BaseAGISkills
+	Manager *SwarmManager
+}
+
+func (s *SupervisorAgent) Run(task string) (interface{}, error) {
+	fmt.Printf("[Supervisor] Decomposing task: %s\n", task)
+	// In a real implementation, this would use an LLM to split the task
+	// For now, we simulate delegation to a specialist
+	vertical := "trading"
+	if strings.Contains(task, "code") || strings.Contains(task, "app") {
+		vertical = "forge"
+	}
+
+	fmt.Printf("[Supervisor] Delegating to %s vertical\n", vertical)
+	return s.Manager.DispatchTask(vertical, task)
+}
+
+func (s *SupervisorAgent) Status() AgentStatus { return StatusIdle }
+func (s *SupervisorAgent) Specialty() string    { return "System Supervisor" }
+func (s *SupervisorAgent) Capabilities() []string { return []string{"task_decomposition", "delegation", "orchestration"} }

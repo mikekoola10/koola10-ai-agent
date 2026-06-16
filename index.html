@@ -125,6 +125,14 @@
 
         <!-- Wizard's Shield -->
         <div class="card">
+            <h2>BLACKBOARD_CONTEXT</h2>
+            <div id="blackboard-data" class="telemetry" style="height: 250px;">
+                [BLACKBOARD] Listening for cross-agent signals...
+            </div>
+        </div>
+
+        <!-- Wizard's Shield -->
+        <div class="card">
             <h2>WIZARD_SHIELD</h2>
             <p>Manual Approval Gate for Critical Actions</p>
             <div id="approval-gate" class="shield-gate">
@@ -147,8 +155,20 @@
                 logTelemetry(msg.source, msg.text);
             } else if (msg.type === 'approval_request') {
                 showShieldGate(msg);
+            } else if (msg.type === 'blackboard_update') {
+                updateBlackboard(msg.data);
             }
         };
+
+        function updateBlackboard(data) {
+            const div = document.getElementById('blackboard-data');
+            div.innerHTML = Object.entries(data).map(([key, entries]) => `
+                <div style="margin-bottom:10px;">
+                    <strong>${key}</strong>: ${entries[entries.length-1].content}
+                    <br><small>Source: ${entries[entries.length-1].source}</small>
+                </div>
+            `).join('');
+        }
 
         function logTelemetry(source, text) {
             const div = document.getElementById(`${source}-telemetry`);

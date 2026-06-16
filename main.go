@@ -404,6 +404,19 @@ func main() {
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
 
+	agents.BroadcastFunc = func(data map[string][]agents.BlackboardEntry) {
+		msg := map[string]interface{}{
+			"type": "blackboard_update",
+			"data": data,
+		}
+		b, _ := json.Marshal(msg)
+		clientsMu.Lock()
+		defer clientsMu.Unlock()
+		for conn := range clients {
+			conn.WriteMessage(websocket.TextMessage, b)
+		}
+	}
+
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
 			redisClient = redis.NewClient(opt)
@@ -481,6 +494,7 @@ func main() {
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
 	r.HandleFunc("/agi/knowledge", corsMiddleware(handleAGIKnowledge))
+	r.Get("/agi/blackboard", corsMiddleware(handleBlackboard))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
@@ -1718,6 +1732,10 @@ func handleRecoveryWebhook(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[Recovery] Triggered by Sentry: %v", event)
 	broadcastTelemetry("shield", "System recovery triggered by Sentry Agent")
 	w.WriteHeader(200)
+}
+
+func handleBlackboard(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(globalSwarmManager.Blackboard.GetAll())
 }
 
 func handleAGIKnowledge(w http.ResponseWriter, r *http.Request) {
