@@ -305,6 +305,8 @@ var (
 		Balance: 100.0,
 	}
 
+	globalAGIKnowledge = agents.NewAGIKnowledgeBase("/data/agi_knowledge.json")
+
 	fundManager *financial.FundManager
 
 	globalSwarmManager = agents.NewSwarmManager()
@@ -363,6 +365,7 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+	globalAGIKnowledge.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
 	// Automated invoice payment check (every 24h)
@@ -477,6 +480,7 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+	r.HandleFunc("/agi/knowledge", corsMiddleware(handleAGIKnowledge))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
@@ -1345,6 +1349,10 @@ func handleComplianceReject(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ap)
 }
 func handleComplianceKillSwitch(w http.ResponseWriter, r *http.Request) {
+	if !handleWizardShield("kill_switch_activate", r.URL.Path) {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
 	os.WriteFile(killSwitchPath, []byte("active"), 0644); w.Write([]byte("Active"))
 }
 func handleComplianceKillSwitchReset(w http.ResponseWriter, r *http.Request) {
@@ -1354,9 +1362,17 @@ func handleComplianceUsage(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"total_tokens": 1000})
 }
 func handleEconomicLedgerCost(w http.ResponseWriter, r *http.Request) {
+	if !handleWizardShield("ledger_cost", r.URL.Path) {
+		w.WriteHeader(http.StatusAccepted) // Held for approval
+		return
+	}
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
+	if !handleWizardShield("ledger_revenue", r.URL.Path) {
+		w.WriteHeader(http.StatusAccepted) // Held for approval
+		return
+	}
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
@@ -1702,4 +1718,17 @@ func handleRecoveryWebhook(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[Recovery] Triggered by Sentry: %v", event)
 	broadcastTelemetry("shield", "System recovery triggered by Sentry Agent")
 	w.WriteHeader(200)
+}
+
+func handleAGIKnowledge(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		var p agents.AGIPattern
+		json.NewDecoder(r.Body).Decode(&p)
+		globalAGIKnowledge.AddPattern(p.Skill, p.Source, p.Data)
+		w.WriteHeader(201)
+		return
+	}
+	globalAGIKnowledge.Mu.RLock()
+	defer globalAGIKnowledge.Mu.RUnlock()
+	json.NewEncoder(w).Encode(globalAGIKnowledge.Patterns)
 }

@@ -17,19 +17,22 @@ type AGIPattern struct {
 
 type AGIKnowledgeBase struct {
 	Patterns []AGIPattern `json:"patterns"`
-	mu       sync.RWMutex
+	Mu       sync.RWMutex
 	path     string
 }
 
 func NewAGIKnowledgeBase(path string) *AGIKnowledgeBase {
-	kb := &AGIKnowledgeBase{path: path}
+	kb := &AGIKnowledgeBase{
+		path:     path,
+		Patterns: []AGIPattern{},
+	}
 	kb.Load()
 	return kb
 }
 
 func (kb *AGIKnowledgeBase) Load() {
-	kb.mu.Lock()
-	defer kb.mu.Unlock()
+	kb.Mu.Lock()
+	defer kb.Mu.Unlock()
 	data, err := os.ReadFile(kb.path)
 	if err == nil {
 		json.Unmarshal(data, kb)
@@ -37,15 +40,15 @@ func (kb *AGIKnowledgeBase) Load() {
 }
 
 func (kb *AGIKnowledgeBase) Save() {
-	kb.mu.RLock()
-	defer kb.mu.RUnlock()
+	kb.Mu.RLock()
+	defer kb.Mu.RUnlock()
 	data, _ := json.MarshalIndent(kb, "", "  ")
 	os.WriteFile(kb.path, data, 0644)
 }
 
 func (kb *AGIKnowledgeBase) AddPattern(skill, source, data string) {
-	kb.mu.Lock()
-	defer kb.mu.Unlock()
+	kb.Mu.Lock()
+	defer kb.Mu.Unlock()
 	kb.Patterns = append(kb.Patterns, AGIPattern{
 		ID:           time.Now().Format("20060102150405"),
 		Skill:        skill,

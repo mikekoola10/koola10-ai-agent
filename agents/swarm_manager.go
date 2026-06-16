@@ -95,7 +95,19 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 	}
 	sm.Mu.Unlock()
 
+	// AGI Workflow: Reason -> Plan -> Run -> Learn -> Adapt
+	reasoning, _ := target.Reason(task)
+	fmt.Printf("[%s] Reasoning: %s\n", target.Specialty(), reasoning)
+
+	plan, _ := target.Plan(task)
+	fmt.Printf("[%s] Plan: %v\n", target.Specialty(), plan)
+
 	result, err := target.Run(task)
+
+	if err == nil {
+		target.Learn(fmt.Sprintf("Successfully completed task: %s", task))
+		target.Adapt("environment_stable")
+	}
 
 	if sm.AuditLogger != nil {
 		sm.AuditLogger("task_executed", map[string]interface{}{

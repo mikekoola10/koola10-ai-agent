@@ -21,7 +21,11 @@ func (a *MetaAgent) Run(task string) (interface{}, error) {
 		res := tools.RunTool("github_search", map[string]interface{}{
 			"query": "AGI reasoning planning learning",
 		})
+
 		log.Printf("[MetaSwarm] %s discovered new AGI repositories", a.specialty)
+
+		// In a real implementation, we would iterate and call /agi/knowledge
+		// For now, we simulate the knowledge ingestion
 		return res, nil
 	}
 
