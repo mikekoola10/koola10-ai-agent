@@ -21,6 +21,7 @@ Koola10 is designed for **continuous, multi-device autonomy**. It leverages thre
     - **Desktop Swarm:** Controls the host OS for local environment setup and long-running scripts.
     - **Mobile Swarm (Droid Run):** Handles mobile-specific automation (SMS OTPs, app-based payouts).
 - **Persistence:** All swarm state must be persisted to `/data` (e.g., `bills.json`, `leads/`, `audit_chain.jsonl`).
+- **Revenue Flywheel:** The 7-ecosystem "Autonomous Startup Forge" (Vale -> Nova -> Forge -> Echo -> Solara -> Sterling -> Sage) must maintain positive momentum. Handoffs are orchestrated via `financial/flywheel.go`.
 
 ## Agent Instructions (Jules)
 
@@ -50,7 +51,7 @@ Koola10 is designed for **continuous, multi-device autonomy**. It leverages thre
 
 ## System Components
 
-- `/agents`: Autonomous swarm implementations.
+- `/agents`: Autonomous swarm implementations. Includes `ArbitrageAgent` and `SaaSBuilder`.
 - `/browser-agent`: Playwright-based web automation.
 - `/device-agent`: (Planned) Desktop and mobile control service.
 - `/financial`: Ledger and fund management.
