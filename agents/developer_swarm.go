@@ -33,6 +33,16 @@ func (a *DeveloperAgent) Run(task string) (interface{}, error) {
 		}, nil
 	}
 
+	// SaaS Building logic
+	if a.specialty == "Backend (Go)" || a.specialty == "Frontend (React)" {
+		log.Printf("[DeveloperAgent] Autonomous SaaS Building: %s", task)
+		return map[string]interface{}{
+			"status": "success",
+			"artifact": fmt.Sprintf("SaaS boilerplate for %s", task),
+			"deployment": "fly.io",
+		}, nil
+	}
+
 	// Fallback for simple string tasks
 	log.Printf("[DeveloperAgent] Processing simple task: %s", task)
 	return fmt.Sprintf("Completed %s task: %s", a.specialty, task), nil

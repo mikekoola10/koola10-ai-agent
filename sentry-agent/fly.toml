@@ -1,0 +1,8 @@
+app = "koola10-sentry"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ORCHESTRATOR_URL = "http://koola10.internal:8080"

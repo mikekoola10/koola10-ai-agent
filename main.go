@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/websocket"
 
 	"koola10/agents"
 	"koola10/financial"
@@ -324,6 +325,12 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+
+	upgrader = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return true },
+	}
+	clients = make(map[*websocket.Conn]bool)
+	clientsMu sync.Mutex
 )
 
 // --- Middleware ---
@@ -376,6 +383,10 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["desktop"] = agents.DesktopFactory
+	globalSwarmManager.Factories["mobile"] = agents.MobileFactory
+	globalSwarmManager.Factories["meta"] = agents.MetaSwarmFactory
+	globalSwarmManager.Factories["builder"] = agents.BuilderFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -407,6 +418,7 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/ws", handleWebSocket)
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -444,6 +456,8 @@ func main() {
 	r.Get("/compliance/audit/verify", corsMiddleware(handleComplianceAuditVerify))
 	r.Post("/compliance/approval", corsMiddleware(handleComplianceApproval))
 	r.Post("/compliance/approve", corsMiddleware(handleComplianceApprove))
+	r.Post("/compliance/reject", corsMiddleware(handleComplianceReject))
+	r.Post("/system/webhook/recovery", corsMiddleware(handleRecoveryWebhook))
 	r.Post("/compliance/kill-switch", corsMiddleware(handleComplianceKillSwitch))
 	r.Post("/compliance/kill-switch/reset", corsMiddleware(handleComplianceKillSwitchReset))
 	r.Get("/compliance/usage", corsMiddleware(handleComplianceUsage))
@@ -1316,8 +1330,18 @@ func handleComplianceApproval(w http.ResponseWriter, r *http.Request) {
 	approvalMu.Lock(); approvalStore[req.ID] = &req; approvalMu.Unlock(); json.NewEncoder(w).Encode(req)
 }
 func handleComplianceApprove(w http.ResponseWriter, r *http.Request) {
-	var req struct { ApprovalID string; Approver string }; json.NewDecoder(r.Body).Decode(&req)
-	approvalMu.Lock(); ap, ok := approvalStore[req.ApprovalID]; if ok { ap.Status = "approved" }; approvalMu.Unlock()
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		var req struct { ApprovalID string; Approver string }; json.NewDecoder(r.Body).Decode(&req)
+		id = req.ApprovalID
+	}
+	approvalMu.Lock(); ap, ok := approvalStore[id]; if ok { ap.Status = "approved" }; approvalMu.Unlock()
+	json.NewEncoder(w).Encode(ap)
+}
+
+func handleComplianceReject(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	approvalMu.Lock(); ap, ok := approvalStore[id]; if ok { ap.Status = "rejected" }; approvalMu.Unlock()
 	json.NewEncoder(w).Encode(ap)
 }
 func handleComplianceKillSwitch(w http.ResponseWriter, r *http.Request) {
@@ -1594,11 +1618,88 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("event: connected\ndata: {}\n\n"))
 }
 
+//go:embed index.html
+var indexHTML string
+
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(dashboardHTML))
+	w.Write([]byte(indexHTML))
 }
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("upgrade error: %v", err)
+		return
+	}
+	clientsMu.Lock()
+	clients[conn] = true
+	clientsMu.Unlock()
+	log.Printf("new ws client connected")
+}
+
+func broadcastTelemetry(source, text string) {
+	msg := map[string]string{
+		"type":   "telemetry",
+		"source": source,
+		"text":   text,
+	}
+	b, _ := json.Marshal(msg)
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
+	for conn := range clients {
+		if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
+			conn.Close()
+			delete(clients, conn)
+		}
+	}
+}
+
+func handleWizardShield(action string, path string) bool {
+	id := generateID()
+	req := &ApprovalRequest{
+		ID:        id,
+		Action:    action,
+		Details:   map[string]interface{}{"path": path},
+		Status:    "pending",
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+	approvalMu.Lock()
+	approvalStore[id] = req
+	approvalMu.Unlock()
+
+	msg := map[string]interface{}{
+		"type":   "approval_request",
+		"id":     id,
+		"action": action,
+		"path":   path,
+	}
+	b, _ := json.Marshal(msg)
+
+	clientsMu.Lock()
+	for conn := range clients {
+		conn.WriteMessage(websocket.TextMessage, b)
+	}
+	clientsMu.Unlock()
+
+	log.Printf("[Wizard's Shield] HOLDING action: %s on path: %s (ID: %s)", action, path, id)
+	broadcastTelemetry("shield", fmt.Sprintf("HOLDING action: %s on %s", action, path))
+	return false // Indicates the action is held for manual approval
+}
+
+func handleRecoveryWebhook(w http.ResponseWriter, r *http.Request) {
+	secret := r.Header.Get("X-Recovery-Secret")
+	if secret != os.Getenv("RECOVERY_WEBHOOK_SECRET") {
+		http.Error(w, "unauthorized", 401)
+		return
+	}
+	var event map[string]interface{}
+	json.NewDecoder(r.Body).Decode(&event)
+	log.Printf("[Recovery] Triggered by Sentry: %v", event)
+	broadcastTelemetry("shield", "System recovery triggered by Sentry Agent")
+	w.WriteHeader(200)
 }

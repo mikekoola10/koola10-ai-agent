@@ -11,13 +11,22 @@ type TradingAgent struct {
 
 func (a *TradingAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
+	defer func() { a.status = StatusCompleted }()
+
+	if a.specialty == "Arbitrage Scanner (DEX)" || a.specialty == "Arbitrage Scanner (CEX)" {
+		// Use market data tool for arbitrage scanning
+		res := tools.RunTool("market_data", map[string]interface{}{
+			"symbol": "BTC/USD",
+		})
+		return res, nil
+	}
+
 	// Use existing crypto tool for paper trading
 	res := tools.RunTool("crypto", map[string]interface{}{
 		"action": "price",
 		"symbol": "BTC",
 	})
 
-	a.status = StatusCompleted
 	return res, nil
 }
 
