@@ -1,0 +1,16 @@
+app = 'koola10-sentry'
+primary_region = 'ams'
+
+[build]
+
+[env]
+  TARGET_URL = 'https://koola10.fly.dev/health'
+  RECOVERY_URL = 'https://koola10.fly.dev/system/webhook/recovery'
+
+[processes]
+  worker = 'python main.py'
+
+[[vm]]
+  memory = '256mb'
+  cpu_kind = 'shared'
+  cpus = 1

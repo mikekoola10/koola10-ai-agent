@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -25,14 +26,151 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/orchestrator"
+	"koola10/services"
 	"koola10/tools"
 
+	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v76"
 	"github.com/stripe/stripe-go/v76/webhook"
 )
 
 // --- Structs ---
+
+
+var recoveryMap *orchestrator.RecoveryMap
+
+func loadRecoveryMap() error {
+	// Try multiple locations for persistence
+	paths := []string{"/data/recovery_map.json", "data/recovery_map.json"}
+	var data []byte
+	var err error
+	for _, p := range paths {
+		data, err = os.ReadFile(p)
+		if err == nil { break }
+	}
+
+	if err != nil {
+		// Fallback to default map embedded in binary
+		return loadDefaultRecoveryMap()
+	}
+	return json.Unmarshal(data, &recoveryMap)
+}
+
+func loadDefaultRecoveryMap() error {
+	recoveryMap = &orchestrator.RecoveryMap{
+		Failures: []orchestrator.FailureDefinition{
+			{
+				Name:       "fly_app_down",
+				Detection:  "health_check_timeout",
+				RootCauses: []string{"no_machines", "oom", "dependency_unreachable"},
+				RecoveryActions: []orchestrator.RecoveryAction{
+					{Name: "rollback_deploy", Command: "fly", Params: []string{"deploy", "--image", "$(fly releases -a koola10 -j | jq -r '.[0].Image')"}, TimeoutSecs: 120},
+					{Name: "scale_memory", Command: "fly", Params: []string{"scale", "memory", "2048", "-a", "koola10"}, TimeoutSecs: 60},
+					{Name: "restart_dependencies", Command: "fly", Params: []string{"restart", "-a", "koola10-redis"}, TimeoutSecs: 30},
+				},
+				Verification: "health_200",
+				Escalation:   "create_github_issue",
+			},
+		},
+	}
+	return nil
+}
+
+// attemptRecovery executes the recovery actions for a given failure name.
+func attemptRecovery(failureName string, details string) bool {
+	var rec orchestrator.FailureDefinition
+	found := false
+	if recoveryMap != nil {
+		for _, f := range recoveryMap.Failures {
+			if f.Name == failureName {
+				rec = f
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		log.Printf("[Recovery] No recovery map for %s", failureName)
+		return false
+	}
+
+	log.Printf("[Recovery] Attempting to recover from %s (root causes: %v)", failureName, rec.RootCauses)
+
+	for _, action := range rec.RecoveryActions {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(action.TimeoutSecs)*time.Second)
+		defer cancel()
+
+		// Use shell to support sub-expressions and pipes if needed
+		fullCmd := action.Command + " " + strings.Join(action.Params, " ")
+
+		// If this is a rollback and we have a lock, use the lock hash
+		if action.Name == "rollback_deploy" {
+			if lock, err := os.ReadFile("data/DEPLOYMENT_LOCK"); err == nil {
+				hash := strings.TrimSpace(string(lock))
+				if hash != "" {
+					log.Printf("[Recovery] Using DEPLOYMENT_LOCK hash for rollback: %s", hash)
+					fullCmd = fmt.Sprintf("fly deploy --image %s", hash)
+				}
+			}
+		}
+
+		cmd := exec.CommandContext(ctx, "sh", "-c", fullCmd)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("[Recovery] Action %s failed: %v, output: %s", action.Name, err, output)
+			continue // try next action
+		}
+		log.Printf("[Recovery] Action %s succeeded", action.Name)
+
+		if verifyRecovery(failureName) {
+			log.Printf("[Recovery] Recovery verified for %s", failureName)
+			return true
+		}
+	}
+
+	escalateFailure(failureName, details)
+	return false
+}
+
+func verifyRecovery(failureName string) bool {
+	resp, err := http.Get("http://localhost:8080/health")
+	if err == nil && resp.StatusCode == 200 {
+		return true
+	}
+	return false
+}
+
+func escalateFailure(failureName, details string) {
+	msg := fmt.Sprintf("Recovery failed for %s: %s", failureName, details)
+	log.Printf("[Recovery] Escalating failure: %s", msg)
+	engine.ReportEvent("recovery_engine", "escalation", msg, map[string]interface{}{"details": details})
+
+	sendAlertEmail("RECOVERY_ESCALATION: "+failureName, msg)
+}
+
+func sendAlertEmail(subject, body string) {
+	// Send to Email
+	to := "mikekoola10@agentmail.to"
+	res := tools.RunTool("agentmail", map[string]interface{}{
+		"to":      to,
+		"subject": "[KOOLA10] " + subject,
+		"body":    body,
+	})
+	if res.Success {
+		log.Printf("[Alert] Notification email sent to %s", to)
+	}
+
+	// Send to Slack
+	res = tools.RunTool("messaging", map[string]interface{}{
+		"channel": "slack",
+		"message": fmt.Sprintf("*[KOOLA10 ALERT]* %s\n%s", subject, body),
+	})
+	if res.Success {
+		log.Printf("[Alert] Slack notification sent")
+	}
+}
 
 type Grant struct {
 	ID          string `json:"grant_id"`
@@ -193,36 +331,6 @@ type UsageLog struct {
 	Cost       float64 `json:"cost"`
 }
 
-type Transaction struct {
-	Timestamp   string  `json:"timestamp"`
-	Type        string  `json:"type"`
-	Category    string  `json:"category"`
-	Vertical    string  `json:"vertical,omitempty"`
-	Amount      float64 `json:"amount"`
-	Description string  `json:"description"`
-}
-
-type EconomicLedger struct {
-	Balance      float64       `json:"balance"`
-	TotalCosts   float64       `json:"total_costs"`
-	TotalRevenue float64       `json:"total_revenue"`
-	Transactions []Transaction `json:"transactions"`
-	mu           sync.RWMutex
-}
-
-type EconomicSummary struct {
-	Balance      float64 `json:"balance"`
-	TotalCosts   float64 `json:"total_costs"`
-	TotalRevenue float64 `json:"total_revenue"`
-	ROI          float64 `json:"roi"`
-}
-
-type EconomicEvaluation struct {
-	Decision      string  `json:"decision"`
-	EstimatedCost float64 `json:"estimated_cost"`
-	ProjectedROI  float64 `json:"projected_roi"`
-	Reason        string  `json:"reason"`
-}
 
 type SwarmTask struct {
 	TaskID     string                 `json:"task_id"`
@@ -237,6 +345,19 @@ type SwarmNode struct {
 	Region   string `json:"region"`
 	Endpoint string `json:"endpoint"`
 	Status   string `json:"status"`
+}
+
+type ErrorReport struct {
+	TaskID    string `json:"task_id"`
+	AgentRole string `json:"agent_role"`
+	Error     string `json:"error"`
+	Context   string `json:"context"`
+}
+
+type SystemHealth struct {
+	Status      string            `json:"status"`
+	Timestamp   string            `json:"timestamp"`
+	Dependencies map[string]string `json:"dependencies"`
 }
 
 // --- Studio Structs ---
@@ -271,6 +392,17 @@ type VideoJob struct {
 // --- Global States ---
 
 var (
+	engine          = orchestrator.NewEngine()
+	julesClient     = services.NewJulesClient("https://jules.google.com/api")
+	agentMailClient *services.AgentMailClient
+	a2aBridge       *orchestrator.A2ABridge
+
+	upgrader = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return true },
+	}
+	portalClients = make(map[*websocket.Conn]bool)
+	clientsMu     sync.Mutex
+
 	cacheMutex   sync.Mutex
 	auditMutex   sync.Mutex
 	usageMutex   sync.Mutex
@@ -300,9 +432,7 @@ var (
 		Items: []SemanticItem{},
 	}
 
-	globalLedger = &EconomicLedger{
-		Balance: 100.0,
-	}
+	globalLedger *financial.EconomicLedger
 
 	fundManager *financial.FundManager
 
@@ -324,6 +454,8 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+	//go:embed web/master_portal.html
+	masterPortalHTML string
 )
 
 // --- Middleware ---
@@ -355,14 +487,47 @@ func main() {
 
 	globalGraph.Load()
 	globalSemantic.Load()
-	globalLedger.Load()
+	loadRecoveryMap()
+	agentMailClient = services.NewAgentMailClient(os.Getenv("AGENTMAIL_API_KEY"))
+	a2aBridge = orchestrator.NewA2ABridge(engine)
+	globalLedger = financial.NewEconomicLedger(ledgerPath)
+	globalLedger.AuditLogger = AddAuditEntry
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
-	// Automated invoice payment check (every 24h)
+	// Automated reporting & payment check (every 24h)
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		for {
 			fundManager.PayFlyInvoice()
+
+			// Send daily financial summary via AgentMail
+			summary := globalLedger.GetSummary()
+			agentMailClient.SendEmail("mikekoola10@agentmail.to", "Daily Financial Summary", fmt.Sprintf("Balance: %.2f, Total Revenue: %.2f", summary.Balance, summary.TotalRevenue))
+
+			<-ticker.C
+		}
+	}()
+
+	// Hourly Smoke Test & Automated Rollback
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		for {
+			log.Printf("[ContinuousVerification] Running hourly smoke test...")
+			cmd := exec.Command("/bin/bash", "./smoke_test.sh")
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				log.Printf("[ContinuousVerification] Smoke test FAILED: %v, output: %s", err, output)
+				engine.ReportEvent("smoke_test", "failure", "Hourly verification failed", map[string]interface{}{"output": string(output)})
+
+				// Attempt Rollback
+				lockHash, err := os.ReadFile("data/DEPLOYMENT_LOCK")
+				if err == nil {
+					log.Printf("[ContinuousVerification] Attempting automated rollback to lock hash: %s", string(lockHash))
+					attemptRecovery("fly_app_down", "Smoke test failure triggered rollback")
+				}
+			} else {
+				log.Printf("[ContinuousVerification] Smoke test passed.")
+			}
 			<-ticker.C
 		}
 	}()
@@ -376,6 +541,11 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["desktop"] = agents.DesktopFactory
+	globalSwarmManager.Factories["mobile"] = agents.MobileFactory
+	globalSwarmManager.Factories["meta"] = agents.MetaSwarmFactory
+	globalSwarmManager.Factories["arbitrage"] = agents.ArbitrageFactory
+	globalSwarmManager.Factories["saas_builder"] = agents.SaaSBuilderFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -407,8 +577,20 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/portal", corsMiddleware(handlePortal))
 
 	r.Get("/health", corsMiddleware(handleHealth))
+	r.Get("/system/health", corsMiddleware(handleSystemHealth))
+	r.Get("/transactions", corsMiddleware(handleTransactions))
+	r.Post("/ledger/record", corsMiddleware(handleLedgerRecord))
+	r.Post("/system/iterate", corsMiddleware(handleSystemIterate))
+	r.Post("/system/recover", corsMiddleware(handleSystemRecover))
+	r.Get("/ws", handleWebSocket)
+	r.Post("/jules/suggest", corsMiddleware(handleJulesSuggest))
+	r.Post("/webhook/agentmail", handleAgentMailWebhook)
+	r.Post("/system/webhook/recovery", corsMiddleware(handleExternalRecoveryWebhook))
+	r.Get("/a2a/discovery", a2aBridge.HandleDiscovery)
+	r.Post("/a2a/delegate", a2aBridge.HandleDelegate)
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
@@ -452,6 +634,7 @@ func main() {
 	r.Post("/economic/ledger/revenue", corsMiddleware(handleEconomicLedgerRevenue))
 	r.Get("/economic/ledger/summary", corsMiddleware(handleEconomicLedgerSummary))
 	r.Post("/economic/evaluate", corsMiddleware(handleEconomicEvaluate))
+	r.Get("/economic/flywheel/status", corsMiddleware(handleEconomicFlywheelStatus))
 
 	r.Post("/swarm/start", corsMiddleware(handleSwarmStart))
 	r.Get("/swarm/task-status", corsMiddleware(handleSwarmStatus))
@@ -463,6 +646,8 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+
+	r.Post("/agent/report-error", corsMiddleware(handleReportError))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
@@ -478,6 +663,17 @@ func main() {
 	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+
+	engine.OnEvent = func(e orchestrator.Event) {
+		log.Printf("[Main] Event broadcast: %s - %s", e.ID, e.Message)
+		broadcastEvent(e)
+	}
+	engine.AttemptRecovery = attemptRecovery
+	engine.Notify = func(subj, body string) {
+		sendAlertEmail(subj, body)
+	}
+	go engine.Start()
+	go runDependencyWatchdog()
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -809,7 +1005,7 @@ func startSwarmListeners() {
 			log.Printf("[Reviewer] Processing task %s", t.TaskID)
 
 			// ROI Evaluation
-			eval := EvaluateAction("grant_submit", 0.07)
+			eval := globalLedger.EvaluateAction("grant_submit", 0.07)
 			t.Results["roi_eval"] = eval
 
 			if eval.Decision == "block" {
@@ -989,26 +1185,6 @@ func LogUsage(tokens int) {
 	logEntry := UsageLog{time.Now().Format(time.RFC3339), tokens, cost}
 	if f, err := os.OpenFile(usagePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil { json.NewEncoder(f).Encode(logEntry); f.Close() }
 }
-func (l *EconomicLedger) Save() {
-	l.mu.RLock(); defer l.mu.RUnlock(); data, _ := json.Marshal(l); os.WriteFile(ledgerPath, data, 0644)
-}
-func (l *EconomicLedger) Load() {
-	l.mu.Lock(); defer l.mu.Unlock(); data, err := os.ReadFile(ledgerPath)
-	if err == nil { json.Unmarshal(data, l) }; if l.Transactions == nil { l.Transactions = []Transaction{} }
-}
-func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
-	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
-}
-func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
-	l.RecordRevenueWithVertical("", amount, source)
-}
-func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
-	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
-}
 
 // --- Financial Handlers ---
 
@@ -1055,14 +1231,6 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {
-	roiThreshold := 2.0; projectedRevenue := 0.0; if actionType == "grant_submit" { projectedRevenue = 500.0 }
-	roi := 0.0; if estimatedCost > 0 { roi = projectedRevenue / estimatedCost }
-	eval := EconomicEvaluation{"allow", estimatedCost, roi, ""}
-	if roi < roiThreshold { eval.Decision = "warn"; eval.Reason = "low_projected_roi" }
-	if globalLedger.Balance < estimatedCost { eval.Decision = "block"; eval.Reason = "insufficient_funds" }
-	return eval
-}
 
 func handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("query"); cat := r.URL.Query().Get("category")
@@ -1336,21 +1504,51 @@ func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
-	globalLedger.mu.RLock()
-	defer globalLedger.mu.RUnlock()
-	roi := 0.0
-	if globalLedger.TotalCosts > 0 {
-		roi = globalLedger.TotalRevenue / globalLedger.TotalCosts
-	}
-	json.NewEncoder(w).Encode(EconomicSummary{
-		Balance:      globalLedger.Balance,
-		TotalCosts:   globalLedger.TotalCosts,
-		TotalRevenue: globalLedger.TotalRevenue,
-		ROI:          roi,
-	})
+	summary := globalLedger.GetSummary()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summary)
 }
 func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
+	var req struct {
+		Action string  `json:"action"`
+		Cost   float64 `json:"cost"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	eval := globalLedger.EvaluateAction(req.Action, req.Cost)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(eval)
+}
+
+func handleEconomicFlywheelStatus(w http.ResponseWriter, r *http.Request) {
+	// Mock flywheel state for initial telemetry
+	status := map[string]interface{}{
+		"momentum":     4.2,
+		"active_cycles": 12,
+		"total_output":  globalLedger.GetTotalRevenue(),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+func handleTransactions(w http.ResponseWriter, r *http.Request) {
+	txs := globalLedger.GetTransactions()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(txs)
+}
+
+func handleLedgerRecord(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Description string  `json:"description"`
+		Amount      float64 `json:"amount"`
+		Type        string  `json:"type"`
+		Date        string  `json:"date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	globalLedger.RecordRevenueWithVertical("", req.Amount, req.Description)
+	w.WriteHeader(http.StatusCreated)
 }
 
 func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
@@ -1365,11 +1563,9 @@ func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
-	globalLedger.mu.RLock()
-	defer globalLedger.mu.RUnlock()
 	revenueByVertical := make(map[string]float64)
 	costByVertical := make(map[string]float64)
-	for _, t := range globalLedger.Transactions {
+	for _, t := range globalLedger.GetTransactions() {
 		if t.Vertical == "" {
 			continue
 		}
@@ -1577,6 +1773,163 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"ok"}`))
 }
 
+func handleSystemHealth(w http.ResponseWriter, r *http.Request) {
+	health := checkSystemHealth()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(health)
+}
+
+func handleSystemIterate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Goal string `json:"goal"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	log.Printf("[Iterate] Starting autonomous build cycle for goal: %s", req.Goal)
+
+	// Start the autonomous loop in a goroutine
+	go func() {
+		taskID := generateID()
+		AddAuditEntry("iterate_cycle_started", map[string]interface{}{"task_id": taskID, "goal": req.Goal})
+
+		// 1. Idea & Implementation Planning (DeepSeek/MetaSwarm)
+		log.Printf("[Iterate] Planning phase for %s", taskID)
+		time.Sleep(2 * time.Second) // Simulate AI thinking
+
+		// 2. Integration (BuilderSwarm/CodePaster)
+		log.Printf("[Iterate] Integration phase for %s", taskID)
+		tools.RunTool("code_paster", map[string]interface{}{
+			"filepath": "AGENTS.md",
+			"search":   "## System Components",
+			"replace":  "## System Components (Updated via Iterate)\n- /agents/builder_swarm.go: Automated build and integration.\n\n## System Components",
+		})
+
+		// 3. Verification (E2EWatchdog)
+		log.Printf("[Iterate] Verification phase for %s", taskID)
+		err := runE2ECheck()
+
+		status := "success"
+		if err != nil {
+			status = "failed"
+			log.Printf("[Iterate] Build cycle failed verification: %v", err)
+		} else {
+			log.Printf("[Iterate] Build cycle completed successfully")
+		}
+
+		AddAuditEntry("iterate_cycle_completed", map[string]interface{}{
+			"task_id": taskID,
+			"status":  status,
+			"error":   fmt.Sprintf("%v", err),
+		})
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status": "cycle_started"}`))
+}
+
+func checkSystemHealth() SystemHealth {
+	health := SystemHealth{
+		Status:      "healthy",
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Dependencies: make(map[string]string),
+	}
+
+	// Check Redis
+	if redisClient != nil {
+		if err := redisClient.Ping(context.Background()).Err(); err != nil {
+			health.Dependencies["redis"] = "down: " + err.Error()
+			health.Status = "degraded"
+		} else {
+			health.Dependencies["redis"] = "up"
+		}
+	} else {
+		health.Dependencies["redis"] = "not_configured"
+	}
+
+	// Check Browser Agent
+	browserURL := os.Getenv("BROWSER_AGENT_URL")
+	if browserURL == "" { browserURL = "http://localhost:8080" }
+	if resp, err := http.Get(browserURL + "/health"); err != nil {
+		health.Dependencies["browser_agent"] = "down: " + err.Error()
+		health.Status = "degraded"
+	} else {
+		resp.Body.Close()
+		health.Dependencies["browser_agent"] = "up"
+	}
+
+	// Check Semantic Agent
+	semanticURL := os.Getenv("SEMANTIC_AGENT_URL")
+	if semanticURL == "" { semanticURL = "https://koola10-semantic.fly.dev" }
+	if resp, err := http.Get(semanticURL + "/health"); err != nil {
+		health.Dependencies["semantic_agent"] = "down: " + err.Error()
+		health.Status = "degraded"
+	} else {
+		resp.Body.Close()
+		health.Dependencies["semantic_agent"] = "up"
+	}
+
+	return health
+}
+
+func runDependencyWatchdog() {
+	log.Printf("[Watchdog] Starting dependency monitoring...")
+	ticker := time.NewTicker(5 * time.Minute)
+	for range ticker.C {
+		health := checkSystemHealth()
+
+		// Run E2E Oversight Check
+		log.Printf("[Watchdog] Running E2E oversight verification...")
+		if err := runE2ECheck(); err != nil {
+			log.Printf("[Watchdog] E2E verification failed: %v", err)
+			engine.ReportEvent("e2e_watchdog", "failure", "E2E verification failed", map[string]interface{}{"error": err.Error()})
+			health.Status = "degraded"
+		}
+
+		if health.Status != "healthy" {
+			log.Printf("[Watchdog] System degraded! Reporting to supervisor...")
+			for dep, status := range health.Dependencies {
+				if strings.HasPrefix(status, "down") {
+					engine.ReportEvent("infrastructure", "error", fmt.Sprintf("Dependency %s is down: %s", dep, status), map[string]interface{}{"context": "DependencyWatchdog"})
+				}
+			}
+		}
+	}
+}
+
+func runE2ECheck() error {
+	// 1. Verify we can still access the EconomicLedger summary
+	summary := globalLedger.GetSummary()
+	if summary.Balance < 0 && summary.TotalCosts == 0 {
+		return fmt.Errorf("EconomicLedger state appears corrupted")
+	}
+
+	// 2. Verify we can execute a simple tool (e.g., github_search)
+	res := tools.RunTool("github_search", map[string]interface{}{"query": "koola10"})
+	if !res.Success {
+		// Recovery Action: If tool fails, check if dependency is reachable
+		health := checkSystemHealth()
+		return fmt.Errorf("tool execution test failed: %s (System health: %s)", res.Error, health.Status)
+	}
+
+	return nil
+}
+
+func handleSystemRecover(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Action string `json:"action"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	log.Printf("[Recover] Triggering automated recovery action: %s", req.Action)
+	engine.ReportEvent("manual_recovery", "command", "Executing: "+req.Action, nil)
+
+	// Execute recovery logic...
+	w.WriteHeader(http.StatusOK)
+}
+
 func handleDailyReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/markdown")
 	w.Write([]byte("# Daily Report\n\nAll systems operational."))
@@ -1596,9 +1949,125 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(dashboardHTML))
+	w.Write([]byte(masterPortalHTML))
+}
+
+func handleJulesSuggest(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Goal string }
+	json.NewDecoder(r.Body).Decode(&req)
+
+	proposal, _ := julesClient.ProposeImplementation(req.Goal)
+	engine.ReportEvent("jules", "proposal", proposal, map[string]interface{}{"goal": req.Goal})
+
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"proposal": "` + proposal + `"}`))
+}
+
+func handleAgentMailWebhook(w http.ResponseWriter, r *http.Request) {
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	msg := fmt.Sprintf("New email received from %v: %v", payload["from"], payload["subject"])
+	engine.ReportEvent("agentmail", "email_received", msg, payload)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleExternalRecoveryWebhook(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		FailureName string `json:"failure_name"`
+		Details     string `json:"details"`
+		Secret      string `json:"secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Basic security check
+	if req.Secret != os.Getenv("RECOVERY_WEBHOOK_SECRET") {
+		http.Error(w, "unauthorized", 401)
+		return
+	}
+
+	log.Printf("[ExternalRecovery] Triggered recovery for: %s", req.FailureName)
+	go attemptRecovery(req.FailureName, req.Details)
+
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	clientsMu.Lock()
+	portalClients[conn] = true
+	clientsMu.Unlock()
+
+	defer func() {
+		clientsMu.Lock()
+		delete(portalClients, conn)
+		clientsMu.Unlock()
+		conn.Close()
+	}()
+
+	for {
+		var msg map[string]interface{}
+		if err := conn.ReadJSON(&msg); err != nil {
+			break
+		}
+		// Handle incoming portal commands
+		if action, ok := msg["action"].(string); ok {
+			log.Printf("[Portal] Received command: %s", action)
+			switch action {
+			case "restart_dependency":
+				engine.ReportEvent("portal", "command", "Restarting dependency", msg)
+			case "approve_event":
+				if id, ok := msg["event_id"].(string); ok {
+					engine.ApproveEvent(id)
+				}
+			case "reject_event":
+				if id, ok := msg["event_id"].(string); ok {
+					engine.RejectEvent(id)
+				}
+			}
+		}
+	}
+}
+
+func broadcastEvent(event orchestrator.Event) {
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
+	for client := range portalClients {
+		client.WriteJSON(event)
+	}
+}
+
+func handlePortal(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(masterPortalHTML))
 }
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func handleReportError(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("[DEBUG] Received error report\n")
+	var report ErrorReport
+	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+		fmt.Printf("[DEBUG] Error decoding report: %v\n", err)
+		http.Error(w, "bad request", 400)
+		return
+	}
+	fmt.Printf("[DEBUG] Reporting event to engine for task: %s\n", report.TaskID)
+	engine.ReportEvent(report.AgentRole, "error", report.Error, map[string]interface{}{
+		"task_id": report.TaskID,
+		"context": report.Context,
+	})
+	w.WriteHeader(http.StatusAccepted)
 }

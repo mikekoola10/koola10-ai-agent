@@ -5,3 +5,5 @@ browser-use
 langchain-openai
 pydantic
 python-dotenv
+agentmail
+langchain-agentmail
