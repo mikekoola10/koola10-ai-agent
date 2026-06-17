@@ -1,52 +1,37 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { LayoutDashboard, Activity, ScrollText, Settings } from 'lucide-react-native';
-import { TelemetryProvider } from './src/context/TelemetryContext';
-
-import HomeScreen from './src/screens/HomeScreen';
-import HealthScreen from './src/screens/HealthScreen';
-import LogsScreen from './src/screens/LogsScreen';
-import SettingsScreen from './src/screens/SettingsScreen';
-
-const Tab = createBottomTabNavigator();
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import WebSocket from 'react-native-websocket';
 
 export default function App() {
+  const [data, setData] = useState({ revenue: 0, balance: 0, health: 'unknown' });
+
+  useEffect(() => {
+    const ws = new WebSocket('wss://koola10.fly.dev/ws');
+    ws.onopen = () => console.log('Connected to Koola10');
+    ws.onmessage = (e) => {
+      try {
+        const payload = JSON.parse(e.data);
+        setData(payload);
+      } catch (err) {
+        console.error('Parse error', err);
+      }
+    };
+    ws.onerror = (e) => console.error('WebSocket error', e);
+    return () => ws.close();
+  }, []);
+
   return (
-    <TelemetryProvider>
-      <NavigationContainer>
-        <Tab.Navigator
-          screenOptions={{
-            headerStyle: { backgroundColor: '#0a0a0a', borderBottomWidth: 1, borderBottomColor: '#333' },
-            headerTitleStyle: { fontWeight: 'bold', letterSpacing: 2, fontSize: 16 },
-            headerTintColor: '#0f0',
-            tabBarStyle: { backgroundColor: '#0a0a0a', borderTopColor: '#333', height: 60, paddingBottom: 10 },
-            tabBarActiveTintColor: '#0f0',
-            tabBarInactiveTintColor: '#666',
-          }}
-        >
-          <Tab.Screen
-            name="Home"
-            component={HomeScreen}
-            options={{ tabBarIcon: ({ color }) => <LayoutDashboard color={color} size={22} /> }}
-          />
-          <Tab.Screen
-            name="Health"
-            component={HealthScreen}
-            options={{ tabBarIcon: ({ color }) => <Activity color={color} size={22} /> }}
-          />
-          <Tab.Screen
-            name="Logs"
-            component={LogsScreen}
-            options={{ tabBarIcon: ({ color }) => <ScrollText color={color} size={22} /> }}
-          />
-          <Tab.Screen
-            name="Settings"
-            component={SettingsScreen}
-            options={{ tabBarIcon: ({ color }) => <Settings color={color} size={22} /> }}
-          />
-        </Tab.Navigator>
-      </NavigationContainer>
-    </TelemetryProvider>
+    <View style={styles.container}>
+      <Text style={styles.title}>🌀 Koola10 Dashboard</Text>
+      <Text style={styles.value}>Revenue: ${data.revenue || 0}</Text>
+      <Text style={styles.value}>Balance: ${data.balance || 0}</Text>
+      <Text style={styles.value}>Health: {data.health || 'unknown'}</Text>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0a0a0a' },
+  title: { fontSize: 24, color: '#0f0', marginBottom: 20 },
+  value: { fontSize: 18, color: '#fff', marginVertical: 5 },
+});
