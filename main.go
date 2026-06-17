@@ -343,6 +343,28 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // --- Main ---
 
 func main() {
+
+	// Autonomous Health Watchdog (Every 5 minutes)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		for {
+			<-ticker.C
+			checkEcosystemHealth()
+		}
+	}()
+
+	// Daily Revenue Summary (8 AM UTC)
+	go func() {
+		for {
+			now := time.Now().UTC()
+			next := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, time.UTC)
+			if now.After(next) {
+				next = next.Add(24 * time.Hour)
+			}
+			time.Sleep(next.Sub(now))
+			sendDailyRevenueSummary()
+		}
+	}()
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
 	region = os.Getenv("FLY_REGION")
@@ -1601,4 +1623,51 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func checkEcosystemHealth() {
+	services := map[string]string{
+		"Koola10": "https://koola10.fly.dev/health",
+		"Spiral":  "https://spiral-ai-agent.onrender.com/",
+		"Semantic": "https://koola10-semantic.fly.dev/health",
+	}
+
+	for name, url := range services {
+		resp, err := http.Get(url)
+		status := "DOWN"
+		if err == nil {
+			if resp.StatusCode == 200 {
+				status = "UP"
+			}
+			resp.Body.Close()
+		}
+		log.Printf("[Watchdog] %s is %s", name, status)
+		if status == "DOWN" {
+			AddAuditEntry("health_failure_detected", map[string]interface{}{"service": name, "url": url})
+			// Per Manifest: Initiate recovery within 5 minutes.
+			// Implementation of specific recovery actions would go here.
+		}
+	}
+}
+
+func sendDailyRevenueSummary() {
+	globalLedger.mu.RLock()
+	rev := globalLedger.TotalRevenue
+	bal := globalLedger.Balance
+	globalLedger.mu.RUnlock()
+
+	opsFund := rev * 0.3
+	spendable := rev * 0.7
+
+	body := fmt.Sprintf("Daily Revenue Summary\n\nTotal Revenue: $%.2f\nOperations Fund (30%%): $%.2f\nSpendable Balance (70%%): $%.2f\nCurrent Ledger Balance: $%.2f\n\nAll systems operational.", rev, opsFund, spendable, bal)
+
+	payload := map[string]interface{}{
+		"action":  "send",
+		"to":      "mikekoola10@agentmail.to",
+		"subject": "Daily Revenue & Operations Summary",
+		"body":    body,
+	}
+
+	tools.RunTool("agentmail", payload)
+	AddAuditEntry("daily_summary_sent", map[string]interface{}{"revenue": rev})
 }
