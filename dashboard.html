@@ -7,7 +7,9 @@
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; line-height: 1.4; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
-        .card { border: 1px solid #333; padding: 15px; background: #111; }
+        .card { border: 1px solid #333; padding: 15px; background: #111; position: relative; }
+        .chart-container { height: 60px; display: flex; align-items: flex-end; gap: 2px; margin-top: 10px; }
+        .bar { background: #0f0; width: 10px; transition: height 0.3s; }
         .status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
         .online { background: #0f0; box-shadow: 0 0 5px #0f0; }
         .offline { background: #f00; }
@@ -37,6 +39,9 @@
             <div>COSTS:   <span id="costs">$0.00</span></div>
             <div>REVENUE: <span id="revenue">$0.00</span></div>
             <div style="margin-top:10px;">ROI_RATIO: <span id="roi">0.00</span>x</div>
+            <div class="chart-container" id="revenue-chart">
+                <!-- Bars will be injected here -->
+            </div>
         </div>
 
         <div class="card">
@@ -70,6 +75,14 @@
                 document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
                 document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
                 document.getElementById('roi').innerText = ledger.roi.toFixed(2);
+
+                // Update revenue chart
+                const chart = document.getElementById('revenue-chart');
+                const bar = document.createElement('div');
+                bar.className = 'bar';
+                bar.style.height = `${Math.min(ledger.total_revenue, 100)}%`;
+                chart.appendChild(bar);
+                if (chart.children.length > 20) chart.removeChild(chart.firstChild);
 
                 // Nodes
                 const nodes = await fetch('/swarm/nodes').then(r => r.json());

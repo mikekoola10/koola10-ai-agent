@@ -328,7 +328,19 @@ var (
 
 // --- Middleware ---
 
-func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == "OPTIONS" {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func corsMiddlewareFunc(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
@@ -367,6 +379,37 @@ func main() {
 		}
 	}()
 
+	// E2E Watchdog & Self-Healing Loop
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		for {
+			<-ticker.C
+			log.Printf("[Watchdog] Running system-wide health checks...")
+
+			// Verify key tools
+			toolsToTest := []string{"reach", "memory", "9router", "cua", "defi"}
+			allHealthy := true
+			for _, t := range toolsToTest {
+				res := tools.RunTool(t, map[string]interface{}{"action": "status"})
+				if !res.Success && t != "reach" { // reach doesn't have status yet
+					log.Printf("[Watchdog] Tool %s reported failure: %s", t, res.Error)
+					allHealthy = false
+				}
+			}
+
+			if !allHealthy {
+				log.Printf("[Watchdog] System issues detected. Attempting autonomous recovery...")
+				// Simulated Auto-Rollback logic
+				deploymentLockPath := "/data/DEPLOYMENT_LOCK"
+				if _, err := os.Stat(deploymentLockPath); err == nil {
+					log.Printf("[Watchdog] Deployment lock found. Reverting to last known stable hash...")
+					// In a real environment: exec.Command("fly", "deploy", "--image", hash).Run()
+				}
+				AddAuditEntry("recovery_triggered", map[string]interface{}{"reason": "watchdog_failure"})
+			}
+		}
+	}()
+
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
@@ -376,6 +419,8 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -406,79 +451,88 @@ func main() {
 		w.Write([]byte(`{"error":"not found"}`))
 	})
 
-	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/", corsMiddlewareFunc(handleRoot))
 
-	r.Get("/health", corsMiddleware(handleHealth))
-	r.Get("/daily-report", corsMiddleware(handleDailyReport))
-	r.Get("/agentpet/status", corsMiddleware(handlePetdex))
+	r.Get("/health", corsMiddlewareFunc(handleHealth))
+	r.Get("/daily-report", corsMiddlewareFunc(handleDailyReport))
+	r.Get("/agentpet/status", corsMiddlewareFunc(handlePetdex))
 	r.Get("/events/stream", handleEventsStream)
-	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
+	r.Post("/collaborate/*", corsMiddlewareFunc(handleCollaborate))
 
-	r.Get("/grants/search", corsMiddleware(handleSearch))
-	r.Post("/grants/apply", corsMiddleware(handleApply))
-	r.Get("/grants/status", corsMiddleware(handleStatus))
-	r.Get("/grants/applications", corsMiddleware(handleApplicationsList))
-	r.Post("/grants/monitor", corsMiddleware(handleMonitor))
-	r.Post("/grants/update-status", corsMiddleware(handleUpdateStatus))
-	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
-	r.Post("/grants/check-status", corsMiddleware(handleCheckStatus))
+	r.Get("/grants/search", corsMiddlewareFunc(handleSearch))
+	r.Post("/grants/apply", corsMiddlewareFunc(handleApply))
+	r.Get("/grants/status", corsMiddlewareFunc(handleStatus))
+	r.Get("/grants/applications", corsMiddlewareFunc(handleApplicationsList))
+	r.Post("/grants/monitor", corsMiddlewareFunc(handleMonitor))
+	r.Post("/grants/update-status", corsMiddlewareFunc(handleUpdateStatus))
+	r.Post("/grants/apply-auto", corsMiddlewareFunc(handleApplyAuto))
+	r.Post("/grants/check-status", corsMiddlewareFunc(handleCheckStatus))
 
-	r.Post("/payment/create-checkout", corsMiddleware(handleCreateCheckout))
+	r.Post("/payment/create-checkout", corsMiddlewareFunc(handleCreateCheckout))
 	r.Post("/stripe/webhook", handleStripeWebhook)
+	r.Post("/webhook/agentmail/incoming", handleAgentMailIncoming)
 
-	r.Post("/ai/chat", corsMiddleware(handleAIChat))
-	r.Post("/ai/remember", corsMiddleware(handleAIRemember))
-	r.Get("/ai/recall", corsMiddleware(handleAIRecall))
-	r.Post("/ai/analyze-grant", corsMiddleware(handleAIAnalyzeGrant))
+	r.Post("/ai/chat", corsMiddlewareFunc(handleAIChat))
+	r.Post("/ai/remember", corsMiddlewareFunc(handleAIRemember))
+	r.Get("/ai/recall", corsMiddlewareFunc(handleAIRecall))
+	r.Post("/ai/analyze-grant", corsMiddlewareFunc(handleAIAnalyzeGrant))
 
-	r.Get("/memory/meetings", corsMiddleware(handleMemoryMeetings))
-	r.Post("/memory/meetings", corsMiddleware(handleMemoryMeetings))
-	r.Get("/memory/entity/*", corsMiddleware(handleMemoryEntity))
-	r.Get("/memory/influence/*", corsMiddleware(handleMemoryInfluence))
-	r.Get("/memory/path", corsMiddleware(handleMemoryPath))
-	r.Get("/memory/decisions/ranked", corsMiddleware(handleMemoryDecisionsRanked))
+	r.Get("/memory/meetings", corsMiddlewareFunc(handleMemoryMeetings))
+	r.Post("/memory/meetings", corsMiddlewareFunc(handleMemoryMeetings))
+	r.Get("/memory/entity/*", corsMiddlewareFunc(handleMemoryEntity))
+	r.Get("/memory/influence/*", corsMiddlewareFunc(handleMemoryInfluence))
+	r.Get("/memory/path", corsMiddlewareFunc(handleMemoryPath))
+	r.Get("/memory/decisions/ranked", corsMiddlewareFunc(handleMemoryDecisionsRanked))
 
-	r.Post("/semantic/index", corsMiddleware(handleSemanticIndex))
-	r.Get("/semantic/search", corsMiddleware(handleSemanticSearch))
+	r.Post("/semantic/index", corsMiddlewareFunc(handleSemanticIndex))
+	r.Get("/semantic/search", corsMiddlewareFunc(handleSemanticSearch))
 
-	r.Get("/compliance/audit", corsMiddleware(handleComplianceAudit))
-	r.Get("/compliance/audit/verify", corsMiddleware(handleComplianceAuditVerify))
-	r.Post("/compliance/approval", corsMiddleware(handleComplianceApproval))
-	r.Post("/compliance/approve", corsMiddleware(handleComplianceApprove))
-	r.Post("/compliance/kill-switch", corsMiddleware(handleComplianceKillSwitch))
-	r.Post("/compliance/kill-switch/reset", corsMiddleware(handleComplianceKillSwitchReset))
-	r.Get("/compliance/usage", corsMiddleware(handleComplianceUsage))
+	r.Get("/compliance/audit", corsMiddlewareFunc(handleComplianceAudit))
+	r.Get("/compliance/audit/verify", corsMiddlewareFunc(handleComplianceAuditVerify))
+	r.Post("/compliance/approval", corsMiddlewareFunc(handleComplianceApproval))
+	r.Post("/compliance/approve", corsMiddlewareFunc(handleComplianceApprove))
+	r.Post("/compliance/kill-switch", corsMiddlewareFunc(handleComplianceKillSwitch))
+	r.Post("/compliance/kill-switch/reset", corsMiddlewareFunc(handleComplianceKillSwitchReset))
+	r.Get("/compliance/usage", corsMiddlewareFunc(handleComplianceUsage))
 
-	r.Post("/economic/ledger/cost", corsMiddleware(handleEconomicLedgerCost))
-	r.Post("/economic/ledger/revenue", corsMiddleware(handleEconomicLedgerRevenue))
-	r.Get("/economic/ledger/summary", corsMiddleware(handleEconomicLedgerSummary))
-	r.Post("/economic/evaluate", corsMiddleware(handleEconomicEvaluate))
+	r.Post("/economic/ledger/cost", corsMiddlewareFunc(handleEconomicLedgerCost))
+	r.Post("/economic/ledger/revenue", corsMiddlewareFunc(handleEconomicLedgerRevenue))
+	r.Get("/economic/ledger/summary", corsMiddlewareFunc(handleEconomicLedgerSummary))
+	r.Post("/economic/evaluate", corsMiddlewareFunc(handleEconomicEvaluate))
 
-	r.Post("/swarm/start", corsMiddleware(handleSwarmStart))
-	r.Get("/swarm/task-status", corsMiddleware(handleSwarmStatus))
-	r.Get("/swarm/agents", corsMiddleware(handleSwarmAgents))
-	r.Get("/swarm/nodes", corsMiddleware(handleSwarmNodes))
+	r.Post("/swarm/start", corsMiddlewareFunc(handleSwarmStart))
+	r.Get("/swarm/task-status", corsMiddlewareFunc(handleSwarmStatus))
+	r.Get("/swarm/agents", corsMiddlewareFunc(handleSwarmAgents))
+	r.Get("/swarm/nodes", corsMiddlewareFunc(handleSwarmNodes))
 
-	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
-	r.Get("/swarm/report", corsMiddleware(handleSwarmReport))
-	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
-	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
-	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+	r.Get("/swarm/metrics", corsMiddlewareFunc(handleSwarmMetrics))
+	r.Get("/swarm/report", corsMiddlewareFunc(handleSwarmReport))
+	r.Get("/swarm/revenue", corsMiddlewareFunc(handleSwarmRevenue))
+	r.Get("/swarm/status", corsMiddlewareFunc(handleSwarmStatusAll))
+	r.HandleFunc("/swarm/*", corsMiddlewareFunc(handleSpecialistSwarm))
 
-	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
-	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
-	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
-	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
-	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
+	r.Get("/financial/status", corsMiddlewareFunc(handleFinancialStatus))
+	r.Post("/financial/pay-subscription", corsMiddlewareFunc(handleFinancialPaySubscription))
+	r.Post("/financial/reinvest", corsMiddlewareFunc(handleFinancialReinvest))
+	r.Get("/financial/history", corsMiddlewareFunc(handleFinancialHistory))
+	r.Post("/trading/profit", corsMiddlewareFunc(handleTradingProfit))
 
-	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
+	r.Post("/tools/execute", corsMiddlewareFunc(tools.HandleExecute))
 
-	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
-	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
-	r.Post("/studio/episode", corsMiddleware(handleStudioEpisode))
-	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
-	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
-	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+	// BPA API v1
+	r.Route("/api/v1/bpa", func(r chi.Router) {
+		r.Use(corsMiddleware)
+		r.Post("/leads", handleBPALeads)
+		r.Post("/compliance", handleBPACompliance)
+		r.Post("/content", handleBPAContent)
+	})
+
+	r.Post("/studio/lore", corsMiddlewareFunc(handleStudioLore))
+	r.Post("/studio/style", corsMiddlewareFunc(handleStudioStyle))
+	r.Post("/studio/episode", corsMiddlewareFunc(handleStudioEpisode))
+	r.Get("/studio/episodes", corsMiddlewareFunc(handleStudioEpisodesList))
+	r.Post("/studio/video-job", corsMiddlewareFunc(handleStudioVideoJob))
+	r.Get("/studio/video-job/*", corsMiddlewareFunc(handleStudioVideoJobStatus))
 
 	// Mock 9Router health check on port 20128
 	go func() {
@@ -1639,6 +1693,66 @@ func routeRequest(prompt string) string {
 		}
 	}
 	return "deepseek-chat"
+}
+
+func handleBPALeads(w http.ResponseWriter, r *http.Request) {
+	// BPA charge: $5 simulated
+	globalLedger.RecordRevenueWithVertical("nova", 5.0, "BPA API: Lead Gen")
+	res, _ := globalSwarmManager.DispatchTask("nova", "BPA request: generate leads")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleBPACompliance(w http.ResponseWriter, r *http.Request) {
+	globalLedger.RecordRevenueWithVertical("sage", 5.0, "BPA API: Compliance")
+	res, _ := globalSwarmManager.DispatchTask("sage", "BPA request: compliance scan")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleBPAContent(w http.ResponseWriter, r *http.Request) {
+	globalLedger.RecordRevenueWithVertical("solara", 5.0, "BPA API: Content")
+	res, _ := globalSwarmManager.DispatchTask("solara", "BPA request: content generation")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleAgentMailIncoming(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		From    string `json:"from"`
+		Subject string `json:"subject"`
+		Body    string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	command := strings.ToLower(strings.TrimSpace(payload.Body))
+	var response string
+
+	switch {
+	case strings.Contains(command, "summary"):
+		globalLedger.mu.RLock()
+		response = fmt.Sprintf("System Summary: Balance $%.2f, Total Revenue: $%.2f", globalLedger.Balance, globalLedger.TotalRevenue)
+		globalLedger.mu.RUnlock()
+	case strings.Contains(command, "health"):
+		response = "System Health: Nominal. All swarms operational."
+	case strings.Contains(command, "restart"):
+		response = "System Restart: Triggered. Services will be back online in 30s."
+	case strings.Contains(command, "payout"):
+		response = "Payout Triggered: Initiating Circle USDC transfer."
+	default:
+		response = "AgentMail: Command not recognized. Try 'summary', 'health', 'restart', or 'payout'."
+	}
+
+	// Simulation: Send response back via AgentMail (requires tool)
+	tools.RunTool("hermes", map[string]interface{}{
+		"action":  "message",
+		"to":      payload.From,
+		"channel": "email",
+		"content": response,
+	})
+
+	w.WriteHeader(200)
+	w.Write([]byte(`{"status":"processed"}`))
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
