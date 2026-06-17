@@ -445,6 +445,8 @@ func main() {
 	r.Get("/events/stream", handleEventsStream)
 	r.HandleFunc("/ws", handleWS)
 	r.Post("/webhook/agentmail/incoming", handleIncomingEmail)
+	r.Post("/admin/trigger_affiliate_swarm", handleTriggerAffiliateSwarm)
+	r.Post("/admin/trigger_bounty_swarm", handleTriggerBountySwarm)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
 
 	r.Get("/grants/search", corsMiddleware(handleSearch))
@@ -1824,4 +1826,34 @@ func initiateAutonomousRecovery(service string) {
 
 	// Implementation would use flyctl or Render API to restart/redeploy
 	AddAuditEntry("recovery_initiated", map[string]interface{}{"service": service, "action": "restart_attempt"})
+}
+
+func handleTriggerAffiliateSwarm(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Manually triggering Affiliate Swarm...")
+	res, err := globalSwarmManager.DispatchTask("affiliate", "Find and promote new AI tools")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "affiliate swarm triggered",
+		"result": res,
+	})
+}
+
+func handleTriggerBountySwarm(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Manually triggering Bug Bounty Swarm...")
+	res, err := globalSwarmManager.DispatchTask("bounty", "Scan domains for vulnerabilities")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "bounty swarm triggered",
+		"result": res,
+	})
 }
