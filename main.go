@@ -448,6 +448,7 @@ func main() {
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
 	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
 	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
+	globalSwarmManager.Factories["repurpose"] = agents.RepurposeFactory
 
 	// Deploy all registered swarms on startup
 	for v := range globalSwarmManager.Factories {
@@ -501,8 +502,18 @@ func main() {
 		for {
 			log.Printf("[MetaSwarm] Discovering and installing new agent skills...")
 
-			// 1. Discover new skill
-			skillID := "autonomous_market_growth_v2"
+			// 1. Discover new skill via GitHub
+			reachRes := tools.RunTool("reach", map[string]interface{}{
+				"action":   "search",
+				"platform": "github",
+				"query":    "agent-skill SKILL.md",
+			})
+
+			skillID := "discovered_github_skill"
+			if reachRes.Success {
+				// Simulate finding a specific skill name from results
+				skillID = "verified_community_skill"
+			}
 
 			// 2. Scan with SkillSpector
 			scan := tools.RunTool("security", map[string]interface{}{"action": "scan", "skill_id": skillID})
@@ -517,6 +528,30 @@ func main() {
 				}
 			}
 			<-ticker.C
+		}
+	}()
+
+	// Customer Onboarding Loop (Simulated)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		for {
+			<-ticker.C
+			// Check for new active subscriptions
+			subMu.Lock()
+			for id, status := range subStore {
+				if status == "active" {
+					log.Printf("[Onboarding] Sending welcome sequence to customer %s...", id)
+					tools.RunTool("hermes", map[string]interface{}{
+						"action":  "message",
+						"to":      "customer@example.com",
+						"channel": "email",
+						"content": "Welcome to Koola10 BPA API! Your subscription " + id + " is now active. Docs: /bpa",
+					})
+					// Mark as onboarded in simulation
+					subStore[id] = "onboarded"
+				}
+			}
+			subMu.Unlock()
 		}
 	}()
 
@@ -553,6 +588,7 @@ func main() {
 	r.Get("/spatial", corsMiddlewareFunc(handleSpatial))
 	r.Get("/bpa", corsMiddlewareFunc(handleBPAHome))
 	r.Post("/bpa/subscribe", corsMiddlewareFunc(handleBPASubscribe))
+	r.Post("/bpa/pay-usdc", corsMiddlewareFunc(handleBPAPayUSDC))
 
 	r.Get("/health", corsMiddlewareFunc(handleHealth))
 	r.Get("/daily-report", corsMiddlewareFunc(handleDailyReport))
@@ -577,6 +613,7 @@ func main() {
 	r.Post("/ai/chat", corsMiddlewareFunc(handleAIChat))
 	r.Post("/ai/remember", corsMiddlewareFunc(handleAIRemember))
 	r.Get("/ai/recall", corsMiddlewareFunc(handleAIRecall))
+	r.Post("/agi/payout", corsMiddlewareFunc(handleAGIPayout))
 	r.Post("/ai/analyze-grant", corsMiddlewareFunc(handleAIAnalyzeGrant))
 
 	r.Get("/memory/meetings", corsMiddlewareFunc(handleMemoryMeetings))
@@ -596,6 +633,7 @@ func main() {
 	r.Post("/compliance/kill-switch", corsMiddlewareFunc(handleComplianceKillSwitch))
 	r.Post("/compliance/kill-switch/reset", corsMiddlewareFunc(handleComplianceKillSwitchReset))
 	r.Get("/compliance/usage", corsMiddlewareFunc(handleComplianceUsage))
+	r.Get("/admin/usage", corsMiddlewareFunc(handleAdminUsage))
 
 	r.Post("/economic/ledger/cost", corsMiddlewareFunc(handleEconomicLedgerCost))
 	r.Post("/economic/ledger/revenue", corsMiddlewareFunc(handleEconomicLedgerRevenue))
@@ -1435,6 +1473,34 @@ func handleAIRemember(w http.ResponseWriter, r *http.Request) {
 func handleAIRecall(w http.ResponseWriter, r *http.Request) {
 	k := r.URL.Query().Get("key"); json.NewEncoder(w).Encode(map[string]string{"key": k, "value": "test"})
 }
+
+func handleAGIPayout(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TargetAgent string  `json:"target_agent"`
+		Amount      float64 `json:"amount"`
+		Service     string  `json:"service"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	log.Printf("[A2A] Transferring %.2f USDC to %s for %s", req.Amount, req.TargetAgent, req.Service)
+
+	// Simulation: A2A transfer via Circle
+	res := tools.RunTool("defi", map[string]interface{}{
+		"action": "execute",
+		"strategy": "a2a-settlement",
+		"amount": req.Amount,
+	})
+
+	if res.Success {
+		globalLedger.RecordCost("agi", "a2a_settlement", req.Amount, "Paid agent "+req.TargetAgent+" for "+req.Service)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
 func handleAIAnalyzeGrant(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"eligibility_score": 85, "summary": "Grant analysis summary."}`))
 }
@@ -1501,6 +1567,25 @@ func handleComplianceKillSwitchReset(w http.ResponseWriter, r *http.Request) {
 }
 func handleComplianceUsage(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"total_tokens": 1000})
+}
+
+func handleAdminUsage(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+
+	usageByVertical := make(map[string]float64)
+	for _, t := range globalLedger.Transactions {
+		if t.Type == "cost" {
+			usageByVertical[t.Vertical] += t.Amount
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"costs_by_vertical": usageByVertical,
+		"total_costs":       globalLedger.TotalCosts,
+		"timestamp":         time.Now().Format(time.RFC3339),
+	})
 }
 func handleEconomicLedgerCost(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
@@ -1793,7 +1878,11 @@ func handlePetdex(w http.ResponseWriter, r *http.Request) {
 }
 
 func routeRequest(prompt string) string {
-	routing := tools.RunTool("9router", map[string]interface{}{"action": "route", "prompt": prompt})
+	priority := "high"
+	// Cost optimization: low priority for non-critical requests
+	if len(prompt) > 500 { priority = "low" }
+
+	routing := tools.RunTool("9router", map[string]interface{}{"action": "route", "prompt": prompt, "priority": priority})
 	if routing.Success {
 		if m, ok := routing.Data.(map[string]interface{})["model"].(string); ok {
 			return m
@@ -1935,6 +2024,31 @@ func handleSpatial(w http.ResponseWriter, r *http.Request) {
 func handleBPAHome(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(bpaHTML))
+}
+
+func handleBPAPayUSDC(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Amount float64 `json:"amount"`
+		From   string  `json:"from_wallet"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Simulation: USDC transfer via Circle tool
+	res := tools.RunTool("defi", map[string]interface{}{
+		"action":   "execute",
+		"strategy": "micro-payment",
+		"amount":   req.Amount,
+	})
+
+	if res.Success {
+		globalLedger.RecordRevenueWithVertical("bpa", req.Amount, "BPA USDC Payment from "+req.From)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
 }
 
 func handleBPASubscribe(w http.ResponseWriter, r *http.Request) {

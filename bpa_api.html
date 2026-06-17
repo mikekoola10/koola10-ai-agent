@@ -44,13 +44,34 @@
         </div>
 
         <div class="code-block">
-            curl -X POST https://koola10.fly.dev/api/leads \<br>
-            &nbsp;&nbsp;-H "Authorization: Bearer YOUR_TOKEN" \<br>
-            &nbsp;&nbsp;-d '{"industry":"AI"}'
+            <h3>API Documentation</h3>
+            <p><strong>Endpoint:</strong> POST /api/leads</p>
+            <p><strong>Auth:</strong> X-API-Key</p>
+            <pre>curl -X POST https://koola10.fly.dev/api/leads \
+  -H "X-API-Key: YOUR_TOKEN" \
+  -H "X-Subscription-ID: sub_XXXX" \
+  -d '{"industry":"AI"}'</pre>
+        </div>
+
+        <div class="tier-card" style="margin-top: 20px;">
+            <h3>PAY WITH USDC (CIRCLE)</h3>
+            <p>Instant activation for international customers.</p>
+            <input type="text" id="wallet" placeholder="Your Wallet Address" style="width: 80%; padding: 5px; margin-bottom: 10px;">
+            <button onclick="payUSDC()">PAY $1.00 USDC</button>
         </div>
     </div>
 
     <script>
+        async function payUSDC() {
+            const wallet = document.getElementById('wallet').value;
+            const res = await fetch('/bpa/pay-usdc', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({amount: 1.0, from_wallet: wallet})
+            }).then(r => r.json());
+            alert(res.output);
+        }
+
         async function subscribe(tier) {
             const res = await fetch('/bpa/subscribe', {
                 method: 'POST',

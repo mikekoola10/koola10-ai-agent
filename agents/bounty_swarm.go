@@ -23,9 +23,10 @@ func (a *BountyAgent) Run(task string) (interface{}, error) {
 
 	log.Printf("[BountyAgent] Running task: %s", task)
 
-	// 1. Use CUA to browse Bounty Platforms (Expansion: HackerOne, Bugcrowd)
+	// 1. Use CUA to browse Bounty Platforms (Expansion: HackerOne, Bugcrowd, Intigriti)
 	platform := "HackerOne"
 	if strings.Contains(task, "bugcrowd") { platform = "Bugcrowd" }
+	if strings.Contains(task, "intigriti") { platform = "Intigriti" }
 
 	cuaRes := tools.RunTool("cua", map[string]interface{}{
 		"action": "screenshot",
@@ -54,6 +55,7 @@ func (a *BountyAgent) Run(task string) (interface{}, error) {
 
 	submitURL := "https://hackerone.com/bugs/submit"
 	if platform == "Bugcrowd" { submitURL = "https://bugcrowd.com/submissions/new" }
+	if platform == "Intigriti" { submitURL = "https://app.intigriti.com/submit" }
 
 	submitData := map[string]interface{}{
 		"url": submitURL,

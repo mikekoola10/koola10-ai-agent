@@ -22,6 +22,7 @@ type SpecialistAgent interface {
 
 type SwarmManager struct {
 	Swarms map[string][]SpecialistAgent
+	SkillCache map[string]interface{}
 	Mu     sync.RWMutex
 
 	// Callbacks for logging to economic ledger and compliance audit
@@ -34,8 +35,9 @@ type SwarmManager struct {
 
 func NewSwarmManager() *SwarmManager {
 	return &SwarmManager{
-		Swarms:    make(map[string][]SpecialistAgent),
-		Factories: make(map[string]func() []SpecialistAgent),
+		Swarms:     make(map[string][]SpecialistAgent),
+		SkillCache: make(map[string]interface{}),
+		Factories:  make(map[string]func() []SpecialistAgent),
 	}
 }
 
