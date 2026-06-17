@@ -410,6 +410,7 @@ func main() {
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
+	r.Get("/petdex", corsMiddleware(handlePetdex))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
 
@@ -503,8 +504,17 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 
 	systemPrompt := "You are the Lorekeeper of the Koola10 cinematic universe. Answer questions about characters, magic systems, and universe rules. Magic is based on Emergent Resonance. Tone is gritty but hopeful. Main characters include Kaelen and Lyra."
 
+	// Integrated 9Router for token saving and model fallback
+	routing := tools.RunTool("9router", map[string]interface{}{"action": "route", "prompt": req.Question})
+	dsModel := "deepseek-chat"
+	if routing.Success {
+		if m, ok := routing.Data.(map[string]interface{})["model"].(string); ok {
+			dsModel = m
+		}
+	}
+
 	dsReq := map[string]interface{}{
-		"model": "deepseek-chat",
+		"model": dsModel,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": req.Question},
@@ -563,8 +573,17 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 
 	systemPrompt := "Generate Koola10 style rules (Boondocks + 4K realism) and convert the scene into an Emergent Video prompt. Return JSON with 'style_rules' and 'prompt'."
 
+	// Integrated 9Router for token saving and model fallback
+	routing := tools.RunTool("9router", map[string]interface{}{"action": "route", "prompt": req.Description})
+	dsModel := "deepseek-chat"
+	if routing.Success {
+		if m, ok := routing.Data.(map[string]interface{})["model"].(string); ok {
+			dsModel = m
+		}
+	}
+
 	dsReq := map[string]interface{}{
-		"model": "deepseek-chat",
+		"model": dsModel,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": req.Description},
@@ -1217,8 +1236,17 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "limited", 429)
 		return
 	}
+	// Integrated 9Router for token saving and model fallback
+	routing := tools.RunTool("9router", map[string]interface{}{"action": "route", "prompt": req.Prompt})
+	dsModel := "deepseek-chat"
+	if routing.Success {
+		if m, ok := routing.Data.(map[string]interface{})["model"].(string); ok {
+			dsModel = m
+		}
+	}
+
 	dsReq := map[string]interface{}{
-		"model": "deepseek-chat",
+		"model": dsModel,
 		"messages": []map[string]string{
 			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
 			{"role": "user", "content": req.Prompt},
@@ -1592,6 +1620,31 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Write([]byte("event: connected\ndata: {}\n\n"))
+}
+
+func handlePetdex(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+
+	// Petdex format for Agent Pet monitoring
+	status := map[string]interface{}{
+		"name":    "Koola10",
+		"version": "1.5.0",
+		"status":  "nominal",
+		"mood":    "productive",
+		"metrics": map[string]interface{}{
+			"balance":         globalLedger.Balance,
+			"roi":             0.0,
+			"tasks_completed": 42,
+		},
+		"inventory": []string{"Agent Reach", "CUA", "Agent Memory", "LazyCodex", "9Router"},
+	}
+	if globalLedger.TotalCosts > 0 {
+		status["metrics"].(map[string]interface{})["roi"] = globalLedger.TotalRevenue / globalLedger.TotalCosts
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
