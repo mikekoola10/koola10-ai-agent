@@ -343,28 +343,6 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // --- Main ---
 
 func main() {
-
-	// Autonomous Health Watchdog (Every 5 minutes)
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		for {
-			<-ticker.C
-			checkEcosystemHealth()
-		}
-	}()
-
-	// Daily Revenue Summary (8 AM UTC)
-	go func() {
-		for {
-			now := time.Now().UTC()
-			next := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, time.UTC)
-			if now.After(next) {
-				next = next.Add(24 * time.Hour)
-			}
-			time.Sleep(next.Sub(now))
-			sendDailyRevenueSummary()
-		}
-	}()
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
 	region = os.Getenv("FLY_REGION")
@@ -386,6 +364,28 @@ func main() {
 		for {
 			fundManager.PayFlyInvoice()
 			<-ticker.C
+		}
+	}()
+
+	// Autonomous Health Watchdog (Every 5 minutes)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		for {
+			<-ticker.C
+			checkEcosystemHealth()
+		}
+	}()
+
+	// Daily Revenue Summary (8 AM UTC)
+	go func() {
+		for {
+			now := time.Now().UTC()
+			next := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, time.UTC)
+			if now.After(next) {
+				next = next.Add(24 * time.Hour)
+			}
+			time.Sleep(next.Sub(now))
+			sendDailyRevenueSummary()
 		}
 	}()
 
@@ -1472,7 +1472,7 @@ func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
 		"solara":   "Solara reports 24 posts scheduled and 15% increase in engagement.",
 		"sage":     "Sage reports all systems SOC2 compliant; 1 minor GDPR advisory generated.",
 		"vale":     "Vale reports 5 competitor pricing shifts detected in the EMEA region.",
-		"trading":  "Trading Swarm (Sterling) reports consolidated P&L: +$1,240.50 today.",
+		"trading":  "Trading Swarm (Sterling) reports consolidated P&L: +,240.50 today.",
 		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
 	}
 	json.NewEncoder(w).Encode(report)
@@ -1659,10 +1659,17 @@ func sendDailyRevenueSummary() {
 	opsFund := rev * 0.3
 	spendable := rev * 0.7
 
-	body := fmt.Sprintf("Daily Revenue Summary\n\nTotal Revenue: $%.2f\nOperations Fund (30%%): $%.2f\nSpendable Balance (70%%): $%.2f\nCurrent Ledger Balance: $%.2f\n\nAll systems operational.", rev, opsFund, spendable, bal)
+	body := fmt.Sprintf(`
+Koola10 Daily Revenue Summary:
+- Total Revenue: $%.2f
+- Operations Fund (30%%): $%.2f
+- Spendable Balance (70%%): $%.2f
+- Current Ledger Balance: $%.2f
+- Date: %s
+
+All systems operational.`, rev, opsFund, spendable, bal, time.Now().Format("2006-01-02"))
 
 	payload := map[string]interface{}{
-		"action":  "send",
 		"to":      "mikekoola10@agentmail.to",
 		"subject": "Daily Revenue & Operations Summary",
 		"body":    body,

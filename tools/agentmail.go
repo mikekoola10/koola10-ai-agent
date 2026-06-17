@@ -19,17 +19,15 @@ func agentmailTool(payload map[string]interface{}) ToolResult {
 		return ToolResult{Success: false, Error: "AGENTMAIL_API_KEY not set"}
 	}
 
-	action, _ := payload["action"].(string)
-	if action != "send" {
-		return ToolResult{Success: false, Error: "Only 'send' action is supported"}
-	}
-
 	to, _ := payload["to"].(string)
 	subject, _ := payload["subject"].(string)
 	body, _ := payload["body"].(string)
+	if body == "" {
+		body, _ = payload["text"].(string)
+	}
 
 	if to == "" || subject == "" || body == "" {
-		return ToolResult{Success: false, Error: "Missing 'to', 'subject', or 'body'"}
+		return ToolResult{Success: false, Error: "Missing 'to', 'subject', or 'body/text'"}
 	}
 
 	inboxID := os.Getenv("AGENTMAIL_INBOX_ID")
@@ -67,4 +65,5 @@ func agentmailTool(payload map[string]interface{}) ToolResult {
 
 func init() {
 	RegisterTool("agentmail", agentmailTool)
+	RegisterTool("send_email", agentmailTool)
 }
