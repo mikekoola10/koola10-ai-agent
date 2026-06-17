@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"koola10/tools"
 )
@@ -23,10 +24,14 @@ func (a *AffiliateAgent) Run(task string) (interface{}, error) {
 	log.Printf("[AffiliateAgent] Running task: %s", task)
 
 	// 1. Use Agent Reach to find trending AI tools
+	platforms := []string{"twitter", "reddit", "github"}
+	targetPlatform := platforms[0]
+	if strings.Contains(task, "reddit") { targetPlatform = "reddit" }
+
 	reachRes := tools.RunTool("reach", map[string]interface{}{
 		"action":   "search",
-		"platform": "twitter",
-		"query":    "trending AI tools 2024 affiliate",
+		"platform": targetPlatform,
+		"query":    "trending AI tools 2024 affiliate " + task,
 	})
 	if !reachRes.Success {
 		return nil, fmt.Errorf("reach failed: %s", reachRes.Error)
@@ -36,7 +41,12 @@ func (a *AffiliateAgent) Run(task string) (interface{}, error) {
 	// In a real scenario, this would call handleAIChat or a similar internal helper
 	article := "Affiliate Article: Top trending AI tools including " + task + ". Buy now!"
 
-	// 3. Post to WordPress/Medium using browser-agent
+	// 3. Select Affiliate Network (Expansion: ShareASale, Impact)
+	network := "Amazon Associates"
+	if strings.Contains(task, "SaaS") { network = "Impact.com" }
+	if strings.Contains(task, "Hardware") { network = "ShareASale" }
+
+	// 4. Post to WordPress/Medium/Substack using browser-agent
 	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
 	if browserAgentURL == "" {
 		browserAgentURL = "http://localhost:8081" // Fallback
@@ -59,7 +69,7 @@ func (a *AffiliateAgent) Run(task string) (interface{}, error) {
 
 	return map[string]interface{}{
 		"status":  "success",
-		"message": "Affiliate article published and logged to ledger.",
+		"message": "Affiliate article published via " + network + " and logged to ledger.",
 		"revenue": 25.0, // Expected revenue for simulation
 	}, nil
 }

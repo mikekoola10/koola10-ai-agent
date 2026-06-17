@@ -6,7 +6,7 @@ import (
 
 func hermesTool(payload map[string]interface{}) ToolResult {
 	action, _ := payload["action"].(string)
-	channel, _ := payload["channel"].(string) // Telegram, Discord, Slack
+	channel, _ := payload["channel"].(string) // Telegram, Discord, Slack, Email
 
 	switch action {
 	case "message":

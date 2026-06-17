@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"koola10/tools"
 )
@@ -22,10 +23,14 @@ func (a *BountyAgent) Run(task string) (interface{}, error) {
 
 	log.Printf("[BountyAgent] Running task: %s", task)
 
-	// 1. Use CUA to browse HackerOne programs
+	// 1. Use CUA to browse Bounty Platforms (Expansion: HackerOne, Bugcrowd)
+	platform := "HackerOne"
+	if strings.Contains(task, "bugcrowd") { platform = "Bugcrowd" }
+
 	cuaRes := tools.RunTool("cua", map[string]interface{}{
 		"action": "screenshot",
 		"os":     "Linux",
+		"target": platform,
 	})
 	if !cuaRes.Success {
 		return nil, fmt.Errorf("CUA failed: %s", cuaRes.Error)
@@ -47,8 +52,11 @@ func (a *BountyAgent) Run(task string) (interface{}, error) {
 		browserAgentURL = "http://localhost:8081"
 	}
 
+	submitURL := "https://hackerone.com/bugs/submit"
+	if platform == "Bugcrowd" { submitURL = "https://bugcrowd.com/submissions/new" }
+
 	submitData := map[string]interface{}{
-		"url": "https://hackerone.com/bugs/submit",
+		"url": submitURL,
 		"form_data": map[string]string{
 			"vulnerability_title": "Automated Security Finding",
 			"report_body":        report,

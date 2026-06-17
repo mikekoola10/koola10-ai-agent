@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koola10 BPA API — Scalable Business Automation</title>
+    <style>
+        body { background: #000; color: #0f0; font-family: 'Courier New', Courier, monospace; padding: 40px; line-height: 1.6; }
+        .container { max-width: 800px; margin: 0 auto; border: 1px solid #0f0; padding: 30px; box-shadow: 0 0 15px #0f0; }
+        h1 { text-align: center; text-transform: uppercase; letter-spacing: 3px; }
+        .tier-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 30px; }
+        .tier-card { border: 1px solid #333; padding: 20px; text-align: center; background: #050505; }
+        .tier-card:hover { border-color: #0f0; }
+        .price { font-size: 1.5rem; margin: 10px 0; }
+        button { background: #0f0; color: #000; border: none; padding: 10px 20px; cursor: pointer; font-weight: bold; width: 100%; text-transform: uppercase; }
+        button:hover { background: #fff; }
+        .code-block { background: #111; padding: 15px; border-left: 3px solid #0f0; margin-top: 20px; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BPA_API_MARKETPLACE</h1>
+        <p>Direct access to the Koola10 swarm ecosystem. Automate leads, compliance, and content generation with zero overhead.</p>
+
+        <div class="tier-grid">
+            <div class="tier-card">
+                <h3>STARTER</h3>
+                <p class="price">$49/mo</p>
+                <p>100 Calls/mo</p>
+                <button onclick="subscribe('starter')">SUBSCRIBE</button>
+            </div>
+            <div class="tier-card">
+                <h3>PROFESSIONAL</h3>
+                <p class="price">$199/mo</p>
+                <p>1,000 Calls/mo</p>
+                <button onclick="subscribe('pro')">SUBSCRIBE</button>
+            </div>
+            <div class="tier-card">
+                <h3>ENTERPRISE</h3>
+                <p class="price">$999/mo</p>
+                <p>Unlimited</p>
+                <button onclick="subscribe('enterprise')">SUBSCRIBE</button>
+            </div>
+        </div>
+
+        <div class="code-block">
+            curl -X POST https://koola10.fly.dev/api/leads \<br>
+            &nbsp;&nbsp;-H "Authorization: Bearer YOUR_TOKEN" \<br>
+            &nbsp;&nbsp;-d '{"industry":"AI"}'
+        </div>
+    </div>
+
+    <script>
+        async function subscribe(tier) {
+            const res = await fetch('/bpa/subscribe', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({tier: tier, email: 'customer@example.com'})
+            }).then(r => r.json());
+
+            if (res.url) {
+                window.location.href = res.url;
+            } else {
+                alert('Checkout failed: ' + res.error);
+            }
+        }
+    </script>
+</body>
+</html>

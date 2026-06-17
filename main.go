@@ -327,6 +327,9 @@ var (
 
 	//go:embed spatial_cmd.html
 	spatialHTML string
+
+	//go:embed bpa_api.html
+	bpaHTML string
 )
 
 // --- Middleware ---
@@ -347,12 +350,33 @@ func corsMiddlewareFunc(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 		if r.Method == "OPTIONS" {
 			return
 		}
 		next(w, r)
 	}
+}
+
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		adminToken := os.Getenv("ADMIN_TOKEN")
+		if adminToken == "" { adminToken = "koola10-dev-token" }
+
+		apiKey := r.Header.Get("X-API-Key")
+		if apiKey == "" {
+			authHeader := r.Header.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				apiKey = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+		}
+
+		if apiKey != adminToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // --- Main ---
@@ -471,14 +495,27 @@ func main() {
 		}
 	}()
 
-	// Skill Auto-Update Loop
+	// Meta-Swarm: Autonomous Skill Expansion Loop
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		for {
-			log.Printf("[SkillUpdate] Scanning for new agent skills...")
-			// Simulate SkillSpector scan
-			tools.RunTool("security", map[string]interface{}{"action": "scan", "skill_id": "new_growth_skill"})
-			AddAuditEntry("skills_updated", map[string]interface{}{"count": 1})
+			log.Printf("[MetaSwarm] Discovering and installing new agent skills...")
+
+			// 1. Discover new skill
+			skillID := "autonomous_market_growth_v2"
+
+			// 2. Scan with SkillSpector
+			scan := tools.RunTool("security", map[string]interface{}{"action": "scan", "skill_id": skillID})
+
+			if scan.Success {
+				if m, ok := scan.Data.(map[string]interface{}); ok {
+					if m["status"] == "safe" {
+						log.Printf("[MetaSwarm] Skill %s verified safe. Installing...", skillID)
+						// 3. Register/Install (Simulated dynamic tool registration)
+						AddAuditEntry("skill_autoinstalled", map[string]interface{}{"skill_id": skillID})
+					}
+				}
+			}
 			<-ticker.C
 		}
 	}()
@@ -514,6 +551,8 @@ func main() {
 
 	r.Get("/", corsMiddlewareFunc(handleRoot))
 	r.Get("/spatial", corsMiddlewareFunc(handleSpatial))
+	r.Get("/bpa", corsMiddlewareFunc(handleBPAHome))
+	r.Post("/bpa/subscribe", corsMiddlewareFunc(handleBPASubscribe))
 
 	r.Get("/health", corsMiddlewareFunc(handleHealth))
 	r.Get("/daily-report", corsMiddlewareFunc(handleDailyReport))
@@ -532,7 +571,8 @@ func main() {
 
 	r.Post("/payment/create-checkout", corsMiddlewareFunc(handleCreateCheckout))
 	r.Post("/stripe/webhook", handleStripeWebhook)
-	r.Post("/webhook/agentmail/incoming", handleAgentMailIncoming)
+	r.With(authMiddleware).Post("/webhook/agentmail/incoming", handleAgentMailIncoming)
+	r.With(authMiddleware).Post("/api/voice/cmd", handleVoiceCommand)
 
 	r.Post("/ai/chat", corsMiddlewareFunc(handleAIChat))
 	r.Post("/ai/remember", corsMiddlewareFunc(handleAIRemember))
@@ -582,12 +622,13 @@ func main() {
 	r.Post("/tools/execute", corsMiddlewareFunc(tools.HandleExecute))
 
 	// BPA API v1 (Aliases for simpler access)
-	r.Post("/api/leads", corsMiddlewareFunc(handleBPALeads))
-	r.Post("/api/compliance", corsMiddlewareFunc(handleBPACompliance))
-	r.Post("/api/content", corsMiddlewareFunc(handleBPAContent))
+	r.With(authMiddleware).Post("/api/leads", handleBPALeads)
+	r.With(authMiddleware).Post("/api/compliance", handleBPACompliance)
+	r.With(authMiddleware).Post("/api/content", handleBPAContent)
 
 	r.Route("/api/v1/bpa", func(r chi.Router) {
 		r.Use(corsMiddleware)
+		r.Use(authMiddleware)
 		r.Post("/leads", handleBPALeads)
 		r.Post("/compliance", handleBPACompliance)
 		r.Post("/content", handleBPAContent)
@@ -1741,7 +1782,7 @@ func handlePetdex(w http.ResponseWriter, r *http.Request) {
 			"roi":             0.0,
 			"tasks_completed": 42,
 		},
-		"inventory": []string{"Agent Reach", "CUA", "Agent Memory", "LazyCodex", "9Router"},
+		"inventory": []string{"Agent Reach", "CUA", "Agent Memory", "LazyCodex", "9Router", "Affiliate Swarm", "Bounty Swarm", "DeFi Trading", "BPA API", "Hermes"},
 	}
 	if globalLedger.TotalCosts > 0 {
 		status["metrics"].(map[string]interface{})["roi"] = globalLedger.TotalRevenue / globalLedger.TotalCosts
@@ -1761,7 +1802,21 @@ func routeRequest(prompt string) string {
 	return "deepseek-chat"
 }
 
+func checkSubscription(r *http.Request) bool {
+	// Subscription verification (In dev mode, we look for a 'sub_test' header or active status in subStore)
+	if r.Header.Get("X-Subscription-ID") == "sub_test" { return true }
+
+	subMu.Lock()
+	defer subMu.Unlock()
+	for _, status := range subStore {
+		if status == "active" { return true }
+	}
+	return false
+}
+
 func handleBPALeads(w http.ResponseWriter, r *http.Request) {
+	if !checkSubscription(r) { http.Error(w, "subscription required", 402); return }
+
 	// BPA charge: $5 simulated
 	globalLedger.RecordRevenueWithVertical("nova", 5.0, "BPA API: Lead Gen")
 	res, _ := globalSwarmManager.DispatchTask("nova", "BPA request: generate leads")
@@ -1773,6 +1828,8 @@ func handleBPALeads(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleBPACompliance(w http.ResponseWriter, r *http.Request) {
+	if !checkSubscription(r) { http.Error(w, "subscription required", 402); return }
+
 	globalLedger.RecordRevenueWithVertical("sage", 5.0, "BPA API: Compliance")
 	res, _ := globalSwarmManager.DispatchTask("sage", "BPA request: compliance scan")
 	w.Header().Set("Content-Type", "application/json")
@@ -1783,6 +1840,8 @@ func handleBPACompliance(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleBPAContent(w http.ResponseWriter, r *http.Request) {
+	if !checkSubscription(r) { http.Error(w, "subscription required", 402); return }
+
 	globalLedger.RecordRevenueWithVertical("solara", 5.0, "BPA API: Content")
 	res, _ := globalSwarmManager.DispatchTask("solara", "BPA request: content generation")
 	w.Header().Set("Content-Type", "application/json")
@@ -1790,6 +1849,52 @@ func handleBPAContent(w http.ResponseWriter, r *http.Request) {
 		"status": "success",
 		"data":   res,
 	})
+}
+
+func handleVoiceCommand(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Transcript string `json:"transcript"`
+		User       string `json:"user"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	log.Printf("[Voice] Processing command from %s: %s", req.User, req.Transcript)
+
+	// Route voice command to AgentMail parser logic for consistency
+	response := processSystemCommand(req.Transcript, req.User)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"response": response,
+		"status":   "executed",
+	})
+}
+
+func processSystemCommand(body string, identity string) string {
+	command := strings.ToLower(strings.TrimSpace(body))
+
+	// Identity verification for sensitive operations
+	isAuthorized := identity == "mikekoola10@agentmail.to" || identity == "mike"
+
+	switch {
+	case strings.Contains(command, "summary"):
+		globalLedger.mu.RLock()
+		defer globalLedger.mu.RUnlock()
+		return fmt.Sprintf("System Summary: Balance $%.2f, Total Revenue: $%.2f", globalLedger.Balance, globalLedger.TotalRevenue)
+	case strings.Contains(command, "health"):
+		return "System Health: Nominal. All swarms operational."
+	case strings.Contains(command, "restart"):
+		if !isAuthorized { return "Error: Unauthorized identity for system restart." }
+		return "System Restart: Triggered. Services will be back online in 30s."
+	case strings.Contains(command, "payout"):
+		if !isAuthorized { return "Error: Unauthorized identity for payout." }
+		return "Payout Triggered: Initiating Circle USDC transfer."
+	default:
+		return "Koola10: Command not recognized. Try 'summary', 'health', 'restart', or 'payout'."
+	}
 }
 
 func handleAgentMailIncoming(w http.ResponseWriter, r *http.Request) {
@@ -1803,23 +1908,7 @@ func handleAgentMailIncoming(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	command := strings.ToLower(strings.TrimSpace(payload.Body))
-	var response string
-
-	switch {
-	case strings.Contains(command, "summary"):
-		globalLedger.mu.RLock()
-		response = fmt.Sprintf("System Summary: Balance $%.2f, Total Revenue: $%.2f", globalLedger.Balance, globalLedger.TotalRevenue)
-		globalLedger.mu.RUnlock()
-	case strings.Contains(command, "health"):
-		response = "System Health: Nominal. All swarms operational."
-	case strings.Contains(command, "restart"):
-		response = "System Restart: Triggered. Services will be back online in 30s."
-	case strings.Contains(command, "payout"):
-		response = "Payout Triggered: Initiating Circle USDC transfer."
-	default:
-		response = "AgentMail: Command not recognized. Try 'summary', 'health', 'restart', or 'payout'."
-	}
+	response := processSystemCommand(payload.Body, payload.From)
 
 	// Simulation: Send response back via AgentMail (requires tool)
 	tools.RunTool("hermes", map[string]interface{}{
@@ -1841,6 +1930,40 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 func handleSpatial(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(spatialHTML))
+}
+
+func handleBPAHome(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(bpaHTML))
+}
+
+func handleBPASubscribe(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Tier  string `json:"tier"`
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Simulation: Create Stripe Checkout Session via tool
+	res := tools.RunTool("stripe", map[string]interface{}{
+		"action":         "create_checkout_session",
+		"customer_email": req.Email,
+		"price_id":       "price_bpa_" + req.Tier,
+		"mode":           "subscription",
+	})
+
+	if !res.Success {
+		// Mock URL for simulation
+		json.NewEncoder(w).Encode(map[string]string{
+			"url": "https://checkout.stripe.com/pay/mock_bpa_" + req.Tier,
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(res.Data)
 }
 
 func generateID() string {
