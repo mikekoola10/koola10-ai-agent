@@ -6,7 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 )
+
+var emailClient = &http.Client{
+	Timeout: 15 * time.Second,
+}
 
 func agentmailTool(payload map[string]interface{}) ToolResult {
 	apiKey := os.Getenv("AGENTMAIL_API_KEY")
@@ -27,7 +32,6 @@ func agentmailTool(payload map[string]interface{}) ToolResult {
 		return ToolResult{Success: false, Error: "Missing 'to', 'subject', or 'body'"}
 	}
 
-	// Use inbox ID from env if available, otherwise fallback to the default
 	inboxID := os.Getenv("AGENTMAIL_INBOX_ID")
 	if inboxID == "" {
 		inboxID = "mikekoola10@agentmail.to"
@@ -48,7 +52,7 @@ func agentmailTool(payload map[string]interface{}) ToolResult {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := emailClient.Do(req)
 	if err != nil {
 		return ToolResult{Success: false, Error: fmt.Sprintf("request failed: %v", err)}
 	}
