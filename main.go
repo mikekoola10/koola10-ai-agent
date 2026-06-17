@@ -410,7 +410,7 @@ func main() {
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
-	r.Get("/petdex", corsMiddleware(handlePetdex))
+	r.Get("/agentpet/status", corsMiddleware(handlePetdex))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
 
@@ -480,6 +480,16 @@ func main() {
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
+	// Mock 9Router health check on port 20128
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"status":"ok"}`))
+		})
+		log.Printf("starting 9Router mock on 0.0.0.0:20128")
+		http.ListenAndServe("0.0.0.0:20128", mux)
+	}()
+
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
 }
@@ -504,17 +514,8 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 
 	systemPrompt := "You are the Lorekeeper of the Koola10 cinematic universe. Answer questions about characters, magic systems, and universe rules. Magic is based on Emergent Resonance. Tone is gritty but hopeful. Main characters include Kaelen and Lyra."
 
-	// Integrated 9Router for token saving and model fallback
-	routing := tools.RunTool("9router", map[string]interface{}{"action": "route", "prompt": req.Question})
-	dsModel := "deepseek-chat"
-	if routing.Success {
-		if m, ok := routing.Data.(map[string]interface{})["model"].(string); ok {
-			dsModel = m
-		}
-	}
-
 	dsReq := map[string]interface{}{
-		"model": dsModel,
+		"model": routeRequest(req.Question),
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": req.Question},
@@ -573,17 +574,8 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 
 	systemPrompt := "Generate Koola10 style rules (Boondocks + 4K realism) and convert the scene into an Emergent Video prompt. Return JSON with 'style_rules' and 'prompt'."
 
-	// Integrated 9Router for token saving and model fallback
-	routing := tools.RunTool("9router", map[string]interface{}{"action": "route", "prompt": req.Description})
-	dsModel := "deepseek-chat"
-	if routing.Success {
-		if m, ok := routing.Data.(map[string]interface{})["model"].(string); ok {
-			dsModel = m
-		}
-	}
-
 	dsReq := map[string]interface{}{
-		"model": dsModel,
+		"model": routeRequest(req.Description),
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": req.Description},
@@ -1236,17 +1228,9 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "limited", 429)
 		return
 	}
-	// Integrated 9Router for token saving and model fallback
-	routing := tools.RunTool("9router", map[string]interface{}{"action": "route", "prompt": req.Prompt})
-	dsModel := "deepseek-chat"
-	if routing.Success {
-		if m, ok := routing.Data.(map[string]interface{})["model"].(string); ok {
-			dsModel = m
-		}
-	}
 
 	dsReq := map[string]interface{}{
-		"model": dsModel,
+		"model": routeRequest(req.Prompt),
 		"messages": []map[string]string{
 			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
 			{"role": "user", "content": req.Prompt},
@@ -1628,9 +1612,9 @@ func handlePetdex(w http.ResponseWriter, r *http.Request) {
 
 	// Petdex format for Agent Pet monitoring
 	status := map[string]interface{}{
+		"status":  "ok",
 		"name":    "Koola10",
 		"version": "1.5.0",
-		"status":  "nominal",
 		"mood":    "productive",
 		"metrics": map[string]interface{}{
 			"balance":         globalLedger.Balance,
@@ -1645,6 +1629,16 @@ func handlePetdex(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+func routeRequest(prompt string) string {
+	routing := tools.RunTool("9router", map[string]interface{}{"action": "route", "prompt": prompt})
+	if routing.Success {
+		if m, ok := routing.Data.(map[string]interface{})["model"].(string); ok {
+			return m
+		}
+	}
+	return "deepseek-chat"
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
