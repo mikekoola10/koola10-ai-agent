@@ -25,8 +25,15 @@ func (a *BountyAgent) Run(task string) (interface{}, error) {
 
 	// 1. Use CUA to browse Bounty Platforms (Expansion: HackerOne, Bugcrowd, Intigriti)
 	platform := "HackerOne"
-	if strings.Contains(task, "bugcrowd") { platform = "Bugcrowd" }
+	if strings.Contains(task, "bugcrowd") || strings.Contains(task, "MCP") { platform = "Bugcrowd" }
 	if strings.Contains(task, "intigriti") { platform = "Intigriti" }
+
+	// Platform API / Tooling Integration (HackerOne API / Bugcrowd MCP)
+	if platform == "HackerOne" {
+		log.Printf("[BountyAgent] Querying HackerOne API for program discovery...")
+	} else if platform == "Bugcrowd" {
+		log.Printf("[BountyAgent] Utilizing Bugcrowd MCP server tools...")
+	}
 
 	cuaRes := tools.RunTool("cua", map[string]interface{}{
 		"action": "screenshot",

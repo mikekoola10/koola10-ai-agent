@@ -41,12 +41,17 @@ func (a *AffiliateAgent) Run(task string) (interface{}, error) {
 	// In a real scenario, this would call handleAIChat or a similar internal helper
 	article := "Affiliate Article: Top trending AI tools including " + task + ". Buy now!"
 
-	// 3. Select Affiliate Network (Expansion: ShareASale, Impact, CJ, Rakuten)
+	// 3. Select Affiliate Network (Expansion: CJ, Rakuten, Impact, ShareASale)
 	network := "Amazon Associates"
 	if strings.Contains(task, "SaaS") || strings.Contains(task, "Impact") { network = "Impact.com" }
 	if strings.Contains(task, "Hardware") || strings.Contains(task, "ShareASale") { network = "ShareASale" }
-	if strings.Contains(task, "Enterprise") { network = "Commission Junction" }
-	if strings.Contains(task, "Consumer") { network = "Rakuten Advertising" }
+	if strings.Contains(task, "Enterprise") || strings.Contains(task, "CJ") { network = "Commission Junction" }
+	if strings.Contains(task, "Consumer") || strings.Contains(task, "Rakuten") { network = "Rakuten Advertising" }
+
+	// CJ/Rakuten API Simulation
+	if network == "Commission Junction" || network == "Rakuten Advertising" {
+		log.Printf("[AffiliateAgent] Calling %s API for advertiser data...", network)
+	}
 
 	// 4. Post to WordPress/Medium/Substack using browser-agent
 	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
