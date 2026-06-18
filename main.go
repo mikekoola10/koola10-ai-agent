@@ -717,7 +717,7 @@ func main() {
 	r.Get("/health", corsMiddlewareFunc(handleHealth))
 	r.Get("/daily-report", corsMiddlewareFunc(handleDailyReport))
 	r.Get("/agentpet/status", corsMiddlewareFunc(handlePetdex))
-	r.Get("/monitor", corsMiddlewareFunc(handleMonitorStatus))
+	r.Get("/monitor", handleMonitorStatus)
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddlewareFunc(handleCollaborate))
 
