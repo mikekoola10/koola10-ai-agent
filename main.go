@@ -572,6 +572,28 @@ func main() {
 		}
 	}()
 
+	// 3-Day Progress Reporting Loop
+	go func() {
+		ticker := time.NewTicker(72 * time.Hour)
+		for {
+			<-ticker.C
+			log.Printf("[Reporting] Generating 3-day progress report...")
+			globalLedger.mu.RLock()
+			roi := 0.0
+			if globalLedger.TotalCosts > 0 { roi = globalLedger.TotalRevenue / globalLedger.TotalCosts }
+			content := fmt.Sprintf("Koola10 Phase 7 Progress Report\nRevenue: $%.2f\nCosts: $%.2f\nROI: %.2fx\nSystems: Nominal",
+				globalLedger.TotalRevenue, globalLedger.TotalCosts, roi)
+			globalLedger.mu.RUnlock()
+
+			tools.RunTool("hermes", map[string]interface{}{
+				"action": "message",
+				"to": "mikekoola10@agentmail.to",
+				"channel": "email",
+				"content": content,
+			})
+		}
+	}()
+
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
 	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory
