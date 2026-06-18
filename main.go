@@ -341,7 +341,7 @@ var (
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", "https://koola10.fly.dev")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == "OPTIONS" {
@@ -353,7 +353,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 func corsMiddlewareFunc(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", "https://koola10.fly.dev")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 		if r.Method == "OPTIONS" {
@@ -366,7 +366,10 @@ func corsMiddlewareFunc(next http.HandlerFunc) http.HandlerFunc {
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		adminToken := os.Getenv("ADMIN_TOKEN")
-		if adminToken == "" { adminToken = "koola10-dev-token" }
+		if adminToken == "" {
+			http.Error(w, "system misconfigured: ADMIN_TOKEN missing", http.StatusInternalServerError)
+			return
+		}
 
 		apiKey := r.Header.Get("X-API-Key")
 		if apiKey == "" {
@@ -404,6 +407,11 @@ func main() {
 
 	// Automated invoice payment check (every 24h)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[Recover] Fly invoice loop panicked: %v", r)
+			}
+		}()
 		ticker := time.NewTicker(24 * time.Hour)
 		for {
 			fundManager.PayFlyInvoice()
@@ -413,6 +421,11 @@ func main() {
 
 	// E2E Watchdog & Self-Healing Loop
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[Recover] Watchdog loop panicked: %v", r)
+			}
+		}()
 		ticker := time.NewTicker(10 * time.Minute)
 		for {
 			<-ticker.C
@@ -454,6 +467,8 @@ func main() {
 	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
 	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
 	globalSwarmManager.Factories["repurpose"] = agents.RepurposeFactory
+	globalSwarmManager.Factories["saas"] = agents.SaasFactory
+	globalSwarmManager.Factories["influence"] = agents.InfluenceFactory
 
 	// Deploy all registered swarms on startup
 	for v := range globalSwarmManager.Factories {
@@ -462,6 +477,11 @@ func main() {
 
 	// Revenue Generation Loop
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[Recover] Revenue loop panicked: %v", r)
+			}
+		}()
 		// Wait for system stabilization
 		time.Sleep(30 * time.Second)
 
@@ -520,6 +540,11 @@ func main() {
 
 	// Meta-Swarm: Autonomous Business Management Loop
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[Recover] Meta-Swarm loop panicked: %v", r)
+			}
+		}()
 		ticker := time.NewTicker(12 * time.Hour)
 		for {
 			log.Printf("[MetaSwarm] Analyzing system performance and market demand...")
@@ -673,6 +698,7 @@ func main() {
 	r.Post("/ai/remember", corsMiddlewareFunc(handleAIRemember))
 	r.Get("/ai/recall", corsMiddlewareFunc(handleAIRecall))
 	r.Post("/agi/payout", corsMiddlewareFunc(handleAGIPayout))
+	r.Get("/agi/marketplace", corsMiddlewareFunc(handleAGIMarketplace))
 	r.Post("/ai/analyze-grant", corsMiddlewareFunc(handleAIAnalyzeGrant))
 
 	r.Get("/memory/meetings", corsMiddlewareFunc(handleMemoryMeetings))
@@ -1589,6 +1615,28 @@ func handleAIRemember(w http.ResponseWriter, r *http.Request) {
 }
 func handleAIRecall(w http.ResponseWriter, r *http.Request) {
 	k := r.URL.Query().Get("key"); json.NewEncoder(w).Encode(map[string]string{"key": k, "value": "test"})
+}
+
+func handleAGIMarketplace(w http.ResponseWriter, r *http.Request) {
+	globalSwarmManager.Mu.RLock()
+	defer globalSwarmManager.Mu.RUnlock()
+
+	skills := make([]map[string]interface{}, 0)
+	for vertical := range globalSwarmManager.Factories {
+		skills = append(skills, map[string]interface{}{
+			"vertical": vertical,
+			"price_per_task": 2.50, // Standard A2A rate
+			"currency": "USDC",
+			"status": "available",
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"marketplace_id": "koola10-global",
+		"skills":         skills,
+		"settlement":     "circle-usdc-bridge-v1",
+	})
 }
 
 func handleAGIPayout(w http.ResponseWriter, r *http.Request) {
