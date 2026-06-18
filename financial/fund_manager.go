@@ -74,11 +74,12 @@ func (fm *FundManager) save() {
 func (fm *FundManager) RouteRevenue(amount float64, source string) {
 	fm.mu.Lock()
 
+	// Phase 10: 30% ops, 70% reinvestment
 	opAmount := amount * 0.30
-	glAmount := amount * 0.70
+	reinvestAmount := amount * 0.70
 
 	fm.Balance += opAmount
-	fm.TotalEarned += opAmount
+	fm.TotalEarned += amount
 
 	fm.Transactions = append(fm.Transactions, Transaction{
 		Timestamp:   time.Now(),
@@ -87,12 +88,71 @@ func (fm *FundManager) RouteRevenue(amount float64, source string) {
 		Type:        "revenue_split",
 		Description: fmt.Sprintf("30%% split to operational fund from %s (Total: %.2f)", source, amount),
 	})
+
+	fm.Transactions = append(fm.Transactions, Transaction{
+		Timestamp:   time.Now(),
+		Amount:      reinvestAmount,
+		Source:      source,
+		Type:        "reinvestment",
+		Description: fmt.Sprintf("70%% split to reinvestment pool from %s", source),
+	})
 	fm.save()
 	fm.mu.Unlock()
 
 	if fm.ledger != nil {
-		fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
+		fm.ledger.RecordRevenue(reinvestAmount, fmt.Sprintf("70%% split from %s", source))
 	}
+}
+
+func (fm *FundManager) FundNewVenture(vertical string, initialCapital float64) error {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+
+	if fm.Balance < initialCapital {
+		return fmt.Errorf("insufficient operational fund for new venture: %.2f", initialCapital)
+	}
+
+	fm.Balance -= initialCapital
+	fm.TotalSpent += initialCapital
+	fm.Transactions = append(fm.Transactions, Transaction{
+		Timestamp:   time.Now(),
+		Amount:      initialCapital,
+		Source:      "self-funding",
+		Type:        "expense",
+		Description: fmt.Sprintf("Funded new %s venture from surplus revenue", vertical),
+	})
+	fm.save()
+	return nil
+}
+
+type TaxReport struct {
+	Quarter      int       `json:"quarter"`
+	Year         int       `json:"year"`
+	TotalRevenue float64   `json:"total_revenue"`
+	TotalExpense float64   `json:"total_expense"`
+	NetProfit    float64   `json:"net_profit"`
+	TaxEstimated float64   `json:"tax_estimated"`
+	GeneratedAt  time.Time `json:"generated_at"`
+}
+
+func (fm *FundManager) GenerateQuarterlyTaxReport() TaxReport {
+	fm.mu.RLock()
+	defer fm.mu.RUnlock()
+
+	now := time.Now()
+	quarter := (int(now.Month())-1)/3 + 1
+
+	report := TaxReport{
+		Quarter:      quarter,
+		Year:         now.Year(),
+		TotalRevenue: fm.TotalEarned,
+		TotalExpense: fm.TotalSpent,
+		NetProfit:    fm.TotalEarned - fm.TotalSpent,
+		GeneratedAt:  now,
+	}
+	report.TaxEstimated = report.NetProfit * 0.15 // Nominal 15% rate for agents
+
+	return report
 }
 
 func (fm *FundManager) CoverStripeFees(transactionAmount float64) {
