@@ -16,7 +16,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -278,7 +280,9 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	alertTrackerMu sync.Mutex
 
+	alertTracker   = make(map[string]time.Time) // key -> last sent time
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
 	memoryPath     = "/data/memory.json"
@@ -367,6 +371,15 @@ func main() {
 		}
 	}()
 
+	// Health Swarm Background Scheduler (every 5 minutes)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		for {
+			<-ticker.C
+			runHealthChecks()
+		}
+	}()
+
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
@@ -376,6 +389,7 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["health"] = agents.HealthSwarmFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -421,6 +435,8 @@ func main() {
 	r.Post("/grants/update-status", corsMiddleware(handleUpdateStatus))
 	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
 	r.Post("/grants/check-status", corsMiddleware(handleCheckStatus))
+
+	r.Post("/webhook/agentmail/incoming", corsMiddleware(handleAgentMailIncoming))
 
 	r.Post("/payment/create-checkout", corsMiddleware(handleCreateCheckout))
 	r.Post("/stripe/webhook", handleStripeWebhook)
@@ -478,6 +494,15 @@ func main() {
 	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+
+	r.Post("/health/inventory", corsMiddleware(handleHealthInventoryUpdate))
+	r.Get("/health/inventory", corsMiddleware(handleHealthInventoryList))
+	r.Post("/health/schedule", corsMiddleware(handleHealthScheduleUpdate))
+	r.Get("/health/schedule", corsMiddleware(handleHealthScheduleList))
+	r.Post("/health/videos", corsMiddleware(handleHealthVideosUpdate))
+	r.Get("/health/videos", corsMiddleware(handleHealthVideosList))
+	r.Post("/health/journal", corsMiddleware(handleHealthJournalUpdate))
+	r.Get("/health/journal", corsMiddleware(handleHealthJournalList))
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -683,7 +708,7 @@ func startHeartbeat() {
 		// We use a separate key for each node's availability to avoid overwriting the whole hash TTL
 		redisClient.Set(ctx, "swarm:node:"+nodeID, jsonNode, 30*time.Second)
 		redisClient.HSet(ctx, "swarm:nodes", nodeID, jsonNode)
-		time.Sleep(15 * time.Second)
+		time.Sleep(15 * time.Minute)
 	}
 }
 
@@ -1601,4 +1626,293 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+// --- Health Swarm Handlers ---
+
+func handleHealthInventoryUpdate(w http.ResponseWriter, r *http.Request) {
+	var item agents.InventoryItem
+	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	items, _ := agents.LoadInventory()
+	found := false
+	for i, it := range items {
+		if it.Name == item.Name {
+			items[i] = item
+			found = true
+			break
+		}
+	}
+	if !found {
+		items = append(items, item)
+	}
+	agents.SaveInventory(items)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(item)
+}
+
+func handleHealthInventoryList(w http.ResponseWriter, r *http.Request) {
+	items, _ := agents.LoadInventory()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func handleHealthScheduleUpdate(w http.ResponseWriter, r *http.Request) {
+	var sched agents.HealthSchedule
+	if err := json.NewDecoder(r.Body).Decode(&sched); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	schedules, _ := agents.LoadSchedules()
+	found := false
+	for i, s := range schedules {
+		if s.Name == sched.Name {
+			schedules[i] = sched
+			found = true
+			break
+		}
+	}
+	if !found {
+		schedules = append(schedules, sched)
+	}
+	agents.SaveSchedules(schedules)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(sched)
+}
+
+func handleHealthScheduleList(w http.ResponseWriter, r *http.Request) {
+	schedules, _ := agents.LoadSchedules()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(schedules)
+}
+
+func handleHealthVideosUpdate(w http.ResponseWriter, r *http.Request) {
+	var video agents.VideoLink
+	if err := json.NewDecoder(r.Body).Decode(&video); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Auto-summary via DeepSeek
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey != "" && (video.Title == "" || video.Summary == "") {
+		prompt := fmt.Sprintf("Summarize this health-related video and provide a title. URL: %s", video.URL)
+		dsReq := map[string]interface{}{
+			"model": "deepseek-chat",
+			"messages": []map[string]string{
+				{"role": "system", "content": "You are a health librarian. Provide a concise title and summary in JSON format with keys 'title' and 'summary'."},
+				{"role": "user", "content": prompt},
+			},
+			"response_format": map[string]string{"type": "json_object"},
+		}
+		dsBody, _ := json.Marshal(dsReq)
+		hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+		hReq.Header.Set("Authorization", "Bearer "+apiKey)
+		hReq.Header.Set("Content-Type", "application/json")
+		resp, err := (&http.Client{}).Do(hReq)
+		if err == nil {
+			defer resp.Body.Close()
+			var dsRes struct {
+				Choices []struct {
+					Message struct {
+						Content string
+					}
+				}
+				Usage struct {
+					TotalTokens int
+				}
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&dsRes); err == nil {
+				var res map[string]string
+				json.Unmarshal([]byte(dsRes.Choices[0].Message.Content), &res)
+				if video.Title == "" { video.Title = res["title"] }
+				if video.Summary == "" { video.Summary = res["summary"] }
+				LogUsage(dsRes.Usage.TotalTokens)
+				globalLedger.RecordCost("health", "ai_inference", float64(dsRes.Usage.TotalTokens)*0.000002, "Video summarization")
+			}
+		}
+	}
+
+	if video.DateAdded.IsZero() {
+		video.DateAdded = time.Now()
+	}
+
+	videos, _ := agents.LoadVideos()
+	videos = append(videos, video)
+	agents.SaveVideos(videos)
+
+	// Semantic indexing
+	if video.Summary != "" {
+		globalSemantic.AddItem(fmt.Sprintf("Video: %s. Summary: %s", video.Title, video.Summary), video.URL)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(video)
+}
+
+func handleHealthVideosList(w http.ResponseWriter, r *http.Request) {
+	videos, _ := agents.LoadVideos()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(videos)
+}
+
+func handleHealthJournalUpdate(w http.ResponseWriter, r *http.Request) {
+	var entry agents.HealthJournalEntry
+	if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	if entry.ID == "" { entry.ID = generateID() }
+	if entry.Timestamp.IsZero() { entry.Timestamp = time.Now() }
+
+	entries, _ := agents.LoadJournal()
+	entries = append(entries, entry)
+	agents.SaveJournal(entries)
+
+	// Semantic indexing
+	globalSemantic.AddItem(fmt.Sprintf("Health Journal: %s (Mood: %s)", entry.Content, entry.Mood), entry.ID)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(entry)
+}
+
+func handleHealthJournalList(w http.ResponseWriter, r *http.Request) {
+	entries, _ := agents.LoadJournal()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entries)
+}
+
+func handleAgentMailIncoming(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		From    string `json:"from"`
+		Subject string `json:"subject"`
+		Body    string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	re := regexp.MustCompile(`[^\s"']+|"([^"]*)"|'([^']*)'`)
+	matches := re.FindAllStringSubmatch(payload.Body, -1)
+	var args []string
+	for _, m := range matches {
+		if m[1] != "" {
+			args = append(args, m[1])
+		} else if m[2] != "" {
+			args = append(args, m[2])
+		} else {
+			args = append(args, m[0])
+		}
+	}
+
+	if len(args) < 2 {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	cmdType := strings.ToLower(args[0])
+	action := strings.ToLower(args[1])
+
+	switch cmdType {
+	case "inventory":
+		if action == "add" && len(args) >= 4 {
+			name := args[2]
+			qty, _ := strconv.Atoi(args[3])
+			threshold := 0
+			if len(args) >= 6 && strings.ToLower(args[4]) == "threshold" {
+				threshold, _ = strconv.Atoi(args[5])
+			}
+			items, _ := agents.LoadInventory()
+			items = append(items, agents.InventoryItem{Name: name, Quantity: qty, Threshold: threshold})
+			agents.SaveInventory(items)
+		}
+	case "schedule":
+		if action == "add" && len(args) >= 5 {
+			name := args[2]
+			time := args[3]
+			recurrence := args[4]
+			schedules, _ := agents.LoadSchedules()
+			schedules = append(schedules, agents.HealthSchedule{Name: name, Time: time, Recurrence: recurrence, Active: true})
+			agents.SaveSchedules(schedules)
+		}
+	case "video":
+		if action == "add" && len(args) >= 3 {
+			url := args[2]
+			video := agents.VideoLink{URL: url}
+			videos, _ := agents.LoadVideos()
+			videos = append(videos, video)
+			agents.SaveVideos(videos)
+		}
+	case "journal":
+		if action == "add" && len(args) >= 3 {
+			content := args[2]
+			mood := ""
+			if len(args) >= 5 && strings.ToLower(args[3]) == "mood" {
+				mood = args[4]
+			}
+			entries, _ := agents.LoadJournal()
+			entries = append(entries, agents.HealthJournalEntry{
+				ID:        generateID(),
+				Content:   content,
+				Mood:      mood,
+				Timestamp: time.Now(),
+			})
+			agents.SaveJournal(entries)
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func runHealthChecks() {
+	alertTrackerMu.Lock()
+	defer alertTrackerMu.Unlock()
+
+	// Inventory Check
+	items, _ := agents.LoadInventory()
+	for _, item := range items {
+		if item.Quantity < item.Threshold {
+			alertKey := "inventory_" + item.Name
+			if lastSent, ok := alertTracker[alertKey]; ok && time.Since(lastSent) < 12*time.Hour {
+				continue
+			}
+			tools.RunTool("agentmail", map[string]interface{}{
+				"action":  "send_email",
+				"to":      "mikekoola10@agentmail.to",
+				"subject": "Health Alert: Low Inventory",
+				"body":    fmt.Sprintf("Stock for %s is low: %d (Threshold: %d)", item.Name, item.Quantity, item.Threshold),
+			})
+			alertTracker[alertKey] = time.Now()
+		}
+	}
+
+	// Schedule Check
+	schedules, _ := agents.LoadSchedules()
+	now := time.Now()
+	for _, s := range schedules {
+		if !s.Active { continue }
+		// Parse s.Time (HH:MM)
+		var h, m int
+		fmt.Sscanf(s.Time, "%d:%d", &h, &m)
+		schedTime := time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location())
+
+		// If due within next hour
+		diff := schedTime.Sub(now)
+		if diff > 0 && diff < 1*time.Hour {
+			alertKey := "schedule_" + s.Name + "_" + s.Time
+			if lastSent, ok := alertTracker[alertKey]; ok && time.Since(lastSent) < 12*time.Hour {
+				continue
+			}
+			tools.RunTool("agentmail", map[string]interface{}{
+				"action":  "send_email",
+				"to":      "mikekoola10@agentmail.to",
+				"subject": "Health Reminder",
+				"body":    fmt.Sprintf("Reminder: %s is scheduled for %s", s.Name, s.Time),
+			})
+			alertTracker[alertKey] = time.Now()
+		}
+	}
 }
