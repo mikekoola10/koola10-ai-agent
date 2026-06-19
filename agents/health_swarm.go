@@ -22,10 +22,11 @@ type HealthSchedule struct {
 }
 
 type VideoLink struct {
-	URL       string    `json:"url"`
-	Title     string    `json:"title"`
-	Summary   string    `json:"summary"`
-	DateAdded time.Time `json:"date_added"`
+	URL         string       `json:"url"`
+	Title       string       `json:"title"`
+	Summary     string       `json:"summary"`
+	Ingredients []Supplement `json:"ingredients,omitempty"`
+	DateAdded   time.Time    `json:"date_added"`
 }
 
 type HealthJournalEntry struct {
@@ -33,6 +34,31 @@ type HealthJournalEntry struct {
 	Content   string    `json:"content"`
 	Mood      string    `json:"mood,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+type Supplement struct {
+	Name      string `json:"name"`
+	Dosage    string `json:"dosage"`
+	Frequency string `json:"frequency,omitempty"`
+}
+
+type HealthRoutine struct {
+	ID        string           `json:"id"`
+	Name      string           `json:"name"`
+	Items     []RoutineItem    `json:"items"`
+	CreatedAt time.Time        `json:"created_at"`
+}
+
+type RoutineItem struct {
+	Time       string `json:"time"`
+	Supplement string `json:"supplement"`
+	Dosage     string `json:"dosage"`
+}
+
+type HealthConflict struct {
+	Ingredient string   `json:"ingredient"`
+	MaxDose    string   `json:"max_dose"`
+	Conflicts  []string `json:"conflicts"` // Names of conflicting supplements/ingredients
 }
 
 type HealthAgent struct {
@@ -68,6 +94,8 @@ var (
 	schedulePath  = "/data/health_schedule.json"
 	videosPath    = "/data/health_videos.json"
 	journalPath   = "/data/health_journal.json"
+	routinePath   = "/data/health_routine.json"
+	conflictsPath = "/data/health_conflicts.json"
 	healthMu      sync.RWMutex
 )
 
@@ -169,4 +197,54 @@ func SaveJournal(items []HealthJournalEntry) error {
 		return err
 	}
 	return os.WriteFile(journalPath, data, 0644)
+}
+
+func LoadRoutine() (*HealthRoutine, error) {
+	healthMu.RLock()
+	defer healthMu.RUnlock()
+	data, err := os.ReadFile(routinePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &HealthRoutine{}, nil
+		}
+		return nil, err
+	}
+	var routine HealthRoutine
+	err = json.Unmarshal(data, &routine)
+	return &routine, err
+}
+
+func SaveRoutine(routine *HealthRoutine) error {
+	healthMu.Lock()
+	defer healthMu.Unlock()
+	data, err := json.MarshalIndent(routine, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(routinePath, data, 0644)
+}
+
+func LoadConflicts() ([]HealthConflict, error) {
+	healthMu.RLock()
+	defer healthMu.RUnlock()
+	data, err := os.ReadFile(conflictsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []HealthConflict{}, nil
+		}
+		return nil, err
+	}
+	var items []HealthConflict
+	err = json.Unmarshal(data, &items)
+	return items, err
+}
+
+func SaveConflicts(items []HealthConflict) error {
+	healthMu.Lock()
+	defer healthMu.Unlock()
+	data, err := json.MarshalIndent(items, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(conflictsPath, data, 0644)
 }

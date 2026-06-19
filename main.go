@@ -503,6 +503,10 @@ func main() {
 	r.Get("/health/videos", corsMiddleware(handleHealthVideosList))
 	r.Post("/health/journal", corsMiddleware(handleHealthJournalUpdate))
 	r.Get("/health/journal", corsMiddleware(handleHealthJournalList))
+	r.Post("/health/ingest-video", corsMiddleware(handleHealthIngestVideo))
+	r.Post("/health/purchase", corsMiddleware(handleHealthPurchase))
+	r.Post("/health/routine", corsMiddleware(handleHealthRoutineGenerate))
+	r.Get("/health/routine", corsMiddleware(handleHealthRoutineShow))
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -708,7 +712,7 @@ func startHeartbeat() {
 		// We use a separate key for each node's availability to avoid overwriting the whole hash TTL
 		redisClient.Set(ctx, "swarm:node:"+nodeID, jsonNode, 30*time.Second)
 		redisClient.HSet(ctx, "swarm:nodes", nodeID, jsonNode)
-		time.Sleep(15 * time.Minute)
+		time.Sleep(15 * time.Second)
 	}
 }
 
@@ -1333,6 +1337,49 @@ func handleComplianceAudit(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entries)
 }
+
+func handleHealthIngestVideo(w http.ResponseWriter, r *http.Request) {
+	var req struct { URL string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400); return
+	}
+	parser := &agents.VideoParserAgent{}
+	res, err := parser.Run(req.URL)
+	if err != nil {
+		http.Error(w, err.Error(), 500); return
+	}
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleHealthPurchase(w http.ResponseWriter, r *http.Request) {
+	var req struct { Item string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400); return
+	}
+	purchaser := &agents.HealthPurchaserAgent{}
+	res, err := purchaser.Run(req.Item)
+	if err != nil {
+		http.Error(w, err.Error(), 500); return
+	}
+	// Log cost
+	purchaseData := res.(map[string]interface{})
+	globalLedger.RecordCost("health", "supplement_purchase", purchaseData["cost"].(float64), "Purchased: "+req.Item)
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleHealthRoutineGenerate(w http.ResponseWriter, r *http.Request) {
+	planner := &agents.HealthRoutineAgent{}
+	res, err := planner.Run("generate")
+	if err != nil {
+		http.Error(w, err.Error(), 500); return
+	}
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleHealthRoutineShow(w http.ResponseWriter, r *http.Request) {
+	routine, _ := agents.LoadRoutine()
+	json.NewEncoder(w).Encode(routine)
+}
 func handleComplianceAuditVerify(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"valid": true})
 }
@@ -1342,7 +1389,24 @@ func handleComplianceApproval(w http.ResponseWriter, r *http.Request) {
 }
 func handleComplianceApprove(w http.ResponseWriter, r *http.Request) {
 	var req struct { ApprovalID string; Approver string }; json.NewDecoder(r.Body).Decode(&req)
-	approvalMu.Lock(); ap, ok := approvalStore[req.ApprovalID]; if ok { ap.Status = "approved" }; approvalMu.Unlock()
+	approvalMu.Lock()
+	ap, ok := approvalStore[req.ApprovalID]
+	if ok && ap.Status != "approved" {
+		ap.Status = "approved"
+		if ap.Action == "health_purchase" {
+			// Trigger the purchase agent
+			go func(appReq *ApprovalRequest) {
+				item := appReq.Details["item"].(string)
+				purchaser := &agents.HealthPurchaserAgent{}
+				res, err := purchaser.Run(item)
+				if err == nil {
+					purchaseData := res.(map[string]interface{})
+					globalLedger.RecordCost("health", "supplement_purchase", purchaseData["cost"].(float64), "Purchased: "+item)
+				}
+			}(ap)
+		}
+	}
+	approvalMu.Unlock()
 	json.NewEncoder(w).Encode(ap)
 }
 func handleComplianceKillSwitch(w http.ResponseWriter, r *http.Request) {
@@ -1861,6 +1925,43 @@ func handleAgentMailIncoming(w http.ResponseWriter, r *http.Request) {
 				Timestamp: time.Now(),
 			})
 			agents.SaveJournal(entries)
+		}
+	case "purchase":
+		if len(args) >= 2 {
+			item := args[1]
+			// Create approval request instead of immediate execution
+			details := map[string]interface{}{"item": item, "type": "health_purchase"}
+			req := &ApprovalRequest{
+				ID: generateID(),
+				Action: "health_purchase",
+				Details: details,
+				Status: "pending",
+				CreatedAt: time.Now().Format(time.RFC3339),
+			}
+			approvalMu.Lock()
+			approvalStore[req.ID] = req
+			approvalMu.Unlock()
+
+			tools.RunTool("agentmail", map[string]interface{}{
+				"action": "send_email",
+				"to": "mikekoola10@agentmail.to",
+				"subject": "Purchase Approval Required",
+				"body": fmt.Sprintf("Health Swarm wants to purchase: %s. Approval ID: %s. Reply with 'approve %s' to execute.", item, req.ID, req.ID),
+			})
+		}
+	case "routine":
+		if action == "generate" {
+			planner := &agents.HealthRoutineAgent{}
+			planner.Run("generate")
+		} else if action == "show" {
+			routine, _ := agents.LoadRoutine()
+			routineJSON, _ := json.MarshalIndent(routine, "", "  ")
+			tools.RunTool("agentmail", map[string]interface{}{
+				"action":  "send_email",
+				"to":      "mikekoola10@agentmail.to",
+				"subject": "Current Health Routine",
+				"body":    string(routineJSON),
+			})
 		}
 	}
 
