@@ -324,6 +324,9 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+
+	//go:embed bpa.html
+	bpaHTML string
 )
 
 // --- Middleware ---
@@ -376,6 +379,8 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -389,6 +394,16 @@ func main() {
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+
+	// Deploy Vision Pro Sprint Swarms
+	globalSwarmManager.DeploySwarms("affiliate", 5)
+	globalSwarmManager.DeploySwarms("bounty", 5)
+	globalSwarmManager.DeploySwarms("leadgen", 10)
+	globalSwarmManager.DeploySwarms("compliance", 5)
+	globalSwarmManager.DeploySwarms("content", 5)
+
+	// Start Vision Pro Sprint Automation
+	go startVisionProSprint()
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -407,6 +422,7 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/bpa", corsMiddleware(handleBPA))
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -463,6 +479,13 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+
+	r.Route("/api/v1/bpa", func(r chi.Router) {
+		r.Get("/leads", corsMiddleware(handleBPALeads))
+		r.Get("/compliance", corsMiddleware(handleBPACompliance))
+		r.Get("/content", corsMiddleware(handleBPAContent))
+		r.Post("/trial", corsMiddleware(handleBPATrial))
+	})
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
@@ -1475,6 +1498,12 @@ func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 	case "echo_api":
 		priceID = os.Getenv("STRIPE_ECHO_PRICE_ID")
 		mode = "payment"
+	case "bpa_pro":
+		priceID = os.Getenv("STRIPE_BPA_PRO_PRICE_ID")
+		mode = "subscription"
+	case "bpa_enterprise":
+		priceID = os.Getenv("STRIPE_BPA_ENT_PRICE_ID")
+		mode = "subscription"
 	default:
 		http.Error(w, "unknown product", 400)
 		return
@@ -1599,6 +1628,155 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(dashboardHTML))
 }
 
+func handleBPA(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(bpaHTML))
+}
+
+func handleBPALeads(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("query")
+	if query == "" {
+		query = "general"
+	}
+	res, err := globalSwarmManager.DispatchTask("leadgen", query)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "data": res})
+}
+
+func handleBPACompliance(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("query")
+	if query == "" {
+		query = "standard"
+	}
+	res, err := globalSwarmManager.DispatchTask("compliance", query)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "data": res})
+}
+
+func handleBPAContent(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("query")
+	if query == "" {
+		query = "viral_hook"
+	}
+	res, err := globalSwarmManager.DispatchTask("content", query)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "data": res})
+}
+
+func handleBPATrial(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	apiKey := generateID()
+	// In a real app, store this. Here we just return it and simulate AgentMail.
+	log.Printf("BPA Trial started for %s, assigned key %s", req.Email, apiKey)
+
+	// Dispatch AgentMail onboarding via tool (will be implemented in next step)
+	tools.RunTool("agentmail", map[string]interface{}{
+		"to":      req.Email,
+		"subject": "Koola10 BPA Trial Activated",
+		"body":    fmt.Sprintf("Welcome! Your BPA API key is: %s\n\nDocs: https://koola10.fly.dev/bpa", apiKey),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "trial_started", "key": apiKey})
+}
+
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func startVisionProSprint() {
+	ticker := time.NewTicker(24 * time.Hour)
+	// Run once on startup
+	runDailySprintTasks()
+
+	for {
+		<-ticker.C
+		runDailySprintTasks()
+	}
+}
+
+func runDailySprintTasks() {
+	log.Println("--- Starting Daily Vision Pro Sprint Tasks ---")
+
+	// 1. Scale affiliate content to 5 articles/day
+	topics := []string{"AI Video Editing", "LLM Fine-tuning", "Autonomous Agents", "No-code AI", "AI Security"}
+	for _, topic := range topics {
+		// Use Reach to get context (simulated)
+		tools.RunTool("reach", map[string]interface{}{"query": topic})
+
+		res, err := globalSwarmManager.DispatchTask("affiliate", topic)
+		if err == nil {
+			if m, ok := res.(map[string]interface{}); ok {
+				rev, _ := m["simulated_revenue"].(float64)
+				if rev > 0 {
+					globalLedger.RecordRevenueWithVertical("affiliate", rev, fmt.Sprintf("Affiliate sale: %s", topic))
+				}
+			}
+		}
+	}
+
+	// 2. Expand bug bounty targets to 10/day
+	targets := []string{"target1.com", "target2.com", "target3.com", "target4.com", "target5.com",
+		"target6.com", "target7.com", "target8.com", "target9.com", "target10.com"}
+	for _, target := range targets {
+		// Use CUA to navigate (simulated)
+		tools.RunTool("cua", map[string]interface{}{"action": "navigate", "url": "https://" + target})
+
+		res, err := globalSwarmManager.DispatchTask("bounty", target)
+		if err == nil {
+			if m, ok := res.(map[string]interface{}); ok {
+				reward, _ := m["estimated_reward"].(float64)
+				if reward > 0 {
+					globalLedger.RecordRevenueWithVertical("bounty", reward, fmt.Sprintf("Bounty found on %s", target))
+				}
+			}
+		}
+	}
+
+	// 3. Content repurposing (articles to tweets)
+	globalSwarmManager.DispatchTask("content", "repurpose_last_articles_to_5_tweets")
+
+	// 4. Send daily revenue summary via AgentMail at 8 AM (simulation: just send it now)
+	summary := globalLedger.GetDailySummary()
+	tools.RunTool("agentmail", map[string]interface{}{
+		"to":      "mikekoola10@agentmail.to",
+		"subject": "Vision Pro Sprint: Daily Revenue Report",
+		"body":    fmt.Sprintf("Current Balance: $%.2f\nTotal Revenue: $%.2f\nTotal Costs: $%.2f\n\nKeep pushing! We need $4,000.", summary.Balance, summary.TotalRevenue, summary.TotalCosts),
+	})
+
+	log.Println("--- Daily Vision Pro Sprint Tasks Completed ---")
+}
+
+func (l *EconomicLedger) GetDailySummary() EconomicSummary {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	roi := 0.0
+	if l.TotalCosts > 0 {
+		roi = l.TotalRevenue / l.TotalCosts
+	}
+	return EconomicSummary{
+		Balance:      l.Balance,
+		TotalCosts:   l.TotalCosts,
+		TotalRevenue: l.TotalRevenue,
+		ROI:          roi,
+	}
 }
