@@ -210,6 +210,12 @@ func (fm *FundManager) PayFlyInvoice() {
 	fm.save()
 }
 
+func (fm *FundManager) ProactiveReinvest(amount float64, confidence float64) {
+	if confidence > 0.8 {
+		fm.ReinvestSurplus(1000.0, 50.0)
+	}
+}
+
 func (fm *FundManager) ReinvestSurplus(threshold, percentage float64) {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()

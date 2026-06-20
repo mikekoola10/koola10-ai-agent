@@ -25,6 +25,7 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/mirror"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -305,6 +306,7 @@ var (
 	}
 
 	fundManager *financial.FundManager
+	apexMirror  *mirror.Mirror
 
 	globalSwarmManager = agents.NewSwarmManager()
 
@@ -357,6 +359,7 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	apexMirror = mirror.NewMirror("/data/apex_mirror.json")
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -370,6 +373,7 @@ func main() {
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
+	globalSwarmManager.Factories["health"] = agents.HealthSwarmFactory
 	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
 	globalSwarmManager.Factories["echo"] = agents.APIFactory
@@ -421,6 +425,10 @@ func main() {
 	r.Post("/grants/update-status", corsMiddleware(handleUpdateStatus))
 	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
 	r.Post("/grants/check-status", corsMiddleware(handleCheckStatus))
+
+	globalSwarmManager.DeploySwarms("health", 1)
+	globalSwarmManager.DeploySwarms("sterling", 1)
+	go ApexProactiveLoop()
 
 	r.Post("/payment/create-checkout", corsMiddleware(handleCreateCheckout))
 	r.Post("/stripe/webhook", handleStripeWebhook)
@@ -490,6 +498,9 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad request", 400)
 		return
+	}
+	if apexMirror != nil {
+		apexMirror.RecordHabit("chat_engagement")
 	}
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
@@ -1601,4 +1612,24 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func ApexProactiveLoop() {
+	ticker := time.NewTicker(1 * time.Hour)
+	for {
+		<-ticker.C
+		if apexMirror == nil {
+			continue
+		}
+		// Proactive Health
+		if apexMirror.PredictConfidence("health_check") > 0.7 {
+			globalSwarmManager.DispatchTask("health", "Perform proactive health vitals scan and nutrition alignment.")
+		}
+		// Proactive Finance
+		if apexMirror.PredictConfidence("reinvest") > 0.8 {
+			if fundManager != nil {
+				fundManager.ProactiveReinvest(100.0, apexMirror.PredictConfidence("reinvest"))
+			}
+		}
+	}
 }
