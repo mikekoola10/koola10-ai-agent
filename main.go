@@ -277,6 +277,8 @@ type SystemMonitorResponse struct {
 		Total      float64 `json:"total"`
 		Operations float64 `json:"operations"`
 		Spendable  float64 `json:"spendable"`
+		TotalCosts float64 `json:"total_costs"`
+		ROI        float64 `json:"roi"`
 	} `json:"revenue"`
 	Autonomy     string `json:"autonomy"`
 	ActiveSwarms int    `json:"active_swarms"`
@@ -758,6 +760,7 @@ func startHeartbeat() {
 }
 
 func handleSwarmNodes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	if redisClient == nil { http.Error(w, "no redis", 503); return }
 	ctx := context.Background()
 	nodes, _ := redisClient.HGetAll(ctx, "swarm:nodes").Result()
@@ -774,6 +777,7 @@ func handleSwarmNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmAgents(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode([]map[string]string{
 		{"role": "finder", "status": "active"}, {"role": "writer", "status": "active"},
 		{"role": "reviewer", "status": "active"}, {"role": "submitter", "status": "active"},
@@ -1114,6 +1118,7 @@ func handleFinancialHistory(w http.ResponseWriter, r *http.Request) {
 
 // TradingAgent integration point
 func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var req struct {
 		Profit float64 `json:"profit"`
 	}
@@ -1412,6 +1417,7 @@ func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	globalLedger.mu.RLock()
 	defer globalLedger.mu.RUnlock()
 	roi := 0.0
@@ -1697,6 +1703,7 @@ func handleBeta(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleBetaSignup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var req struct {
 		Email string `json:"email"`
 	}
@@ -1741,6 +1748,11 @@ func handleSystemMonitor(w http.ResponseWriter, r *http.Request) {
 	res.Revenue.Operations = fundStatus.Balance
 	res.Revenue.Spendable = globalLedger.Balance
 	res.Revenue.Total = fundStatus.TotalEarned + globalLedger.TotalRevenue
+	res.Revenue.TotalCosts = globalLedger.TotalCosts
+
+	if globalLedger.TotalCosts > 0 {
+		res.Revenue.ROI = res.Revenue.Total / globalLedger.TotalCosts
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(res)
