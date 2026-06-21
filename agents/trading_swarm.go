@@ -30,6 +30,11 @@ func (a *TradingAgent) Run(task string) (interface{}, error) {
 	})
 
 	a.status = StatusCompleted
+
+	if a.mirror != nil {
+		a.mirror.RecordOutcome("trading", map[string]interface{}{"task": task, "success": true})
+	}
+
 	return res, nil
 }
 

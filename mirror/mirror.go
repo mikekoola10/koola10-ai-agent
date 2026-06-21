@@ -21,9 +21,17 @@ type UserHabit struct {
 }
 
 type UserProfile struct {
-	Values      []string         `json:"values"`
-	Preferences []UserPreference `json:"preferences"`
-	Habits      []UserHabit      `json:"habits"`
+	Values      []string               `json:"values"`
+	Preferences []UserPreference       `json:"preferences"`
+	Habits      []UserHabit            `json:"habits"`
+	Outcomes    []map[string]interface{} `json:"outcomes"`
+}
+
+type DecisionContext struct {
+	Tone           string  `json:"tone"`
+	RiskTolerance  string  `json:"risk_tolerance"`
+	EthicsBoundary string  `json:"ethics_boundary"`
+	Weight         float64 `json:"weight"`
 }
 
 type Mirror struct {
@@ -89,6 +97,62 @@ func (m *Mirror) GetPreference(category, key string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func (m *Mirror) GetContext(category string) DecisionContext {
+	m.mu.RLock()
+	// Fetch memories to inform context
+	memories, _ := m.Recall(category)
+	m.mu.RUnlock()
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ctx := DecisionContext{
+		Tone:           "professional",
+		RiskTolerance:  "moderate",
+		EthicsBoundary: "strict",
+		Weight:         1.0,
+	}
+
+	// Simple heuristic: if memories contain "aggressive", increase risk tolerance
+	for _, mem := range memories {
+		if category == "trading" && (contains(mem, "aggressive") || contains(mem, "high risk")) {
+			ctx.RiskTolerance = "high"
+		}
+	}
+
+	for _, p := range m.Profile.Preferences {
+		if p.Category == category || p.Category == "general" {
+			switch p.Key {
+			case "tone":
+				ctx.Tone = p.Value
+			case "risk_tolerance":
+				ctx.RiskTolerance = p.Value
+			case "ethics_boundary":
+				ctx.EthicsBoundary = p.Value
+			}
+		}
+	}
+	return ctx
+}
+
+func contains(s, substr string) bool {
+	return (len(s) >= len(substr)) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr)
+}
+
+func (m *Mirror) RecordOutcome(category string, outcome map[string]interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	outcome["category"] = category
+	outcome["timestamp"] = time.Now().Format(time.RFC3339)
+	m.Profile.Outcomes = append(m.Profile.Outcomes, outcome)
+
+	// Persist outcome as a memory as well
+	outcomeJSON, _ := json.Marshal(outcome)
+	go m.Remember(string(outcomeJSON), "outcome_"+time.Now().Format("20060102150405"))
+	go m.Save()
 }
 
 func (m *Mirror) Reflect(input string) {

@@ -373,6 +373,7 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	globalMirror = mirror.NewMirror(mirrorPath)
+	globalSwarmManager.Mirror = globalMirror
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
 	// Automated invoice payment check (every 24h)
@@ -386,27 +387,27 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
-	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
-	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
-	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
-	globalSwarmManager.Factories["echo"] = agents.APIFactory
-	globalSwarmManager.Factories["solara"] = agents.ContentFactory
-	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
-	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory(globalMirror)
+	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory(globalMirror)
+	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory(globalMirror)
+	globalSwarmManager.Factories["echo"] = agents.APIFactory(globalMirror)
+	globalSwarmManager.Factories["solara"] = agents.ContentFactory(globalMirror)
+	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory(globalMirror)
+	globalSwarmManager.Factories["vale"] = agents.ResearchFactory(globalMirror)
 	globalSwarmManager.Factories["health"] = agents.HealthFactory(globalMirror)
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory(globalMirror)
-	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory
-	globalSwarmManager.Factories["api_service"] = agents.APIFactory
-	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory
-	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory
-	globalSwarmManager.Factories["content"] = agents.ContentFactory
-	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
-	globalSwarmManager.Factories["research"] = agents.ResearchFactory
+	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory(globalMirror)
+	globalSwarmManager.Factories["api_service"] = agents.APIFactory(globalMirror)
+	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory(globalMirror)
+	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory(globalMirror)
+	globalSwarmManager.Factories["content"] = agents.ContentFactory(globalMirror)
+	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory(globalMirror)
+	globalSwarmManager.Factories["research"] = agents.ResearchFactory(globalMirror)
 
 	// Register Night Shift vertical
-	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory(globalMirror)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -1267,6 +1268,12 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "parse failed", 500)
 		return
 	}
+
+	if globalMirror != nil {
+		go globalMirror.Remember(req.Prompt, "user_chat")
+		go globalMirror.Remember(dsRes.Choices[0].Message.Content, "spiral_reply")
+	}
+
 	LogUsage(dsRes.Usage.TotalTokens)
 	globalLedger.RecordCost("", "ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
 	w.Header().Set("Content-Type", "application/json")

@@ -23,6 +23,10 @@ func (a *HealthAgent) Run(task string) (interface{}, error) {
 		}
 	}
 
+	if a.mirror != nil {
+		a.mirror.RecordOutcome("health", map[string]interface{}{"task": task, "success": true})
+	}
+
 	return fmt.Sprintf("Health task executed: %s", task), nil
 }
 
