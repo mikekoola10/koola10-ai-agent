@@ -25,6 +25,7 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/mirror"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -301,6 +302,9 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	mirrorPath     = "/data/user_mirror.json"
+
+	globalMirror *mirror.Mirror
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -368,6 +372,7 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+	globalMirror = mirror.NewMirror(mirrorPath)
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
 	// Automated invoice payment check (every 24h)
@@ -388,9 +393,10 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["health"] = agents.HealthFactory(globalMirror)
 
 	// Descriptive Slugs & Pilot Aliases
-	globalSwarmManager.Factories["trading"] = agents.TradingFactory
+	globalSwarmManager.Factories["trading"] = agents.TradingFactory(globalMirror)
 	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory
 	globalSwarmManager.Factories["api_service"] = agents.APIFactory
 	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory
