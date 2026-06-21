@@ -35,13 +35,15 @@ type DecisionContext struct {
 }
 
 type Mirror struct {
+	UserID      string      `json:"user_id"`
 	Profile     UserProfile `json:"profile"`
 	StoragePath string      `json:"storage_path"`
 	mu          sync.RWMutex
 }
 
-func NewMirror(path string) *Mirror {
+func NewMirror(userID string, path string) *Mirror {
 	m := &Mirror{
+		UserID:      userID,
 		StoragePath: path,
 		Profile: UserProfile{
 			Values:      []string{},

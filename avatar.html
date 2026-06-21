@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>APEX Mirror — 3D Avatar</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
+        #overlay {
+            position: fixed; top: 20px; left: 20px; color: #00ff88;
+            background: rgba(0, 0, 0, 0.7); padding: 20px; border: 1px solid #00ff88;
+            pointer-events: none; z-index: 100;
+        }
+        .status-item { margin-bottom: 10px; font-size: 14px; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <h2 style="margin-top:0">APEX_PROTOCOL v2.0</h2>
+        <div class="status-item">AVATAR_STATE: <span id="avatar-state">NEUTRAL</span></div>
+        <div class="status-item">REVENUE: <span id="revenue-val">$0.00</span></div>
+        <div class="status-item">SYSTEM_NOMINAL: TRUE</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+                "three/examples/jsm/loaders/GLTFLoader": "https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js",
+                "three-vrm": "https://unpkg.com/@pixiv/three-vrm@2.0.0/lib/three-vrm.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+        import { VRM, VRMLoaderPlugin } from 'three-vrm';
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0.0, 1.4, 1.5);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const light = new THREE.DirectionalLight(0xffffff, 1.0);
+        light.position.set(1.0, 1.0, 1.0).normalize();
+        scene.add(light);
+
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        let currentVRM = null;
+        const loader = new GLTFLoader();
+        loader.register((parser) => new VRMLoaderPlugin(parser));
+
+        // Use a default sample VRM for prototype
+        const vrmUrl = 'https://pixiv.github.io/three-vrm/packages/three-vrm/examples/models/VRM1_Constraint_Sample.vrm';
+
+        loader.load(
+            vrmUrl,
+            (gltf) => {
+                const vrm = gltf.userData.vrm;
+                currentVRM = vrm;
+                vrm.scene.rotation.y = Math.PI;
+                scene.add(vrm.scene);
+                console.log('VRM loaded');
+            },
+            (progress) => console.log('Loading VRM...', (progress.loaded / progress.total * 100), '%'),
+            (error) => console.error(error)
+        );
+
+        // Update loop
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            if (currentVRM) {
+                currentVRM.update(delta);
+                // Idle sway
+                currentVRM.humanoid.getNormalizedBoneNode('chest').rotation.y = Math.sin(Date.now() * 0.001) * 0.05;
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // System state integration
+        async function updateAvatar() {
+            try {
+                const resp = await fetch('/monitor');
+                const data = await resp.json();
+
+                document.getElementById('revenue-val').innerText = `$${data.revenue.total.toFixed(2)}`;
+
+                if (currentVRM) {
+                    const expressionManager = currentVRM.expressionManager;
+                    const stateEl = document.getElementById('avatar-state');
+
+                    if (data.revenue.total > 1000) {
+                        expressionManager.setValue('happy', 1.0);
+                        expressionManager.setValue('neutral', 0.0);
+                        stateEl.innerText = 'HAPPY (PROFITABLE)';
+                    } else if (data.status !== 'System Nominal') {
+                        expressionManager.setValue('sad', 1.0);
+                        expressionManager.setValue('neutral', 0.0);
+                        stateEl.innerText = 'CONCERNED (ALERTS)';
+                    } else {
+                        expressionManager.setValue('neutral', 1.0);
+                        stateEl.innerText = 'NEUTRAL (IDLE)';
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to sync avatar with system state', e);
+            }
+        }
+
+        setInterval(updateAvatar, 5000);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

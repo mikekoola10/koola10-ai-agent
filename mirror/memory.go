@@ -13,10 +13,10 @@ func (m *Mirror) Recall(context string) ([]string, error) {
 		url = "https://koola10-semantic.fly.dev"
 	}
 
-	// In a real implementation, we would fetch embeddings first
-	// but here we follow the pattern of searching via the semantic agent
+	// Search scoped to user via query prefix
+	query := m.UserID + ": " + context
 	reqBody, _ := json.Marshal(map[string]interface{}{
-		"query": context,
+		"query": query,
 		"top_k": 5,
 	})
 
@@ -46,8 +46,10 @@ func (m *Mirror) Remember(text string, refID string) error {
 		url = "https://koola10-semantic.fly.dev"
 	}
 
+	// Scope interaction to user
+	scopedText := m.UserID + ": " + text
 	reqBody, _ := json.Marshal(map[string]string{
-		"text":   text,
+		"text":   scopedText,
 		"ref_id": refID,
 	})
 

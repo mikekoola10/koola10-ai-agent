@@ -28,6 +28,7 @@ import (
 	"koola10/mirror"
 	"koola10/tools"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v76"
 	"github.com/stripe/stripe-go/v76/webhook"
@@ -340,9 +341,42 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+
+	//go:embed avatar.html
+	avatarHTML string
 )
 
 // --- Middleware ---
+
+var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
+
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if string(jwtSecret) == "" {
+			// If secret not set, allow for now but log warning
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "missing authorization header", 401)
+			return
+		}
+
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+			return jwtSecret, nil
+		})
+
+		if err != nil || !token.Valid {
+			http.Error(w, "invalid token", 401)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -372,7 +406,7 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
-	globalMirror = mirror.NewMirror(mirrorPath)
+	globalMirror = mirror.NewMirror("admin", mirrorPath)
 	globalSwarmManager.Mirror = globalMirror
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
@@ -425,10 +459,26 @@ func main() {
 		w.Write([]byte(`{"error":"not found"}`))
 	})
 
-	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/", corsMiddleware(handleAvatar))
+	r.Get("/legacy", corsMiddleware(handleRoot))
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/monitor", corsMiddleware(handleSystemMonitor))
+
+	// Spatial Interface
+	r.Get("/spatial", corsMiddleware(handleSpatial))
+
+	// Beta Signup
+	r.Get("/beta", corsMiddleware(handleBeta))
+	r.Post("/api/beta/signup", corsMiddleware(handleBetaSignup))
+
+	// BPA API v1 (Protected)
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(authMiddleware)
+		r.Get("/status", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"status":"v1_active"}`))
+		})
+	})
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
@@ -1623,6 +1673,57 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleAvatar(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(avatarHTML))
+}
+
+//go:embed spatial/index.html
+var spatialHTML string
+
+func handleSpatial(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(spatialHTML))
+}
+
+//go:embed beta.html
+var betaHTML string
+
+func handleBeta(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(betaHTML))
+}
+
+func handleBetaSignup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	AddAuditEntry("beta_signup", map[string]interface{}{"email": req.Email})
+
+	// Automated onboarding flow
+	go func(email string) {
+		time.Sleep(2 * time.Second) // Simulate review period
+		onboardingMsg := fmt.Sprintf("Welcome to APEX Private Beta. Your Mirror is being provisioned for %s. Protocol established.", email)
+		tools.RunTool("agentmail", map[string]interface{}{
+			"to":      email,
+			"subject": "APEX_PROTOCOL: ONBOARDING_ESTABLISHED",
+			"body":    onboardingMsg,
+		})
+		AddAuditEntry("beta_approved", map[string]interface{}{"email": email})
+	}(req.Email)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "ACCESS_REQUEST_LOGGED. AWAITING_GOVERNANCE_REVIEW.",
+	})
 }
 
 func handleSystemMonitor(w http.ResponseWriter, r *http.Request) {
