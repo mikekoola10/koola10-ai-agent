@@ -39,6 +39,16 @@
             <div style="margin-top:10px;">ROI_RATIO: <span id="roi">0.00</span>x</div>
         </div>
 
+        <div class="card" style="border-color: #0ff;">
+            <h2 style="color: #0ff;">SPIRAL_ECOSYSTEM</h2>
+            <div>LOCKED_FUND: <span id="spiral-balance">$0.00</span></div>
+            <div>TOTAL_REV:  <span id="spiral-revenue">$0.00</span></div>
+            <div style="margin-top:10px;">
+                <a href="/spatial" target="_blank" style="color: #0ff; text-decoration: none;">[ OPEN_SPATIAL_DASHBOARD ]</a>
+            </div>
+            <div id="spiral-swarms" style="font-size: 10px; margin-top: 10px; color: #888;"></div>
+        </div>
+
         <div class="card">
             <h2>SWARM_NETWORK</h2>
             <div id="nodes-list">Scanning for nodes...</div>
@@ -70,6 +80,18 @@
                 document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
                 document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
                 document.getElementById('roi').innerText = ledger.roi.toFixed(2);
+
+                // Spiral
+                const spiral = await fetch('/spiral/ledger').then(r => r.json());
+                document.getElementById('spiral-balance').innerText = `$${spiral.balance.toFixed(2)}`;
+                document.getElementById('spiral-revenue').innerText = `$${spiral.total_revenue.toFixed(2)}`;
+
+                const spiralStatus = await fetch('/spiral/status').then(r => r.json());
+                const swarmDiv = document.getElementById('spiral-swarms');
+                swarmDiv.innerHTML = Object.entries(spiralStatus).map(([name, agents]) => {
+                    const active = agents.filter(a => a.status !== 'idle').length;
+                    return `<div>${name.toUpperCase()}: ${active}/${agents.length}</div>`;
+                }).join('');
 
                 // Nodes
                 const nodes = await fetch('/swarm/nodes').then(r => r.json());

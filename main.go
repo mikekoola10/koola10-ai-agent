@@ -289,6 +289,7 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	spiralPath     = "/data/spiral_ledger.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -303,6 +304,8 @@ var (
 	globalLedger = &EconomicLedger{
 		Balance: 100.0,
 	}
+
+	globalSpiralLedger *financial.SpiralLedger
 
 	fundManager *financial.FundManager
 
@@ -356,7 +359,20 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+	globalSpiralLedger = financial.NewSpiralLedger(spiralPath)
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
+	// Spiral Revenue Sprint (Simulation for Day 1-7)
+	go func() {
+		ticker := time.NewTicker(30 * time.Minute)
+		for {
+			<-ticker.C
+			// Simulate work from swarms
+			globalSpiralLedger.RecordRevenue(15.0, "affiliate_sale")
+			globalSpiralLedger.RecordRevenue(50.0, "bug_bounty_reward")
+			globalSpiralLedger.RecordRevenue(5.0, "bpa_api_usage")
+		}
+	}()
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -377,6 +393,12 @@ func main() {
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
 
+	// Spiral Ecosystem Swarms
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
+	globalSwarmManager.Factories["bpa-api"] = agents.APIFactory
+	globalSwarmManager.Factories["content"] = agents.ContentFactory
+
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
 	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory
@@ -389,6 +411,12 @@ func main() {
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+
+	// Deploy Spiral Swarms
+	globalSwarmManager.DeploySwarms("affiliate", 10)
+	globalSwarmManager.DeploySwarms("bounty", 10)
+	globalSwarmManager.DeploySwarms("bpa-api", 10)
+	globalSwarmManager.DeploySwarms("content", 10)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -407,6 +435,7 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/spatial", corsMiddleware(handleSpatial))
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -469,6 +498,9 @@ func main() {
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
+
+	r.Get("/spiral/ledger", corsMiddleware(handleSpiralLedger))
+	r.Get("/spiral/status", corsMiddleware(handleSpiralStatus))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
@@ -1055,6 +1087,24 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleSpiralLedger(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(globalSpiralLedger.GetStatus())
+}
+
+func handleSpiralStatus(w http.ResponseWriter, r *http.Request) {
+	globalSwarmManager.Mu.RLock()
+	defer globalSwarmManager.Mu.RUnlock()
+
+	spiralSwarms := []string{"affiliate", "bounty", "bpa-api", "content"}
+	res := make(map[string]interface{})
+	for _, v := range spiralSwarms {
+		res[v] = globalSwarmManager.GetSwarmStatus(v)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
 func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {
 	roiThreshold := 2.0; projectedRevenue := 0.0; if actionType == "grant_submit" { projectedRevenue = 500.0 }
 	roi := 0.0; if estimatedCost > 0 { roi = projectedRevenue / estimatedCost }
@@ -1597,6 +1647,10 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleSpatial(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "spatial/index.html")
 }
 
 func generateID() string {
