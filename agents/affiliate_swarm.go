@@ -1,0 +1,52 @@
+package agents
+
+import (
+	"fmt"
+	"math/rand"
+)
+
+type AffiliateAgent struct {
+	specialty string
+	status    AgentStatus
+	vertical  string
+}
+
+func (a *AffiliateAgent) Run(task string) (interface{}, error) {
+	a.status = StatusWorking
+	defer func() { a.status = StatusCompleted }()
+
+	// Simulate affiliate link generation and traffic driving
+	profit := 5.0 + rand.Float64()*20.0
+
+	// Report profit if we have a way to do it.
+	// For now, we return it as part of the result.
+	// In a real scenario, it would call an endpoint or use a shared ledger.
+
+	res := fmt.Sprintf("Affiliate Result (%s - %s): Generated %.2f profit from task: %s", a.vertical, a.specialty, profit, task)
+	return res, nil
+}
+
+func (a *AffiliateAgent) Status() AgentStatus { return a.status }
+func (a *AffiliateAgent) Specialty() string    { return a.specialty }
+
+func AffiliateFactory() []SpecialistAgent {
+	return CreateAffiliateSwarm("affiliate")
+}
+
+func SpiralAffiliateFactory() []SpecialistAgent {
+	return CreateAffiliateSwarm("spiral_affiliate")
+}
+
+func CreateAffiliateSwarm(vertical string) []SpecialistAgent {
+	specialties := []string{
+		"Amazon Associate Optimizer", "ClickBank Niche Hunter", "Impact Radius Manager",
+		"Affiliate Link Cloaker", "SEO Keyword Researcher (Affiliate)",
+		"Review Article Writer", "Price Comparison Bot", "Coupon Code Aggregator",
+		"Influencer Outreach (Affiliate)", "Conversion Rate Optimizer",
+	}
+	agents := make([]SpecialistAgent, 0, len(specialties))
+	for _, s := range specialties {
+		agents = append(agents, &AffiliateAgent{specialty: s, status: StatusIdle, vertical: vertical})
+	}
+	return agents
+}

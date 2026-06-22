@@ -16,6 +16,14 @@ func (a *APIAgent) Status() AgentStatus { return a.status }
 func (a *APIAgent) Specialty() string    { return a.specialty }
 
 func APIFactory() []SpecialistAgent {
+	return CreateAPISwarm("api_service")
+}
+
+func SpiralAPIFactory() []SpecialistAgent {
+	return CreateAPISwarm("spiral_api")
+}
+
+func CreateAPISwarm(vertical string) []SpecialistAgent {
 	specialties := []string{
 		"Text-to-Image (Model A)", "Text-to-Image (Model B)",
 		"Sentiment Analysis (Fast)", "Sentiment Analysis (Deep)",
