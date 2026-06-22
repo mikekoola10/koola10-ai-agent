@@ -376,6 +376,7 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["debugger"] = agents.DebuggerFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -407,6 +408,9 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+
+	r.Get("/beta", handleBeta)
+	r.Get("/spatial", handleSpatial)
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -479,6 +483,7 @@ func main() {
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
+	go agents.StartDebuggerLoop(globalSwarmManager)
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
 }
@@ -688,6 +693,7 @@ func startHeartbeat() {
 }
 
 func handleSwarmNodes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	if redisClient == nil { http.Error(w, "no redis", 503); return }
 	ctx := context.Background()
 	nodes, _ := redisClient.HGetAll(ctx, "swarm:nodes").Result()
@@ -704,6 +710,7 @@ func handleSwarmNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmAgents(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode([]map[string]string{
 		{"role": "finder", "status": "active"}, {"role": "writer", "status": "active"},
 		{"role": "reviewer", "status": "active"}, {"role": "submitter", "status": "active"},
@@ -712,6 +719,7 @@ func handleSwarmAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmStart(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var req struct { Query string; OrgProfile map[string]interface{} }; json.NewDecoder(r.Body).Decode(&req)
 	id := generateID()
 	task := SwarmTask{TaskID: id, Stage: "finding", Query: req.Query, OrgProfile: req.OrgProfile, Results: make(map[string]interface{})}
@@ -1257,34 +1265,43 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func handleAIRemember(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var req MemoryEntry; json.NewDecoder(r.Body).Decode(&req); json.NewEncoder(w).Encode(map[string]string{"status": "stored"})
 }
 func handleAIRecall(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	k := r.URL.Query().Get("key"); json.NewEncoder(w).Encode(map[string]string{"key": k, "value": "test"})
 }
 func handleAIAnalyzeGrant(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"eligibility_score": 85, "summary": "Grant analysis summary."}`))
 }
 func handleMemoryMeetings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	if r.Method == "POST" { var m Meeting; json.NewDecoder(r.Body).Decode(&m); id := globalGraph.AddMeeting(m); json.NewEncoder(w).Encode(map[string]string{"id": id}); return }
 	json.NewEncoder(w).Encode([]Meeting{})
 }
 func handleMemoryEntity(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(Entity{})
 }
 func handleMemoryInfluence(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"score": 0.5})
 }
 func handleMemoryPath(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode([]Edge{})
 }
 func handleMemoryDecisionsRanked(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode([]string{})
 }
 func handleSemanticIndex(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "indexed"})
 }
 func handleSemanticSearch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode([]SemanticSearchResult{})
 }
 func handleComplianceAudit(w http.ResponseWriter, r *http.Request) {
@@ -1309,13 +1326,16 @@ func handleComplianceAudit(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(entries)
 }
 func handleComplianceAuditVerify(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"valid": true})
 }
 func handleComplianceApproval(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var req ApprovalRequest; json.NewDecoder(r.Body).Decode(&req); req.ID = generateID(); req.Status = "pending"
 	approvalMu.Lock(); approvalStore[req.ID] = &req; approvalMu.Unlock(); json.NewEncoder(w).Encode(req)
 }
 func handleComplianceApprove(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var req struct { ApprovalID string; Approver string }; json.NewDecoder(r.Body).Decode(&req)
 	approvalMu.Lock(); ap, ok := approvalStore[req.ApprovalID]; if ok { ap.Status = "approved" }; approvalMu.Unlock()
 	json.NewEncoder(w).Encode(ap)
@@ -1327,6 +1347,7 @@ func handleComplianceKillSwitchReset(w http.ResponseWriter, r *http.Request) {
 	os.Remove(killSwitchPath); w.Write([]byte("Reset"))
 }
 func handleComplianceUsage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"total_tokens": 1000})
 }
 func handleEconomicLedgerCost(w http.ResponseWriter, r *http.Request) {
@@ -1336,6 +1357,7 @@ func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	globalLedger.mu.RLock()
 	defer globalLedger.mu.RUnlock()
 	roi := 0.0
@@ -1350,6 +1372,7 @@ func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
 }
 
@@ -1394,6 +1417,7 @@ func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/swarm/"), "/")
 	if len(parts) < 2 {
 		if len(parts) == 1 && parts[0] == "" {
@@ -1438,10 +1462,12 @@ func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(globalSwarmManager.GetAllSwarmMetrics())
 }
 
 func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	report := map[string]string{
 		"sterling": "Sterling reports consolidated financial statements and daily variance analysis.",
 		"nova":     "Nova reports 12 federal grant proposals drafted and 5 foundation leads found.",
@@ -1597,6 +1623,16 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleBeta(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status": "coming_soon", "feature": "Beta Signup"}`))
+}
+
+func handleSpatial(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status": "coming_soon", "feature": "Spatial Interface"}`))
 }
 
 func generateID() string {
