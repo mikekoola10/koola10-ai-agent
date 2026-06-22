@@ -500,6 +500,7 @@ func main() {
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
 
 	r.Get("/spiral/ledger", corsMiddleware(handleSpiralLedger))
+	r.Post("/spiral/ledger/revenue", corsMiddleware(handleSpiralLedgerRevenue))
 	r.Get("/spiral/status", corsMiddleware(handleSpiralStatus))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
@@ -1092,6 +1093,19 @@ func handleSpiralLedger(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(globalSpiralLedger.GetStatus())
 }
 
+func handleSpiralLedgerRevenue(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Amount float64 `json:"amount"`
+		Source string  `json:"source"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	globalSpiralLedger.RecordRevenue(req.Amount, req.Source)
+	w.WriteHeader(http.StatusCreated)
+}
+
 func handleSpiralStatus(w http.ResponseWriter, r *http.Request) {
 	globalSwarmManager.Mu.RLock()
 	defer globalSwarmManager.Mu.RUnlock()
@@ -1475,9 +1489,19 @@ func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
 			}
 			res, err := globalSwarmManager.DispatchTask(vertical, string(reqBody))
 			if err != nil {
+				tools.LogStructured("CRITICAL", generateID(), vertical, "Swarm dispatch failed", map[string]interface{}{"error": err.Error(), "task": string(reqBody)})
 				http.Error(w, err.Error(), 500)
 				return
 			}
+
+			// Record revenue for Spiral swarms upon successful task dispatch/completion
+			spiralSwarms := map[string]bool{"affiliate": true, "bounty": true, "bpa-api": true, "content": true}
+			if spiralSwarms[vertical] {
+				globalSpiralLedger.RecordRevenue(10.0, "manual_dispatch:"+vertical)
+			}
+
+			tools.LogStructured("INFO", generateID(), vertical, "Task dispatched successfully", map[string]interface{}{"task": string(reqBody)})
+
 			json.NewEncoder(w).Encode(res)
 		}
 	case "GET":

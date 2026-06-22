@@ -38,8 +38,15 @@ func (sl *SpiralLedger) load() {
 }
 
 func (sl *SpiralLedger) save() {
-	data, _ := json.MarshalIndent(sl, "", "  ")
-	os.WriteFile(sl.storagePath, data, 0644)
+	data, err := json.MarshalIndent(sl, "", "  ")
+	if err != nil {
+		tools.LogStructured("ERROR", "internal", "spiral_ledger", "Failed to marshal ledger", map[string]interface{}{"error": err.Error()})
+		return
+	}
+	err = os.WriteFile(sl.storagePath, data, 0644)
+	if err != nil {
+		tools.LogStructured("CRITICAL", "internal", "spiral_ledger", "Failed to save ledger to file", map[string]interface{}{"error": err.Error(), "path": sl.storagePath})
+	}
 }
 
 func (sl *SpiralLedger) RecordRevenue(amount float64, source string) {
