@@ -18,12 +18,13 @@
         .red { color: #f00; border-color: #f00; }
         .red:hover { background: #300; }
         pre { font-size: 12px; overflow-x: auto; color: #aaa; }
-        .node { border-bottom: 1px solid #222; padding: 5px 0; }
+        .metric { margin-bottom: 5px; }
+        .val { color: #fff; }
     </style>
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>AGENT_ADMIN_PANEL v1.0</h1>
+        <h1>AGENT_ADMIN_PANEL v1.5</h1>
         <div>
             <span id="status-dot" class="status online"></span>
             <span id="status-text">SYSTEM_NOMINAL</span>
@@ -33,22 +34,22 @@
     <div class="grid">
         <div class="card">
             <h2>FINANCIAL_LEDGER</h2>
-            <div>BALANCE: <span id="balance">$0.00</span></div>
-            <div>COSTS:   <span id="costs">$0.00</span></div>
-            <div>REVENUE: <span id="revenue">$0.00</span></div>
-            <div style="margin-top:10px;">ROI_RATIO: <span id="roi">0.00</span>x</div>
+            <div class="metric">SPENDABLE: <span id="balance" class="val">$0.00</span></div>
+            <div class="metric">OPERATIONS: <span id="operations" class="val">$0.00</span></div>
+            <div class="metric">TOTAL_REVENUE: <span id="revenue" class="val">$0.00</span></div>
+            <div class="metric">TOTAL_COSTS: <span id="costs" class="val">$0.00</span></div>
+            <div style="margin-top:10px;">ROI_RATIO: <span id="roi" class="val">0.00</span>x</div>
         </div>
 
         <div class="card">
             <h2>SWARM_NETWORK</h2>
-            <div id="nodes-list">Scanning for nodes...</div>
+            <div class="metric">ACTIVE_SWARMS: <span id="active-swarms" class="val">0</span></div>
+            <div class="metric">UPTIME: <span id="uptime" class="val">0s</span></div>
+            <div class="metric">AUTONOMY: <span id="autonomy" class="val">0%</span></div>
         </div>
 
         <div class="card">
             <h2>CONTROL_CENTER</h2>
-            <div style="margin-bottom: 10px;">
-                PENDING_APPROVALS: <span id="approvals-count">0</span>
-            </div>
             <div style="display: flex; flex-direction: column; gap: 10px;">
                 <button onclick="triggerMonitor()">RUN_DAILY_MONITOR</button>
                 <button id="kill-btn" class="red" onclick="toggleKillSwitch()">ACTIVATE_KILL_SWITCH</button>
@@ -62,50 +63,62 @@
     </div>
 
     <script>
-        async function update() {
+        async function safeFetch(url, options = {}) {
             try {
-                // Ledger
-                const ledger = await fetch('/economic/ledger/summary').then(r => r.json());
-                document.getElementById('balance').innerText = `$${ledger.balance.toFixed(2)}`;
-                document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
-                document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
-                document.getElementById('roi').innerText = ledger.roi.toFixed(2);
-
-                // Nodes
-                const nodes = await fetch('/swarm/nodes').then(r => r.json());
-                const nodesDiv = document.getElementById('nodes-list');
-                if (nodes.length === 0) {
-                    nodesDiv.innerText = "No active nodes.";
-                } else {
-                    nodesDiv.innerHTML = nodes.map(n => `
-                        <div class="node">
-                            [${n.region}] ${n.node_id} - ${n.status}
-                        </div>
-                    `).join('');
-                }
-
-                // Approvals
-                const audit = await fetch('/compliance/audit').then(r => r.json());
-                const pending = audit.filter(e => e.action === 'approval_request_created');
-                document.getElementById('approvals-count').innerText = pending.length;
-
-                // Log a tick
-                const logs = document.getElementById('logs');
-                const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-                logs.innerText = `[${timestamp}] Telemetry update successful\n` + logs.innerText.split('\n').slice(0, 10).join('\n');
-
+                const response = await fetch(url, options);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                return await response.json();
             } catch (e) {
-                console.error(e);
+                console.error(`Fetch failed for ${url}:`, e);
+                return null;
+            }
+        }
+
+        async function update() {
+            const data = await safeFetch('/monitor');
+            if (!data) {
                 document.getElementById('status-dot').className = 'status offline';
                 document.getElementById('status-text').innerText = 'CONNECTION_LOST';
+                return;
             }
+
+            // Status
+            document.getElementById('status-dot').className = 'status online';
+            document.getElementById('status-text').innerText = data.status;
+
+            if (data.status === 'KILL_SWITCH_ACTIVE') {
+                const btn = document.getElementById('kill-btn');
+                btn.innerText = 'RESET_KILL_SWITCH';
+                btn.className = '';
+            } else {
+                const btn = document.getElementById('kill-btn');
+                btn.innerText = 'ACTIVATE_KILL_SWITCH';
+                btn.className = 'red';
+            }
+
+            // Ledger
+            document.getElementById('balance').innerText = `$${data.revenue.spendable.toFixed(2)}`;
+            document.getElementById('operations').innerText = `$${data.revenue.operations.toFixed(2)}`;
+            document.getElementById('revenue').innerText = `$${data.revenue.total.toFixed(2)}`;
+            document.getElementById('costs').innerText = `$${data.total_costs.toFixed(2)}`;
+            document.getElementById('roi').innerText = data.roi.toFixed(2);
+
+            // Swarm
+            document.getElementById('active-swarms').innerText = data.active_swarms;
+            document.getElementById('uptime').innerText = data.uptime;
+            document.getElementById('autonomy').innerText = `${(data.autonomy * 100).toFixed(0)}%`;
+
+            // Log a tick
+            const logs = document.getElementById('logs');
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            logs.innerText = `[${timestamp}] Telemetry update successful\n` + logs.innerText.split('\n').slice(0, 10).join('\n');
         }
 
         async function triggerMonitor() {
             const btn = event.target;
             btn.disabled = true;
             btn.innerText = 'EXECUTING...';
-            await fetch('/grants/monitor');
+            await safeFetch('/grants/monitor', { method: 'POST' });
             btn.innerText = 'MONITOR_COMPLETE';
             setTimeout(() => { btn.disabled = false; btn.innerText = 'RUN_DAILY_MONITOR'; }, 2000);
         }
@@ -113,14 +126,11 @@
         async function toggleKillSwitch() {
             const btn = document.getElementById('kill-btn');
             if (btn.innerText.includes('ACTIVATE')) {
-                await fetch('/compliance/kill-switch', {method: 'POST'});
-                btn.innerText = 'RESET_KILL_SWITCH';
-                btn.className = '';
+                await safeFetch('/compliance/kill-switch', {method: 'POST'});
             } else {
-                await fetch('/compliance/kill-switch/reset', {method: 'POST'});
-                btn.innerText = 'ACTIVATE_KILL_SWITCH';
-                btn.className = 'red';
+                await safeFetch('/compliance/kill-switch/reset', {method: 'POST'});
             }
+            update();
         }
 
         setInterval(update, 5000);
