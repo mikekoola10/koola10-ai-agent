@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Spiral Spatial Dashboard - Vision Pro</title>
+    <meta name="description" content="Spiral Ecosystem Revenue & Swarm Visualization">
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-environment-component@1.3.3/dist/aframe-environment-component.min.js"></script>
+    <style>
+      #overlay {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 1000;
+        color: #0f0;
+        font-family: monospace;
+        background: rgba(0,0,0,0.5);
+        padding: 10px;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overlay">
+      SPIRAL_SPATIAL_V1.0<br>
+      STATUS: CONNECTED
+    </div>
+
+    <a-scene>
+      <a-entity environment="preset: night; lighting: point; groundColor: #111; grid: dashed"></a-entity>
+
+      <!-- Main Header -->
+      <a-entity position="0 3 -4">
+        <a-text value="SPIRAL ECOSYSTEM" align="center" color="#fff" width="10" font="monoid"></a-text>
+        <a-text value="Vision Pro Spatial Interface" position="0 -0.5 0" align="center" color="#0f0" width="4" font="monoid"></a-text>
+      </a-entity>
+
+      <!-- Revenue Panel -->
+      <a-entity id="revenue-panel" position="-3 2 -3" rotation="0 20 0">
+        <a-plane width="2.5" height="1.5" color="#111" material="opacity: 0.8; transparent: true; side: double"></a-plane>
+        <a-text value="SPIRAL_LEDGER" position="-1.1 0.6 0.01" color="#fff" width="3"></a-text>
+        <a-text id="balance-text" value="BALANCE: $0.00" position="-1.1 0.2 0.01" color="#0f0" width="4"></a-text>
+        <a-text id="revenue-text" value="REVENUE: $0.00" position="-1.1 -0.1 0.01" color="#0f0" width="4"></a-text>
+        <a-text id="spent-text" value="SPENT: $0.00" position="-1.1 -0.4 0.01" color="#f00" width="4"></a-text>
+      </a-entity>
+
+      <!-- Swarm Activity Panel -->
+      <a-entity id="swarm-panel" position="3 2 -3" rotation="0 -20 0">
+        <a-plane width="2.5" height="1.5" color="#111" material="opacity: 0.8; transparent: true; side: double"></a-plane>
+        <a-text value="SWARM_STATUS" position="-1.1 0.6 0.01" color="#fff" width="3"></a-text>
+        <a-entity id="swarm-list" position="-1.1 0.3 0.01"></a-entity>
+      </a-entity>
+
+      <!-- Camera + Cursor -->
+      <a-entity camera look-controls wasd-controls position="0 1.6 0">
+        <a-cursor color="#0f0" fuse="false"></a-cursor>
+      </a-entity>
+    </a-scene>
+
+    <script>
+      async function updateData() {
+        try {
+          // Fetch Ledger
+          const ledgerRes = await fetch('/spiral/ledger');
+          const ledger = await ledgerRes.json();
+          document.querySelector('#balance-text').setAttribute('value', `BALANCE: $${ledger.balance.toFixed(2)}`);
+          document.querySelector('#revenue-text').setAttribute('value', `REVENUE: $${ledger.total_revenue.toFixed(2)}`);
+          document.querySelector('#spent-text').setAttribute('value', `SPENT: $${ledger.total_spent.toFixed(2)}`);
+
+          // Fetch Swarms
+          const swarmRes = await fetch('/spiral/status');
+          const swarms = await swarmRes.json();
+          const swarmList = document.querySelector('#swarm-list');
+
+          // Clear old list
+          while (swarmList.firstChild) {
+            swarmList.removeChild(swarmList.firstChild);
+          }
+
+          let yOffset = 0;
+          for (const [name, agents] of Object.entries(swarms)) {
+            const activeCount = agents.filter(a => a.status !== 'idle').length;
+            const text = document.createElement('a-text');
+            text.setAttribute('value', `${name.toUpperCase()}: ${activeCount}/${agents.length} ACTIVE`);
+            text.setAttribute('position', `0 ${yOffset} 0`);
+            text.setAttribute('width', '3');
+            text.setAttribute('color', activeCount > 0 ? '#0f0' : '#aaa');
+            swarmList.appendChild(text);
+            yOffset -= 0.25;
+          }
+        } catch (e) {
+          console.error("Spatial update failed", e);
+        }
+      }
+
+      setInterval(updateData, 5000);
+      updateData();
+    </script>
+  </body>
+</html>

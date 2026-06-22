@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"koola10/mirror"
 	"os"
 	"path/filepath"
 )
@@ -9,10 +10,17 @@ import (
 type LeadGenAgent struct {
 	specialty string
 	status    AgentStatus
+	mirror    *mirror.Mirror
 }
 
 func (a *LeadGenAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
+	defer func() { a.status = StatusIdle }()
+
+	if a.mirror != nil {
+		ctx := a.mirror.GetContext("leadgen")
+		_ = ctx.Tone
+	}
 
 	// Simulate daily CSV production
 	dir := "/data/leads/"
@@ -22,13 +30,19 @@ func (a *LeadGenAgent) Run(task string) (interface{}, error) {
 	os.WriteFile(filepath.Join(dir, filename), []byte(content), 0644)
 
 	a.status = StatusCompleted
+
+	if a.mirror != nil {
+		a.mirror.RecordOutcome("leadgen", map[string]interface{}{"task": task, "success": true})
+	}
+
 	return "Leads generated in " + filename, nil
 }
 
 func (a *LeadGenAgent) Status() AgentStatus { return a.status }
 func (a *LeadGenAgent) Specialty() string    { return a.specialty }
 
-func LeadGenFactory() []SpecialistAgent {
+func LeadGenFactory(m *mirror.Mirror) func() []SpecialistAgent {
+	return func() []SpecialistAgent {
 	specialties := []string{
 		"LinkedIn Scraper (Tech)", "LinkedIn Scraper (Finance)", "LinkedIn Scraper (Healthcare)",
 		"Crunchbase Enrichment", "Crunchbase Deep Dive",
@@ -36,8 +50,9 @@ func LeadGenFactory() []SpecialistAgent {
 		"ICP Scoring", "Outreach Sequencing", "CRM Sync",
 	}
 	agents := make([]SpecialistAgent, 0, len(specialties))
-	for _, s := range specialties {
-		agents = append(agents, &LeadGenAgent{specialty: s, status: StatusIdle})
+		for _, s := range specialties {
+			agents = append(agents, &LeadGenAgent{specialty: s, status: StatusIdle, mirror: m})
+		}
+		return agents
 	}
-	return agents
 }

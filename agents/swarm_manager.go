@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"koola10/mirror"
 	"sync"
 )
 
@@ -23,6 +24,7 @@ type SpecialistAgent interface {
 type SwarmManager struct {
 	Swarms map[string][]SpecialistAgent
 	Mu     sync.RWMutex
+	Mirror *mirror.Mirror
 
 	// Callbacks for logging to economic ledger and compliance audit
 	AuditLogger func(action string, details map[string]interface{})
@@ -90,6 +92,16 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 	sm.Mu.Unlock()
 
 	result, err := target.Run(task)
+
+	// Post-execution Mirror reflection
+	if sm.Mirror != nil {
+		outcome := map[string]interface{}{
+			"task":    task,
+			"success": err == nil,
+			"result":  result,
+		}
+		sm.Mirror.RecordOutcome(vertical, outcome)
+	}
 
 	if sm.AuditLogger != nil {
 		sm.AuditLogger("task_executed", map[string]interface{}{

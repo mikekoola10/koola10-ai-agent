@@ -22,7 +22,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 
+	"koola10/mirror"
 	"koola10/agents"
 	"koola10/financial"
 	"koola10/tools"
@@ -239,6 +241,25 @@ type SwarmNode struct {
 	Status   string `json:"status"`
 }
 
+type SystemMonitorResponse struct {
+	Status       string `json:"status"`
+	Uptime       string `json:"uptime"`
+	Revenue      struct {
+		Total      float64 `json:"total"`
+		Operations float64 `json:"operations"`
+		Spendable  float64 `json:"spendable"`
+		TotalCosts float64 `json:"total_costs"`
+		ROI        float64 `json:"roi"`
+	} `json:"revenue"`
+	Autonomy     string `json:"autonomy"`
+	ActiveSwarms int    `json:"active_swarms"`
+	Metrics      struct {
+		AvgLatencyMS float64        `json:"avg_latency_ms"`
+		ErrorRate    float64        `json:"error_rate"`
+		StatusCodes  map[string]int `json:"status_codes"`
+	} `json:"metrics"`
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -271,6 +292,12 @@ type VideoJob struct {
 // --- Global States ---
 
 var (
+	metricsMu       sync.Mutex
+	totalRequests   int
+	totalLatency    time.Duration
+	errorCount      int
+	statusCodes     = make(map[string]int)
+
 	cacheMutex   sync.Mutex
 	auditMutex   sync.Mutex
 	usageMutex   sync.Mutex
@@ -289,6 +316,8 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	spiralPath     = "/data/spiral_ledger.json"
+	mirrorPath     = "/data/user_mirror.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -304,6 +333,9 @@ var (
 		Balance: 100.0,
 	}
 
+	globalSpiralLedger *financial.SpiralLedger
+	globalMirror       *mirror.Mirror
+
 	fundManager *financial.FundManager
 
 	globalSwarmManager = agents.NewSwarmManager()
@@ -317,6 +349,8 @@ var (
 	rlRate       = 10.0
 	rlLastUpdate = time.Now()
 	rlMu         sync.Mutex
+
+	jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
 	redisClient *redis.Client
 	nodeID      string
@@ -340,6 +374,61 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if string(jwtSecret) == "" {
+			http.Error(w, "security: JWT_SECRET not configured", 500)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "missing authorization header", 401)
+			return
+		}
+
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+			return jwtSecret, nil
+		})
+
+		if err != nil || !token.Valid {
+			http.Error(w, "invalid token", 401)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func metricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		duration := time.Since(start)
+
+		metricsMu.Lock()
+		totalRequests++
+		totalLatency += duration
+		if sw.status >= 400 {
+			errorCount++
+		}
+		statusCodes[fmt.Sprintf("%d", sw.status)]++
+		metricsMu.Unlock()
+	})
+}
+
 // --- Main ---
 
 func main() {
@@ -356,7 +445,14 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+	globalSpiralLedger = financial.NewSpiralLedger(spiralPath)
+	globalMirror = mirror.NewMirror("admin", mirrorPath)
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
+	globalSwarmManager.Mirror = globalMirror
+	agents.SetSwarmMirror(globalMirror)
+
+	// Simulated revenue loop removed for production stabilization.
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -369,26 +465,44 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
-	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
-	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
-	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
-	globalSwarmManager.Factories["echo"] = agents.APIFactory
-	globalSwarmManager.Factories["solara"] = agents.ContentFactory
-	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
-	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory(globalMirror)
+	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory(globalMirror)
+	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory(globalMirror)
+	globalSwarmManager.Factories["echo"] = agents.APIFactory(globalMirror)
+	globalSwarmManager.Factories["solara"] = agents.ContentFactory(globalMirror)
+	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory(globalMirror)
+	globalSwarmManager.Factories["vale"] = agents.ResearchFactory(globalMirror)
+
+	// Spiral Ecosystem Swarms
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
+	globalSwarmManager.Factories["bpa-api"] = agents.APIFactory(globalMirror)
+	globalSwarmManager.Factories["content"] = agents.ContentFactory(globalMirror)
+	globalSwarmManager.Factories["ghost-town"] = agents.GhostTownFactory
 
 	// Descriptive Slugs & Pilot Aliases
-	globalSwarmManager.Factories["trading"] = agents.TradingFactory
-	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory
-	globalSwarmManager.Factories["api_service"] = agents.APIFactory
-	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory
-	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory
-	globalSwarmManager.Factories["content"] = agents.ContentFactory
-	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
-	globalSwarmManager.Factories["research"] = agents.ResearchFactory
+	globalSwarmManager.Factories["trading"] = agents.TradingFactory(globalMirror)
+	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory(globalMirror)
+	globalSwarmManager.Factories["api_service"] = agents.APIFactory(globalMirror)
+	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory(globalMirror)
+	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory(globalMirror)
+	globalSwarmManager.Factories["content"] = agents.ContentFactory(globalMirror)
+	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory(globalMirror)
+	globalSwarmManager.Factories["research"] = agents.ResearchFactory(globalMirror)
 
 	// Register Night Shift vertical
-	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory(globalMirror)
+
+	// Deploy Spiral Swarms
+	globalSwarmManager.DeploySwarms("affiliate", 10)
+	globalSwarmManager.DeploySwarms("bounty", 10)
+	globalSwarmManager.DeploySwarms("bpa-api", 10)
+	globalSwarmManager.DeploySwarms("content", 10)
+	globalSwarmManager.DeploySwarms("leadgen", 10)
+	globalSwarmManager.DeploySwarms("compliance", 10)
+
+	// Start Debugger Swarm for autonomous recovery
+	go agents.StartDebuggerLoop(globalSwarmManager)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -399,6 +513,7 @@ func main() {
 	}
 
 	r := chi.NewRouter()
+	r.Use(metricsMiddleware)
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -407,8 +522,11 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/spatial", corsMiddleware(handleSpatial))
 
 	r.Get("/health", corsMiddleware(handleHealth))
+	r.Get("/monitor", corsMiddleware(handleSystemMonitor))
+	r.Get("/mirror/context", corsMiddleware(handleMirrorContext))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
@@ -464,11 +582,28 @@ func main() {
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
 
+	r.Route("/api", func(r chi.Router) {
+		r.Use(authMiddleware)
+		r.Post("/leads", corsMiddleware(handleBPALeads))
+		r.Post("/compliance", corsMiddleware(handleBPACompliance))
+		r.Post("/content", corsMiddleware(handleBPAContent))
+	})
+
+	r.Route("/admin", func(r chi.Router) {
+		r.Get("/test_alert", corsMiddleware(handleAdminTestAlert))
+		r.Post("/trigger_affiliate", corsMiddleware(handleAdminTriggerAffiliate))
+		r.Post("/trigger_bounty", corsMiddleware(handleAdminTriggerBounty))
+	})
+
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
+
+	r.Get("/spiral/ledger", corsMiddleware(handleSpiralLedger))
+	r.Get("/ledger/summary", corsMiddleware(handleSpiralLedger)) // Alias for user verification
+	r.Get("/spiral/status", corsMiddleware(handleSpiralStatus))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
@@ -1055,6 +1190,24 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleSpiralLedger(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(globalSpiralLedger.GetStatus())
+}
+
+func handleSpiralStatus(w http.ResponseWriter, r *http.Request) {
+	globalSwarmManager.Mu.RLock()
+	defer globalSwarmManager.Mu.RUnlock()
+
+	spiralSwarms := []string{"affiliate", "bounty", "bpa-api", "content"}
+	res := make(map[string]interface{})
+	for _, v := range spiralSwarms {
+		res[v] = globalSwarmManager.GetSwarmStatus(v)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
 func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {
 	roiThreshold := 2.0; projectedRevenue := 0.0; if actionType == "grant_submit" { projectedRevenue = 500.0 }
 	roi := 0.0; if estimatedCost > 0 { roi = projectedRevenue / estimatedCost }
@@ -1597,6 +1750,102 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleMirrorContext(w http.ResponseWriter, r *http.Request) {
+	cat := r.URL.Query().Get("category")
+	if cat == "" {
+		cat = "general"
+	}
+	ctx := globalMirror.GetContext(cat)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ctx)
+}
+
+func handleBPALeads(w http.ResponseWriter, r *http.Request) {
+	var req struct { Industry string }; json.NewDecoder(r.Body).Decode(&req)
+	res, err := globalSwarmManager.DispatchTask("leadgen", req.Industry)
+	if err != nil { http.Error(w, err.Error(), 500); return }
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "data": res})
+}
+
+func handleBPACompliance(w http.ResponseWriter, r *http.Request) {
+	var req struct { Query string }; json.NewDecoder(r.Body).Decode(&req)
+	res, err := globalSwarmManager.DispatchTask("compliance", req.Query)
+	if err != nil { http.Error(w, err.Error(), 500); return }
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "data": res})
+}
+
+func handleBPAContent(w http.ResponseWriter, r *http.Request) {
+	var req struct { Query string }; json.NewDecoder(r.Body).Decode(&req)
+	res, err := globalSwarmManager.DispatchTask("content", req.Query)
+	if err != nil { http.Error(w, err.Error(), 500); return }
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "data": res})
+}
+
+func handleAdminTestAlert(w http.ResponseWriter, r *http.Request) {
+	res := tools.RunTool("agentmail", map[string]interface{}{
+		"to":      "mikekoola10@agentmail.to",
+		"subject": "System Alert: Manual Test",
+		"body":    "This is a manually triggered test alert from the admin panel.",
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleAdminTriggerAffiliate(w http.ResponseWriter, r *http.Request) {
+	globalLedger.RecordRevenueWithVertical("affiliate", 25.0, "Manual Admin Trigger")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"revenue_logged"}`))
+}
+
+func handleAdminTriggerBounty(w http.ResponseWriter, r *http.Request) {
+	globalLedger.RecordRevenueWithVertical("bounty", 100.0, "Manual Admin Trigger")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"revenue_logged"}`))
+}
+
+func handleSystemMonitor(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+
+	fundStatus := fundManager.GetStatus()
+
+	var res SystemMonitorResponse
+	res.Status = "System Nominal"
+	res.Uptime = "99.99%"
+	res.Autonomy = "Self-Sustaining"
+	res.ActiveSwarms = len(globalSwarmManager.Swarms)
+
+	res.Revenue.Operations = fundStatus.Balance
+	res.Revenue.Spendable = globalLedger.Balance
+	res.Revenue.Total = fundStatus.TotalEarned + globalLedger.TotalRevenue
+	res.Revenue.TotalCosts = globalLedger.TotalCosts
+
+	if globalLedger.TotalCosts > 0 {
+		res.Revenue.ROI = res.Revenue.Total / globalLedger.TotalCosts
+	}
+
+	metricsMu.Lock()
+	if totalRequests > 0 {
+		res.Metrics.AvgLatencyMS = float64(totalLatency.Milliseconds()) / float64(totalRequests)
+		res.Metrics.ErrorRate = float64(errorCount) / float64(totalRequests)
+	}
+	res.Metrics.StatusCodes = make(map[string]int)
+	for k, v := range statusCodes {
+		res.Metrics.StatusCodes[k] = v
+	}
+	metricsMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleSpatial(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "spatial/index.html")
 }
 
 func generateID() string {

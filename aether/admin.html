@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Aether Admin</title>
+</head>
+<body>
+    <h1>Aether Phase 1: AI Influencer Dashboard</h1>
+    <div id="status">Status: Connecting...</div>
+    <script>
+        fetch('/')
+            .then(r => r.text())
+            .then(t => document.getElementById('status').innerText = 'Status: ' + t);
+    </script>
+</body>
+</html>
