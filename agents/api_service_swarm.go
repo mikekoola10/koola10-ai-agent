@@ -1,6 +1,7 @@
 package agents
 
 type APIAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -29,3 +30,4 @@ func APIFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *APIAgent) SetPrompt(p string) { a.prompt = p }

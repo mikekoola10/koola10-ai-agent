@@ -7,6 +7,7 @@ import (
 )
 
 type MaintenanceAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -45,3 +46,4 @@ func MaintenanceFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *MaintenanceAgent) SetPrompt(p string) { a.prompt = p }

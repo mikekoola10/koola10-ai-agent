@@ -146,11 +146,18 @@ type Edge struct {
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
+type Reflection struct {
+	Timestamp string `json:"timestamp"`
+	Insight   string `json:"insight"`
+	Vertical  string `json:"vertical"`
+}
+
 type MemoryGraph struct {
-	Meetings map[string]Meeting `json:"meetings"`
-	Entities map[string]Entity  `json:"entities"`
-	Edges    []Edge             `json:"edges"`
-	mu       sync.RWMutex
+	Meetings    map[string]Meeting `json:"meetings"`
+	Entities    map[string]Entity  `json:"entities"`
+	Reflections []Reflection       `json:"reflections"`
+	Edges       []Edge             `json:"edges"`
+	mu          sync.RWMutex
 }
 
 type SemanticItem struct {
@@ -289,6 +296,7 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	promptsPath    = "data/agent_prompts.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -312,6 +320,7 @@ var (
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
 	lastProcessedAuditOffset int64
+	lastProcessedImprovementOffset int64
 
 	rlBucket     = 15.0
 	rlMaxBucket  = 15.0
@@ -370,6 +379,7 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
+	globalSwarmManager.PromptLoader = LoadAgentPrompt
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
 	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
@@ -392,8 +402,10 @@ func main() {
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
 	globalSwarmManager.Factories["maintenance"] = agents.MaintenanceFactory
 	globalSwarmManager.Factories["copilot-hive"] = agents.CopilotHiveFactory
+	globalSwarmManager.Factories["gbase"] = agents.GBaseFactory
 
 	go startMaintenanceLoop()
+	go startSelfImprovementLoop()
 	globalSwarmManager.DeploySwarms("copilot-hive", 13)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
@@ -442,6 +454,7 @@ func main() {
 	r.Get("/memory/influence/*", corsMiddleware(handleMemoryInfluence))
 	r.Get("/memory/path", corsMiddleware(handleMemoryPath))
 	r.Get("/memory/decisions/ranked", corsMiddleware(handleMemoryDecisionsRanked))
+	r.Get("/memory/reflections", corsMiddleware(handleMemoryReflections))
 
 	r.Post("/semantic/index", corsMiddleware(handleSemanticIndex))
 	r.Get("/semantic/search", corsMiddleware(handleSemanticSearch))
@@ -690,6 +703,86 @@ func startHeartbeat() {
 		redisClient.Set(ctx, "swarm:node:"+nodeID, jsonNode, 30*time.Second)
 		redisClient.HSet(ctx, "swarm:nodes", nodeID, jsonNode)
 		time.Sleep(15 * time.Second)
+	}
+}
+
+func startSelfImprovementLoop() {
+	log.Printf("Starting GBase recursive self-improvement loop...")
+	ticker := time.NewTicker(5 * time.Minute)
+	for range ticker.C {
+		f, err := os.Open(auditPath)
+		if err != nil {
+			continue
+		}
+		f.Seek(lastProcessedImprovementOffset, io.SeekStart)
+
+		scanner := bufio.NewScanner(f)
+		var tasksToReflect []string
+		var newOffset int64 = lastProcessedImprovementOffset
+
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			newOffset += int64(len(line) + 1)
+			var entry AuditEntry
+			if err := json.Unmarshal(line, &entry); err == nil {
+				if entry.Action == "task_executed" {
+					tasksToReflect = append(tasksToReflect, fmt.Sprintf("%v", entry.Details))
+				}
+			}
+		}
+		f.Close()
+		lastProcessedImprovementOffset = newOffset
+
+		if len(tasksToReflect) > 0 {
+			// Take last 5 tasks for reflection
+			if len(tasksToReflect) > 5 {
+				tasksToReflect = tasksToReflect[len(tasksToReflect)-5:]
+			}
+
+			for _, t := range tasksToReflect {
+				globalSwarmManager.DeploySwarms("gbase", 2)
+				res, err := globalSwarmManager.DispatchTask("gbase", "reflect_on: "+t)
+				if err == nil {
+					insight := fmt.Sprintf("%v", res)
+					globalGraph.mu.Lock()
+					globalGraph.Reflections = append(globalGraph.Reflections, Reflection{
+						Timestamp: time.Now().Format(time.RFC3339),
+						Insight:   insight,
+						Vertical:  "system",
+					})
+					globalGraph.mu.Unlock()
+					globalGraph.Save()
+
+					// Evolve prompt if strategist suggests
+					res2, err2 := globalSwarmManager.DispatchTask("gbase", "propose_strategy_for: "+insight)
+					if err2 == nil {
+						strategy := fmt.Sprintf("%v", res2)
+						log.Printf("[GBase] Strategy Evolved: %s", strategy)
+
+						// Phase 2: Autonomous Prompt Evolution
+						// We'll update the prompt for the related vertical if possible
+						// This is a placeholder for actual LLM-based prompt engineering
+						EvolvePrompts(strategy)
+					}
+				}
+			}
+		}
+	}
+}
+
+func EvolvePrompts(strategy string) {
+	// Logic to parse strategy and update data/agent_prompts.json
+	data, err := os.ReadFile(promptsPath)
+	if err != nil { return }
+	var prompts map[string]string
+	if err := json.Unmarshal(data, &prompts); err != nil { return }
+
+	// Example: Strategist suggested ROI constraints for 'nova'
+	if strings.Contains(strings.ToLower(strategy), "nova") {
+		prompts["nova"] += " Remember to strictly enforce ROI constraints in all proposals."
+		updated, _ := json.MarshalIndent(prompts, "", "  ")
+		os.WriteFile(promptsPath, updated, 0644)
+		log.Printf("[GBase] Evolved prompt for nova based on strategy.")
 	}
 }
 
@@ -970,6 +1063,7 @@ func (g *MemoryGraph) Load() {
 	if err == nil { json.Unmarshal(data, g) }
 	if g.Meetings == nil { g.Meetings = make(map[string]Meeting) }
 	if g.Entities == nil { g.Entities = make(map[string]Entity) }
+	if g.Reflections == nil { g.Reflections = []Reflection{} }
 }
 func (g *MemoryGraph) AddWeightedEdge(source, target, relation string, metadata map[string]interface{}) {
 	g.mu.Lock(); defer g.mu.Unlock()
@@ -1314,7 +1408,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
+			{"role": "system", "content": LoadAgentPrompt("nova")},
 			{"role": "user", "content": req.Prompt},
 		},
 	}
@@ -1374,6 +1468,12 @@ func handleMemoryPath(w http.ResponseWriter, r *http.Request) {
 }
 func handleMemoryDecisionsRanked(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode([]string{})
+}
+func handleMemoryReflections(w http.ResponseWriter, r *http.Request) {
+	globalGraph.mu.RLock()
+	defer globalGraph.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(globalGraph.Reflections)
 }
 func handleSemanticIndex(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "indexed"})
@@ -1695,4 +1795,19 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func LoadAgentPrompt(vertical string) string {
+	data, err := os.ReadFile(promptsPath)
+	if err != nil {
+		return "You are a helpful autonomous agent."
+	}
+	var prompts map[string]string
+	if err := json.Unmarshal(data, &prompts); err != nil {
+		return "You are a helpful autonomous agent."
+	}
+	if p, ok := prompts[vertical]; ok {
+		return p
+	}
+	return "You are a helpful autonomous agent."
 }

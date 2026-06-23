@@ -7,6 +7,7 @@ import (
 )
 
 type DeveloperAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -54,3 +55,4 @@ func DeveloperFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *DeveloperAgent) SetPrompt(p string) { a.prompt = p }

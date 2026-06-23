@@ -1,6 +1,7 @@
 package agents
 
 type FinancialAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -29,3 +30,4 @@ func FinancialFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *FinancialAgent) SetPrompt(p string) { a.prompt = p }

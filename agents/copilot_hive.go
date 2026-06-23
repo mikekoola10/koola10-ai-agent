@@ -6,6 +6,7 @@ import (
 )
 
 type CopilotAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -35,3 +36,4 @@ func CopilotHiveFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *CopilotAgent) SetPrompt(p string) { a.prompt = p }

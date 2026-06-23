@@ -55,6 +55,9 @@
             <div style="margin-top: 10px;">
                 COPILOT_HIVE: <span id="copilot-count">0</span> AGENTS
             </div>
+            <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 5px;">
+                GBASE_INSIGHTS: <span id="insights-count">0</span>
+            </div>
         </div>
 
         <div class="card">
@@ -115,6 +118,10 @@
                 if (swarmMetrics['copilot-hive']) {
                     document.getElementById('copilot-count').innerText = swarmMetrics['copilot-hive'].total;
                 }
+
+                // Insights
+                const reflections = await fetch('/memory/reflections').then(r => r.json());
+                document.getElementById('insights-count').innerText = reflections.length;
 
                 // Log a tick
                 const logs = document.getElementById('logs');
