@@ -311,6 +311,7 @@ var (
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
+	lastProcessedAuditOffset int64
 
 	rlBucket     = 15.0
 	rlMaxBucket  = 15.0
@@ -389,6 +390,11 @@ func main() {
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["maintenance"] = agents.MaintenanceFactory
+	globalSwarmManager.Factories["copilot-hive"] = agents.CopilotHiveFactory
+
+	go startMaintenanceLoop()
+	globalSwarmManager.DeploySwarms("copilot-hive", 13)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -687,6 +693,45 @@ func startHeartbeat() {
 	}
 }
 
+func startMaintenanceLoop() {
+	log.Printf("Starting autonomous self-healing maintenance loop...")
+	ticker := time.NewTicker(1 * time.Minute)
+	for range ticker.C {
+		f, err := os.Open(auditPath)
+		if err != nil {
+			continue
+		}
+
+		f.Seek(lastProcessedAuditOffset, io.SeekStart)
+
+		scanner := bufio.NewScanner(f)
+		var lastError string
+		var newOffset int64 = lastProcessedAuditOffset
+
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			newOffset += int64(len(line) + 1) // +1 for newline
+			var entry AuditEntry
+			if err := json.Unmarshal(line, &entry); err == nil {
+				// Detect failures in audit logs
+				if strings.Contains(strings.ToLower(entry.Action), "fail") ||
+				   strings.Contains(strings.ToLower(fmt.Sprintf("%v", entry.Details)), "error") {
+					lastError = fmt.Sprintf("Action: %s, Details: %v", entry.Action, entry.Details)
+				}
+			}
+		}
+		f.Close()
+		lastProcessedAuditOffset = newOffset
+
+		if lastError != "" {
+			log.Printf("[Self-Healing] Detected new system failure: %s. Dispatching repair task.", lastError)
+			// Trigger maintenance swarm
+			globalSwarmManager.DeploySwarms("maintenance", 3)
+			globalSwarmManager.DispatchTask("maintenance", "repair: "+lastError)
+		}
+	}
+}
+
 func handleSwarmNodes(w http.ResponseWriter, r *http.Request) {
 	if redisClient == nil { http.Error(w, "no redis", 503); return }
 	ctx := context.Background()
@@ -876,6 +921,50 @@ func (g *MemoryGraph) Save() {
 	g.mu.RLock(); defer g.mu.RUnlock()
 	data, _ := json.Marshal(g); os.WriteFile(graphPath, data, 0644)
 }
+
+func (g *MemoryGraph) SummarizeOldTurns() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if len(g.Meetings) <= 50 {
+		return
+	}
+
+	log.Printf("[Hivekeep] Summarizing old memory turns to maintain persistent context...")
+
+	// Sort meetings by ID (simple proxy for time if no timestamp sort available)
+	var keys []string
+	for k := range g.Meetings {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Take the oldest 10 meetings
+	toSummarize := keys[:10]
+	summaryText := "Legacy Summary of historical meetings: "
+	for _, k := range toSummarize {
+		m := g.Meetings[k]
+		summaryText += fmt.Sprintf("[%s: %s] ", m.Timestamp, m.Summary)
+		delete(g.Meetings, k)
+	}
+
+	// Create a single legacy entity representing this compressed history
+	legacyID := "legacy_" + generateID()
+	g.Entities[legacyID] = Entity{
+		Name:  "Historical Context",
+		Type:  "legacy_summary",
+		Tasks: []string{summaryText},
+	}
+
+	// Add an edge from system to this legacy summary
+	g.Edges = append(g.Edges, Edge{
+		Source:   "koola10",
+		Target:   legacyID,
+		Relation: "references_legacy_memory",
+		Weight:   1.5,
+	})
+}
+
 func (g *MemoryGraph) Load() {
 	g.mu.Lock(); defer g.mu.Unlock(); data, err := os.ReadFile(graphPath)
 	if err == nil { json.Unmarshal(data, g) }
@@ -894,6 +983,11 @@ func (g *MemoryGraph) AddWeightedEdge(source, target, relation string, metadata 
 func (g *MemoryGraph) AddMeeting(m Meeting) string {
 	if m.MeetingID == "" { m.MeetingID = generateID() }; if m.Timestamp == "" { m.Timestamp = time.Now().Format(time.RFC3339) }
 	g.mu.Lock(); g.Meetings[m.MeetingID] = m; g.mu.Unlock()
+
+	if len(g.Meetings) > 50 {
+		g.SummarizeOldTurns()
+	}
+
 	for _, decision := range m.Decisions {
 		g.mu.Lock(); if _, ok := g.Entities[decision]; !ok { g.Entities[decision] = Entity{Name: decision, Type: "decision"} }; g.mu.Unlock()
 		g.AddWeightedEdge(m.MeetingID, decision, "contains_decision", nil)
