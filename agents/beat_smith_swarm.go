@@ -10,21 +10,25 @@ type BeatSmithAgent struct {
 	status    AgentStatus
 }
 
+var (
+	beatSmithVSTManager = &beatsmith.VSTManager{}
+	beatSmithLoopGen    = &beatsmith.LoopGenerator{LoopsDir: "/data/beat-smith/loops"}
+	beatSmithArranger   = &beatsmith.ArrangementAdvisor{}
+	beatSmithSampler    = &beatsmith.SampleManager{}
+)
+
 func (a *BeatSmithAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
 	defer func() { a.status = StatusCompleted }()
 
 	switch a.specialty {
 	case "VST Manager":
-		vm := &beatsmith.VSTManager{}
-		vm.ScanPlugins()
-		return vm.InstalledPlugins, nil
+		beatSmithVSTManager.ScanPlugins()
+		return beatSmithVSTManager.InstalledPlugins, nil
 	case "Loop Generator":
-		lg := &beatsmith.LoopGenerator{LoopsDir: "/data/beat-smith/loops"}
-		return lg.GenerateMIDIPattern("Trap", 140)
+		return beatSmithLoopGen.GenerateMIDIPattern("Trap", 140)
 	case "Arrangement Advisor":
-		aa := &beatsmith.ArrangementAdvisor{}
-		return aa.GenerateReport("current_project.flp")
+		return beatSmithArranger.GenerateReport("current_project.flp")
 	case "Mastering Assistant":
 		ma := &beatsmith.MasteringAssistant{}
 		return ma.RecommendSettings("Trap"), nil

@@ -6,10 +6,13 @@ import (
 )
 
 type VSTPlugin struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"` // e.g., Synth, FX
-	Version  string `json:"version"`
-	Category string `json:"category"`
+	Name        string `json:"name"`
+	Type        string `json:"type"` // e.g., Synth, FX
+	Version     string `json:"version"`
+	Category    string `json:"category"`
+	LicenseKey  string `json:"license_key,omitempty"`
+	IsUpToDate  bool   `json:"is_up_to_date"`
+	LatestVers  string `json:"latest_version,omitempty"`
 }
 
 type VSTManager struct {
@@ -18,6 +21,10 @@ type VSTManager struct {
 }
 
 func (v *VSTManager) ScanPlugins() error {
+	// If plugins already tracked, don't overwrite
+	if len(v.InstalledPlugins) > 0 {
+		return nil
+	}
 	// Mock scanning VSTPath
 	v.InstalledPlugins = []VSTPlugin{
 		{Name: "Serum", Type: "Synth", Version: "1.0", Category: "Wavetable"},
@@ -50,10 +57,30 @@ func (v *VSTManager) SuggestVSTs(profile ProducerProfile) []VSTPlugin {
 func (v *VSTManager) CheckForUpdates() []string {
 	// Mock logic for checking updates
 	alerts := []string{}
-	for _, p := range v.InstalledPlugins {
-		if p.Name == "Serum" && p.Version == "1.0" {
-			alerts = append(alerts, fmt.Sprintf("Update available for %s: v1.1", p.Name))
+	for i, p := range v.InstalledPlugins {
+		// Mock check against remote registry
+		latest := "1.0"
+		if p.Name == "Serum" {
+			latest = "1.1"
+		}
+
+		if p.Version != latest {
+			v.InstalledPlugins[i].IsUpToDate = false
+			v.InstalledPlugins[i].LatestVers = latest
+			alerts = append(alerts, fmt.Sprintf("Update available for %s: current v%s, latest v%s", p.Name, p.Version, latest))
+		} else {
+			v.InstalledPlugins[i].IsUpToDate = true
 		}
 	}
 	return alerts
+}
+
+func (v *VSTManager) TrackLicense(pluginName string, licenseKey string) error {
+	for i, p := range v.InstalledPlugins {
+		if p.Name == pluginName {
+			v.InstalledPlugins[i].LicenseKey = licenseKey
+			return nil
+		}
+	}
+	return fmt.Errorf("plugin %s not found", pluginName)
 }

@@ -65,6 +65,20 @@ func (l *LoopGenerator) GenerateMIDIPattern(genre string, bpm int) (string, erro
 }
 
 func (l *LoopGenerator) GenerateAudioLoop(genre string, bpm int) (string, error) {
-	// Suno API placeholder
-	return "suno_audio_loop_placeholder.wav", nil
+	apiKey := os.Getenv("SUNO_API_KEY")
+	if apiKey == "" {
+		return "", fmt.Errorf("SUNO_API_KEY not set")
+	}
+
+	prompt := fmt.Sprintf("A %s audio loop at %d BPM.", genre, bpm)
+	fmt.Printf("[Suno] Calling Suno API with prompt: %s\n", prompt)
+
+	// Mock API call
+	// resp, err := http.Post("https://api.suno.ai/v1/generate", ...)
+
+	filename := fmt.Sprintf("%s/%s_%dBPM_audio.wav", l.LoopsDir, genre, bpm)
+	os.MkdirAll(l.LoopsDir, 0755)
+	err := os.WriteFile(filename, []byte("mock audio data"), 0644)
+
+	return filename, err
 }

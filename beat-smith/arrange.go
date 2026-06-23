@@ -5,17 +5,27 @@ import (
 )
 
 type ProjectStructure struct {
-	Bars     int
-	Sections []string
+	Bars         int
+	Sections     []string
+	Tempo        float64
+	Key          string
+	EffectsChain map[string][]string
 }
 
 type ArrangementAdvisor struct{}
 
 func (a *ArrangementAdvisor) AnalyzeProject(filePath string) (ProjectStructure, error) {
-	// Mock FLP parsing
+	// Mock deeper FLP parsing
 	return ProjectStructure{
 		Bars:     64,
 		Sections: []string{"Intro", "Verse 1", "Chorus", "Verse 2"},
+		Tempo:    140.0,
+		Key:      "C Minor",
+		EffectsChain: map[string][]string{
+			"Kick":   {"Parametric EQ 2", "Soft Tube"},
+			"Melody": {"Serum", "RC-20", "ValhallaSupermassive"},
+			"Master": {"Fruity Limiter", "Soft Clipper"},
+		},
 	}, nil
 }
 
@@ -38,6 +48,7 @@ func (a *ArrangementAdvisor) GenerateReport(filePath string) (string, error) {
 	suggestions := a.SuggestImprovements(ps)
 
 	report := fmt.Sprintf("Arrangement Report for %s:\n", filePath)
+	report += fmt.Sprintf("Tempo: %.1f BPM | Key: %s\n", ps.Tempo, ps.Key)
 	report += fmt.Sprintf("Total Bars: %d\n", ps.Bars)
 	report += "Current Sections: "
 	for i, s := range ps.Sections {
@@ -46,7 +57,12 @@ func (a *ArrangementAdvisor) GenerateReport(filePath string) (string, error) {
 			report += ", "
 		}
 	}
-	report += "\n\nSuggestions:\n"
+	report += "\n\nEffects Chain Summary:\n"
+	for track, fx := range ps.EffectsChain {
+		report += fmt.Sprintf("- %s: %v\n", track, fx)
+	}
+
+	report += "\nSuggestions:\n"
 	for _, s := range suggestions {
 		report += "- " + s + "\n"
 	}
