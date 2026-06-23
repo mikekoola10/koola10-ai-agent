@@ -39,7 +39,7 @@ func (a *BeatSmithAgent) Specialty() string    { return a.specialty }
 func BeatSmithFactory() []SpecialistAgent {
 	specialties := []string{
 		"VST Manager", "Loop Generator", "Arrangement Advisor",
-		"Sample Manager", "Mastering Assistant", "Collaboration Agent",
+		"Sample Manager", "Mastering Assistant",
 		"Marketplace Sync", "Creative Strategist", "Sound Designer", "Rhythm Analyst",
 	}
 	agents := make([]SpecialistAgent, 0, len(specialties))

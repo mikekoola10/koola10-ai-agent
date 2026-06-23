@@ -476,6 +476,7 @@ func main() {
 	r.Get("/beat-smith/vsts", corsMiddleware(handleBeatSmithVSTs))
 	r.Post("/beat-smith/arrange", corsMiddleware(handleBeatSmithArrange))
 	r.Post("/beat-smith/profile", corsMiddleware(handleBeatSmithProfile))
+	r.Post("/admin/trigger_beatsmith", corsMiddleware(handleTriggerBeatSmith))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
@@ -548,6 +549,17 @@ func handleBeatSmithProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	beatSmithMirror.UpdateProfile(p)
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleTriggerBeatSmith(w http.ResponseWriter, r *http.Request) {
+	// Deploy swarms and dispatch a creative task
+	globalSwarmManager.DeploySwarms("beat-smith", 5)
+	res, err := globalSwarmManager.DispatchTask("beat-smith", "Generate new creative ideas")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	json.NewEncoder(w).Encode(res)
 }
 
 // --- Studio Handlers ---
