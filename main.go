@@ -193,25 +193,11 @@ type UsageLog struct {
 	Cost       float64 `json:"cost"`
 }
 
-type Transaction struct {
-	Timestamp   string  `json:"timestamp"`
-	Type        string  `json:"type"`
-	Category    string  `json:"category"`
-	Vertical    string  `json:"vertical,omitempty"`
-	Amount      float64 `json:"amount"`
-	Description string  `json:"description"`
-}
 
-type EconomicLedger struct {
-	Balance      float64       `json:"balance"`
-	TotalCosts   float64       `json:"total_costs"`
-	TotalRevenue float64       `json:"total_revenue"`
-	Transactions []Transaction `json:"transactions"`
-	mu           sync.RWMutex
-}
 
 type EconomicSummary struct {
 	Balance      float64 `json:"balance"`
+	SettledBalance float64 `json:"settled_balance"`
 	TotalCosts   float64 `json:"total_costs"`
 	TotalRevenue float64 `json:"total_revenue"`
 	ROI          float64 `json:"roi"`
@@ -300,9 +286,7 @@ var (
 		Items: []SemanticItem{},
 	}
 
-	globalLedger = &EconomicLedger{
-		Balance: 100.0,
-	}
+	globalLedger = financial.NewEconomicLedger(ledgerPath)
 
 	fundManager *financial.FundManager
 
@@ -355,8 +339,8 @@ func main() {
 
 	globalGraph.Load()
 	globalSemantic.Load()
-	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	go startDailyReconciliationLoop()
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -991,26 +975,6 @@ func LogUsage(tokens int) {
 	logEntry := UsageLog{time.Now().Format(time.RFC3339), tokens, cost}
 	if f, err := os.OpenFile(usagePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil { json.NewEncoder(f).Encode(logEntry); f.Close() }
 }
-func (l *EconomicLedger) Save() {
-	l.mu.RLock(); defer l.mu.RUnlock(); data, _ := json.Marshal(l); os.WriteFile(ledgerPath, data, 0644)
-}
-func (l *EconomicLedger) Load() {
-	l.mu.Lock(); defer l.mu.Unlock(); data, err := os.ReadFile(ledgerPath)
-	if err == nil { json.Unmarshal(data, l) }; if l.Transactions == nil { l.Transactions = []Transaction{} }
-}
-func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
-	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
-}
-func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
-	l.RecordRevenueWithVertical("", amount, source)
-}
-func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
-	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
-}
 
 // --- Financial Handlers ---
 
@@ -1119,7 +1083,7 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var req struct { ApplicationID string; Status string }; json.NewDecoder(r.Body).Decode(&req)
 	id := filepath.Base(req.ApplicationID); data, _ := os.ReadFile(filepath.Join(appsDir, id+".json")); var d ApplicationDraft; json.Unmarshal(data, &d)
 	prev := d.Status; d.Status = req.Status; updated, _ := json.Marshal(d); os.WriteFile(filepath.Join(appsDir, id+".json"), updated, 0644)
-	if req.Status == "approved" && prev != "approved" { globalLedger.RecordRevenueWithVertical("", 500.0, "Grant success: "+id) }
+	if req.Status == "approved" && prev != "approved" { globalLedger.RecordRevenueWithVertical("", 500.0, "Grant success: "+id, false) }
 	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(d)
 }
 func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
@@ -1338,17 +1302,30 @@ func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
-	globalLedger.mu.RLock()
-	defer globalLedger.mu.RUnlock()
+	globalLedger.Mu.RLock()
+	defer globalLedger.Mu.RUnlock()
 	roi := 0.0
 	if globalLedger.TotalCosts > 0 {
 		roi = globalLedger.TotalRevenue / globalLedger.TotalCosts
 	}
+
+	settledBalance := 0.0
+	for _, tx := range globalLedger.Transactions {
+		if tx.Settled {
+			if tx.Type == "revenue" {
+				settledBalance += tx.Amount
+			} else if tx.Type == "cost" || tx.Type == "expense" {
+				settledBalance -= tx.Amount
+			}
+		}
+	}
+
 	json.NewEncoder(w).Encode(EconomicSummary{
-		Balance:      globalLedger.Balance,
-		TotalCosts:   globalLedger.TotalCosts,
-		TotalRevenue: globalLedger.TotalRevenue,
-		ROI:          roi,
+		Balance:        globalLedger.Balance,
+		SettledBalance: settledBalance,
+		TotalCosts:     globalLedger.TotalCosts,
+		TotalRevenue:   globalLedger.TotalRevenue,
+		ROI:            roi,
 	})
 }
 func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
@@ -1367,8 +1344,8 @@ func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
-	globalLedger.mu.RLock()
-	defer globalLedger.mu.RUnlock()
+	globalLedger.Mu.RLock()
+	defer globalLedger.Mu.RUnlock()
 	revenueByVertical := make(map[string]float64)
 	costByVertical := make(map[string]float64)
 	for _, t := range globalLedger.Transactions {
@@ -1613,4 +1590,34 @@ func handleSpiralLedger(w http.ResponseWriter, r *http.Request) {
 func handleSpiralStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte("{\"status\": \"operational\", \"swarms\": [\"affiliate\", \"bounty\", \"bpa-api\", \"content\"]}"))
+}
+
+func startDailyReconciliationLoop() {
+	ticker := time.NewTicker(24 * time.Hour)
+	for {
+		// Mock actual balances for reconciliation
+		// In production, these would call real APIs (Stripe, Binance, etc.)
+		actual := map[string]float64{
+			"cashapp": 0.0,
+			"stripe":  0.0,
+			"binance": 0.0,
+			"circle":  0.0,
+		}
+
+		rec := globalLedger.Reconcile(actual)
+		if rec.Status == "discrepancy" {
+			msg := fmt.Sprintf("⚠️ Ledger revenue: $%.2f | Actual cash: $%.2f | Difference: $%.2f", rec.LedgerBalance, 0.0, rec.Discrepancy)
+			tools.RunTool("agentmail", map[string]interface{}{
+				"to": "admin@koola10.ai",
+				"subject": "Daily Reconciliation Alert",
+				"body": msg,
+			})
+		}
+
+		// Save reconciliation record
+		data, _ := json.MarshalIndent(rec, "", "  ")
+		os.WriteFile("/data/daily_reconciliation.json", data, 0644)
+
+		<-ticker.C
+	}
 }
