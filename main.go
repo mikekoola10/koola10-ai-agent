@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"bufio"
 	"bytes"
 	"context"
@@ -344,6 +345,13 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // --- Main ---
 
 func main() {
+	swarmType := flag.String("swarm", "", "Type of swarm to run (affiliate, bounty)")
+	liveMode := flag.Bool("live", false, "Run in live mode")
+	count := flag.Int("count", 3, "Number of items to process/generate")
+	targets := flag.Int("targets", 10, "Number of targets to scan")
+	outputFile := flag.String("output", "", "Output file for results")
+	flag.Parse()
+
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
 	region = os.Getenv("FLY_REGION")
@@ -361,29 +369,31 @@ func main() {
 
 	vaultClient := sterling.NewVaultClient()
 	deepseekAPIKey := os.Getenv("DEEPSEEK_API_KEY")
-	bountyHunter := sterling.NewBountyHunter(globalLedger, vaultClient, deepseekAPIKey)
-	contentGen := sterling.NewContentGenerator(globalLedger, vaultClient, deepseekAPIKey)
 
-	// Run bounty hunter daily (e.g., at 2 AM)
-	go func() {
-		for {
-			bountyHunter.RunDailyScan()
-			time.Sleep(24 * time.Hour)
-		}
-	}()
-
-	// Run content generator daily (e.g., at 10 AM)
-	go func() {
-		for {
-			now := time.Now()
-			next := time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, now.Location())
-			if now.After(next) {
-				next = next.Add(24 * time.Hour)
+	// Local Swarm Execution
+	if *swarmType != "" {
+		fmt.Printf("--- Starting Local Emergency Swarm: %s ---\n", *swarmType)
+		if *swarmType == "affiliate" {
+			contentGen := sterling.NewContentGenerator(globalLedger, vaultClient, deepseekAPIKey)
+			// For affiliate swarm, we process 'count' times
+			for i := 0; i < *count; i++ {
+				fmt.Printf("\n[Affiliate] Generating article %d/%d...\n", i+1, *count)
+				contentGen.RunDailyContentCreation()
 			}
-			time.Sleep(time.Until(next))
-			contentGen.RunDailyContentCreation()
+		} else if *swarmType == "bounty" {
+			bountyHunter := sterling.NewBountyHunter(globalLedger, vaultClient, deepseekAPIKey)
+			// For bounty swarm, we process 'targets'
+			fmt.Printf("\n[Bounty] Scanning targets (limit: %d)...\n", *targets)
+			if *outputFile != "" {
+				fmt.Printf("[Bounty] Output will be saved to: %s\n", *outputFile)
+			}
+			bountyHunter.RunDailyScan(*targets, *outputFile)
 		}
-	}()
+		fmt.Println("\n--- Local Swarm Execution Complete ---")
+		if !*liveMode {
+			return
+		}
+	}
 
 	// Automated invoice payment check (every 24h)
 	go func() {

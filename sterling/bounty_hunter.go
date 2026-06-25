@@ -170,14 +170,18 @@ func (bh *BountyHunter) submitReport(program BountyProgram, reportText string) e
 }
 
 // RunDailyScan is the main entry point (call from cron or daily payer)
-func (bh *BountyHunter) RunDailyScan() {
+func (bh *BountyHunter) RunDailyScan(targetLimit int, outputFile string) {
     programs, err := bh.fetchPrograms()
     if err != nil {
         log.Printf("[BountyHunter] Failed to fetch programs: %v", err)
         return
     }
 
+    count := 0
     for _, prog := range programs {
+        if targetLimit > 0 && count >= targetLimit {
+            break
+        }
         log.Printf("[BountyHunter] Scanning %s (%s)", prog.Name, prog.Target)
         result, err := bh.runNucleiScan(prog.Target)
         if err != nil {
@@ -198,11 +202,21 @@ func (bh *BountyHunter) RunDailyScan() {
 
             // Save locally for manual submission
             filename := fmt.Sprintf("bounty_report_%d.txt", time.Now().UnixNano())
-            os.WriteFile(filename, []byte(report), 0644)
-            fmt.Printf("--- BOUNTY REPORT GENERATED FOR %s ---\nSaved to: %s\n\n%s\n---------------------------\n", prog.Name, filename, report)
+            if outputFile != "" {
+                f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+                if err == nil {
+                    f.WriteString(fmt.Sprintf("\n--- REPORT FOR %s ---\n%s\n", prog.Target, report))
+                    f.Close()
+                    filename = outputFile
+                }
+            } else {
+                os.WriteFile(filename, []byte(report), 0644)
+            }
+            fmt.Printf("\n--- BOUNTY REPORT GENERATED ---\nTarget: %s\nSaved to: %s\n------------------------------\n", prog.Target, filename)
 
             // Record expected bounty in ledger (when paid)
             bh.ledger.RecordRevenue(float64(result.Bounty), "Bug bounty: "+prog.Name+" (pending)")
+            count++
             bh.vault.AddEntry(VaultEntry{
                 Description: "Bug bounty submission",
                 Amount:      float64(result.Bounty),

@@ -108,11 +108,13 @@ func (cg *ContentGenerator) RunDailyContentCreation() {
         log.Printf("[ContentSeller] Generated article: %s", title)
 
         // Save locally for manual publishing
-        filename := fmt.Sprintf("article_%d.md", time.Now().UnixNano())
+        outDir := "./output/affiliate"
+        os.MkdirAll(outDir, 0755)
+        filename := fmt.Sprintf("%s/article_%d.md", outDir, time.Now().UnixNano())
         os.WriteFile(filename, []byte(content), 0644)
-        fmt.Printf("--- ARTICLE GENERATED: %s ---\nSaved to: %s\n\n%s\n---------------------------\n", title, filename, content)
+        fmt.Printf("\n--- ARTICLE GENERATED ---\nTitle: %s\nSaved to: %s\n-------------------------\n", title, filename)
 
-        // Skip sleep for emergency local execution if desired, or use a small delay
+        // Short sleep for local execution
         time.Sleep(2 * time.Second)
     }
 }
