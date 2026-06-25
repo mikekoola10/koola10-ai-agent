@@ -463,6 +463,8 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+	r.Get("/spiral/ledger", corsMiddleware(handleSpiralLedger))
+	r.Get("/spiral/status", corsMiddleware(handleSpiralStatus))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
@@ -1601,4 +1603,14 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func handleSpiralLedger(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte("{\"balance\": 0.0, \"total_revenue\": 0.0, \"total_spent\": 0.0}"))
+}
+
+func handleSpiralStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte("{\"status\": \"operational\", \"swarms\": [\"affiliate\", \"bounty\", \"bpa-api\", \"content\"]}"))
 }
