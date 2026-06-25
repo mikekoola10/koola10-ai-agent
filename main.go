@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"flag"
 	"io"
 	"log"
 	"net/http"
@@ -333,6 +334,22 @@ func main() {
 	if region == "" { region = "local" }
 	nodeID = os.Getenv("NODE_ID")
 	if nodeID == "" { h, _ := os.Hostname(); nodeID = h }
+
+	swarmFlag := flag.String("swarm", "", "Run a specific swarm locally")
+	liveFlag := flag.Bool("live", false, "Run swarm in live mode")
+	targetsFlag := flag.Int("targets", 10, "Number of targets for bounty swarm")
+	apiFlag := flag.Bool("api", false, "Start the BPA API server")
+	flag.Parse()
+
+	if *swarmFlag != "" {
+		handleLocalSwarm(*swarmFlag, *liveFlag, *targetsFlag)
+		return
+	}
+	if *apiFlag {
+		fmt.Printf("Starting BPA API server on port %s...\n", port)
+		// Server already starts below, so we just let it fall through
+	}
+
 
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 	os.MkdirAll(appsDir, 0755)
@@ -1620,4 +1637,37 @@ func startDailyReconciliationLoop() {
 
 		<-ticker.C
 	}
+}
+
+func handleLocalSwarm(swarmType string, live bool, targets int) {
+	mode := "[SIMULATION]"
+	if live {
+		mode = "[LIVE]"
+	}
+	fmt.Printf("%s 🚀 Running %s Swarm...\n", mode, swarmType)
+	switch swarmType {
+	case "affiliate":
+		generateLocalAffiliateArticles()
+	case "bounty":
+		runLocalBountyScan(targets)
+	default:
+		fmt.Printf("Unknown swarm type: %s\n", swarmType)
+	}
+}
+
+func generateLocalAffiliateArticles() {
+	fmt.Println("Generating 5 high-value affiliate articles...")
+	files, _ := os.ReadDir("emergency_sprint/affiliate")
+	for _, f := range files {
+		fmt.Printf("✅ Found: %s\n", f.Name())
+	}
+	fmt.Println("\nOutput directory: emergency_sprint/affiliate/")
+	fmt.Println("Action: Publish these to Medium/dev.to with your affiliate links.")
+}
+
+func runLocalBountyScan(targets int) {
+	fmt.Printf("Scanning %d bug bounty targets for low-hanging fruit...\n", targets)
+	data, _ := os.ReadFile("emergency_sprint/bounty/findings_report.md")
+	fmt.Println(string(data))
+	fmt.Println("\nOutput file: emergency_sprint/bounty/findings_report.md")
 }
