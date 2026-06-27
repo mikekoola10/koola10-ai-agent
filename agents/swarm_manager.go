@@ -27,6 +27,7 @@ type SwarmManager struct {
 	// Callbacks for logging to economic ledger and compliance audit
 	AuditLogger func(action string, details map[string]interface{})
 	LedgerLogger func(vertical, category string, amount float64, description string)
+	RevenueLogger func(amount float64, source string)
 
 	// Factory for creating agents for a vertical
 	Factories map[string]func() []SpecialistAgent
@@ -90,6 +91,15 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 	sm.Mu.Unlock()
 
 	result, err := target.Run(task)
+
+	// Check if result contains profit and log it
+	if err == nil && sm.RevenueLogger != nil {
+		if resMap, ok := result.(map[string]interface{}); ok {
+			if profit, ok := resMap["profit"].(float64); ok && profit > 0 {
+				sm.RevenueLogger(profit, fmt.Sprintf("Swarm: %s (%s)", vertical, target.Specialty()))
+			}
+		}
+	}
 
 	if sm.AuditLogger != nil {
 		sm.AuditLogger("task_executed", map[string]interface{}{
