@@ -1,0 +1,13 @@
+MCP QUICK REFERENCE
+
+Endpoints:
+- /admin/mcp-test: Quick check if MCP is working.
+
+Files:
+- tools/mcp_client.go: Core implementation.
+- spiral-mcp-client.ts: Spiral client.
+- Dockerfile: Infrastructure setup.
+
+Commands:
+- go build: Recompile core.
+- npx ts-node spiral-mcp-client.ts: Run Spiral client.

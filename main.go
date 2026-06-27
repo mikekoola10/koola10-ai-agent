@@ -15,8 +15,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
+	"syscall"
 	"strings"
 	"sync"
 	"time"
@@ -358,6 +360,9 @@ func main() {
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
+	// Register default MCP client for testing
+	tools.RegisterMCPClient("everything", "node", "./node_modules/@modelcontextprotocol/server-everything/dist/index.js")
+
 	// Automated invoice payment check (every 24h)
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
@@ -464,6 +469,8 @@ func main() {
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
 
+	r.Get("/admin/mcp-test", corsMiddleware(handleMCPTest))
+
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
@@ -480,7 +487,34 @@ func main() {
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
-	http.ListenAndServe("0.0.0.0:"+port, r)
+
+	server := &http.Server{
+		Addr:    "0.0.0.0:" + port,
+		Handler: r,
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+
+	// Graceful shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	<-stop
+
+	log.Println("Shutting down MCP clients...")
+	tools.ShutdownMCPClients()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %s", err)
+	}
+
+	log.Println("Server exiting")
 }
 
 // --- Studio Handlers ---
@@ -1597,6 +1631,17 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleMCPTest(w http.ResponseWriter, r *http.Request) {
+	// Test calling a registered MCP client
+	res, err := tools.CallMCP("everything", "tools/list", nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(res)
 }
 
 func generateID() string {
