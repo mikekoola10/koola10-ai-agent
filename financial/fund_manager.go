@@ -12,6 +12,7 @@ import (
 
 type Ledger interface {
 	RecordRevenue(amount float64, source string)
+	RecordCost(vertical, category string, amount float64, description string)
 }
 
 type Transaction struct {
@@ -115,8 +116,6 @@ func (fm *FundManager) CoverStripeFees(transactionAmount float64) {
 
 func (fm *FundManager) PaySubscription(service string, amount float64) {
 	fm.mu.Lock()
-	defer fm.mu.Unlock()
-
 	fm.Balance -= amount
 	fm.TotalSpent += amount
 
@@ -128,6 +127,11 @@ func (fm *FundManager) PaySubscription(service string, amount float64) {
 		Description: fmt.Sprintf("Subscription payment for %s", service),
 	})
 	fm.save()
+	fm.mu.Unlock()
+
+	if fm.ledger != nil {
+		fm.ledger.RecordCost("operations", "subscription", amount, fmt.Sprintf("Subscription payment for %s", service))
+	}
 }
 
 func (fm *FundManager) PayFlyInvoice() {
