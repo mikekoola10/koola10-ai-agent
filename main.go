@@ -289,6 +289,7 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	subsPath       = "/data/subscriptions.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -305,6 +306,7 @@ var (
 	}
 
 	fundManager *financial.FundManager
+	subManager  *SubscriptionManager
 
 	globalSwarmManager = agents.NewSwarmManager()
 
@@ -325,6 +327,96 @@ var (
 	//go:embed dashboard.html
 	dashboardHTML string
 )
+
+
+// --- Subscription Manager ---
+
+type Subscription struct {
+	ID        string    `json:"id"`
+	Service   string    `json:"service"`
+	Amount    float64   `json:"amount"`
+	CardID    string    `json:"card_id"`
+	Status    string    `json:"status"`
+	Frequency string    `json:"frequency"` // "monthly"
+	LastPaid  time.Time `json:"last_paid"`
+}
+
+type SubscriptionManager struct {
+	Subscriptions []Subscription `json:"subscriptions"`
+	storagePath   string
+	mu            sync.RWMutex
+}
+
+func NewSubscriptionManager(path string) *SubscriptionManager {
+	sm := &SubscriptionManager{
+		storagePath:   path,
+		Subscriptions: []Subscription{},
+	}
+	sm.Load()
+	return sm
+}
+
+func (sm *SubscriptionManager) Load() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	data, err := os.ReadFile(sm.storagePath)
+	if err == nil {
+		json.Unmarshal(data, sm)
+	}
+}
+
+func (sm *SubscriptionManager) Save() {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	data, _ := json.MarshalIndent(sm, "", "  ")
+	os.WriteFile(sm.storagePath, data, 0644)
+}
+
+func (sm *SubscriptionManager) AddSubscription(sub Subscription) {
+	sm.mu.Lock()
+	if sub.ID == "" {
+		sub.ID = generateID()
+	}
+	sm.Subscriptions = append(sm.Subscriptions, sub)
+	sm.mu.Unlock()
+	sm.Save()
+}
+
+func (sm *SubscriptionManager) RunTick(fm *financial.FundManager) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	now := time.Now()
+	changed := false
+	for i, sub := range sm.Subscriptions {
+		if sub.LastPaid.IsZero() || now.Sub(sub.LastPaid) > 30*24*time.Hour {
+			log.Printf("[Scheduler] Paying subscription for %s: $%.2f", sub.Service, sub.Amount)
+			fm.PaySubscription(sub.Service, sub.Amount)
+			sm.Subscriptions[i].LastPaid = now
+			changed = true
+		}
+	}
+	if changed {
+		data, _ := json.MarshalIndent(sm, "", "  ")
+		os.WriteFile(sm.storagePath, data, 0644)
+	}
+}
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		apiKey := os.Getenv("ADMIN_API_KEY")
+		if apiKey == "" {
+			http.Error(w, "ADMIN_API_KEY not configured", 500)
+			return
+		}
+		providedKey := r.Header.Get("X-Admin-API-Key")
+		if providedKey != apiKey {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		next(w, r)
+	}
+}
 
 // --- Middleware ---
 
@@ -351,14 +443,28 @@ func main() {
 	if nodeID == "" { h, _ := os.Hostname(); nodeID = h }
 
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
+	os.MkdirAll(filepath.Dir(ledgerPath), 0755)
+	os.MkdirAll(filepath.Dir(fundPath), 0755)
+	os.MkdirAll(filepath.Dir(subsPath), 0755)
 	os.MkdirAll(appsDir, 0755)
 
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	subManager = NewSubscriptionManager(subsPath)
 
 	// Automated invoice payment check (every 24h)
+
+	// Subscription Scheduler (every 1h)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		for {
+			subManager.RunTick(fundManager)
+			<-ticker.C
+		}
+	}()
+
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		for {
@@ -407,6 +513,10 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/{file}.html", func(w http.ResponseWriter, r *http.Request) {
+		file := chi.URLParam(r, "file")
+		http.ServeFile(w, r, file+".html")
+	})
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -451,6 +561,7 @@ func main() {
 	r.Post("/economic/ledger/cost", corsMiddleware(handleEconomicLedgerCost))
 	r.Post("/economic/ledger/revenue", corsMiddleware(handleEconomicLedgerRevenue))
 	r.Get("/economic/ledger/summary", corsMiddleware(handleEconomicLedgerSummary))
+	r.Get("/vault/summary", corsMiddleware(handleEconomicLedgerSummary))
 	r.Post("/economic/evaluate", corsMiddleware(handleEconomicEvaluate))
 
 	r.Post("/swarm/start", corsMiddleware(handleSwarmStart))
@@ -472,6 +583,10 @@ func main() {
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
+	r.Post("/admin/subscriptions/run", authMiddleware(handleAdminSubscriptionsRun))
+	r.Post("/admin/agentcards/create", authMiddleware(handleAdminAgentCardsCreate))
+	r.Get("/admin/subscriptions", authMiddleware(handleAdminSubscriptionsList))
+
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
 	r.Post("/studio/episode", corsMiddleware(handleStudioEpisode))
@@ -481,6 +596,53 @@ func main() {
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
+}
+
+
+func handleAdminSubscriptionsRun(w http.ResponseWriter, r *http.Request) {
+	subManager.RunTick(fundManager)
+	w.Write([]byte(`{"status":"triggered"}`))
+}
+
+func handleAdminAgentCardsCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Service string  `json:"service"`
+		Amount  float64 `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	client := financial.NewAgentCardClient()
+	card, err := client.CreateCard(int(req.Amount * 100))
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	sub := Subscription{
+		Service:   req.Service,
+		Amount:    req.Amount,
+		CardID:    card.ID,
+		Status:    "active",
+		Frequency: "monthly",
+	}
+	subManager.AddSubscription(sub)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "created",
+		"card":   card,
+		"sub":    sub,
+	})
+}
+
+func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
+	subManager.mu.RLock()
+	defer subManager.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(subManager.Subscriptions)
 }
 
 // --- Studio Handlers ---
