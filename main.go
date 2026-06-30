@@ -340,6 +340,34 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		adminKey := os.Getenv("ADMIN_API_KEY")
+		if adminKey == "" {
+			next(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		apiKeyHeader := r.Header.Get("X-Admin-API-Key")
+
+		if apiKeyHeader == adminKey {
+			next(w, r)
+			return
+		}
+
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			if token == adminKey {
+				next(w, r)
+				return
+			}
+		}
+
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}
+}
+
 // --- Main ---
 
 func main() {
@@ -386,6 +414,8 @@ func main() {
 	globalSwarmManager.Factories["content"] = agents.ContentFactory
 	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
@@ -419,6 +449,11 @@ func main() {
 	r.Get("/grants/applications", corsMiddleware(handleApplicationsList))
 	r.Post("/grants/monitor", corsMiddleware(handleMonitor))
 	r.Post("/grants/update-status", corsMiddleware(handleUpdateStatus))
+
+	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
+	r.Post("/admin/trigger_affiliate", corsMiddleware(authMiddleware(handleTriggerAffiliate)))
+	r.Post("/admin/trigger_bounty", corsMiddleware(authMiddleware(handleTriggerBounty)))
+	r.Get("/logs", corsMiddleware(authMiddleware(handleLogs)))
 	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
 	r.Post("/grants/check-status", corsMiddleware(handleCheckStatus))
 
@@ -1353,6 +1388,28 @@ func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
 }
 
+func handleVaultSummary(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	totalRevenue := globalLedger.TotalRevenue
+	globalLedger.mu.RUnlock()
+
+	fundManager.RLock()
+	totalEarned := fundManager.TotalEarned
+	fundManager.RUnlock()
+
+	// Consolidate gross Total Revenue
+	grossRevenue := totalRevenue + totalEarned
+
+	res := map[string]interface{}{
+		"total_revenue":   grossRevenue,
+		"operations_fund": grossRevenue * 0.30,
+		"spendable_fund":  grossRevenue * 0.70,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
 func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
 	globalSwarmManager.Mu.RLock()
 	defer globalSwarmManager.Mu.RUnlock()
@@ -1597,6 +1654,79 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleTriggerAffiliate(w http.ResponseWriter, r *http.Request) {
+	// Auto-deploy if not already
+	if len(globalSwarmManager.Swarms["affiliate"]) == 0 {
+		globalSwarmManager.DeploySwarms("affiliate", 5)
+	}
+
+	res, err := globalSwarmManager.DispatchTask("affiliate", "Generate revenue via affiliate links")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	// Route revenue if profit was reported
+	if m, ok := res.(map[string]interface{}); ok {
+		if profit, ok := m["profit"].(float64); ok {
+			fundManager.RouteRevenue(profit, "affiliate_swarm")
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleTriggerBounty(w http.ResponseWriter, r *http.Request) {
+	// Auto-deploy if not already
+	if len(globalSwarmManager.Swarms["bounty"]) == 0 {
+		globalSwarmManager.DeploySwarms("bounty", 5)
+	}
+
+	res, err := globalSwarmManager.DispatchTask("bounty", "Find and secure bug bounties")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	// Route revenue if profit was reported
+	if m, ok := res.(map[string]interface{}); ok {
+		if profit, ok := m["profit"].(float64); ok {
+			fundManager.RouteRevenue(profit, "bounty_swarm")
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleLogs(w http.ResponseWriter, r *http.Request) {
+	service := r.URL.Query().Get("service")
+	f, err := os.Open(auditPath)
+	if err != nil {
+		json.NewEncoder(w).Encode([]AuditEntry{})
+		return
+	}
+	defer f.Close()
+
+	var entries []AuditEntry
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var e AuditEntry
+		if err := json.Unmarshal([]byte(scanner.Text()), &e); err == nil {
+			if service == "" || strings.Contains(strings.ToLower(fmt.Sprintf("%v", e.Details)), strings.ToLower(service)) || strings.Contains(strings.ToLower(e.Action), strings.ToLower(service)) {
+				entries = append(entries, e)
+			}
+		}
+	}
+	// Return last 100 entries
+	if len(entries) > 100 {
+		entries = entries[len(entries)-100:]
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entries)
 }
 
 func generateID() string {
