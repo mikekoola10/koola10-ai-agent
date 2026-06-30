@@ -3,128 +3,990 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Admin</title>
+    <title>KOOLA10_SYSTEM v3.0 // DIGITAL_MANCAVE</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
     <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; line-height: 1.4; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
-        .card { border: 1px solid #333; padding: 15px; background: #111; }
-        .status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
-        .online { background: #0f0; box-shadow: 0 0 5px #0f0; }
-        .offline { background: #f00; }
-        h1, h2 { color: #fff; margin-top: 0; }
-        button { background: #333; color: #fff; border: 1px solid #555; padding: 8px 12px; cursor: pointer; font-family: monospace; }
-        button:hover { background: #444; }
-        button:disabled { opacity: 0.5; }
-        .red { color: #f00; border-color: #f00; }
-        .red:hover { background: #300; }
-        pre { font-size: 12px; overflow-x: auto; color: #aaa; }
-        .node { border-bottom: 1px solid #222; padding: 5px 0; }
+        :root {
+            --neon-cyan: #00f3ff;
+            --neon-purple: #bc13fe;
+            --neon-green: #39ff14;
+            --neon-red: #ff003c;
+            --deep-black: #050505;
+            --leather-black: #0a0a0a;
+            --glass: rgba(255, 255, 255, 0.05);
+        }
+
+        body, html {
+            margin: 0; padding: 0;
+            background: var(--deep-black);
+            color: #fff;
+            font-family: 'Orbitron', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            user-select: none;
+        }
+
+        /* Dynamic Background Image */
+        #bg-image-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-size: cover;
+            background-position: center;
+            opacity: 0;
+            transition: opacity 2s ease-in-out;
+            z-index: -2;
+            filter: brightness(0.3) blur(2px);
+        }
+
+        /* Scanline Effect */
+        body::before {
+            content: " ";
+            display: block;
+            position: fixed;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.15) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            z-index: 9999;
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+        }
+
+        #bg-canvas {
+            position: fixed;
+            top: 0; left: 0;
+            z-index: -1;
+        }
+
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 1.2fr 2fr 1.2fr;
+            grid-template-rows: auto 1fr auto;
+            gap: 20px;
+            padding: 20px;
+            height: 100vh;
+            box-sizing: border-box;
+            background: radial-gradient(circle at 50% 50%, rgba(0, 243, 255, 0.05) 0%, transparent 70%);
+        }
+
+        header {
+            grid-column: 1 / span 3;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--leather-black);
+            border: 1px solid var(--neon-cyan);
+            padding: 10px 30px;
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.2);
+            clip-path: polygon(0 0, 98% 0, 100% 100%, 2% 100%);
+            position: relative;
+        }
+
+        header::after {
+            content: "";
+            position: absolute;
+            bottom: 0; left: 0; width: 100%; height: 2px;
+            background: var(--neon-cyan);
+            box-shadow: 0 0 10px var(--neon-cyan);
+            animation: pulse-border 2s infinite;
+        }
+
+        @keyframes pulse-border {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+
+        .header-left h1 {
+            margin: 0;
+            font-size: 1.2rem;
+            letter-spacing: 8px;
+            color: var(--neon-cyan);
+            text-shadow: 0 0 15px var(--neon-cyan);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 25px;
+        }
+
+        .audio-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 243, 255, 0.05);
+            padding: 5px 15px;
+            border: 1px solid rgba(0, 243, 255, 0.2);
+            border-radius: 20px;
+        }
+
+        #volume-slider {
+            width: 60px;
+            height: 4px;
+            cursor: pointer;
+            accent-color: var(--neon-cyan);
+        }
+
+        .xp-container {
+            width: 150px;
+            height: 8px;
+            background: #111;
+            border: 1px solid var(--neon-purple);
+            position: relative;
+            box-shadow: inset 0 0 5px #000;
+        }
+
+        #xp-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--neon-purple), #ff00ff);
+            width: 0%;
+            box-shadow: 0 0 15px var(--neon-purple);
+            transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .stat-item {
+            font-size: 0.7rem;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        .stat-value {
+            color: var(--neon-green);
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .panel {
+            background: rgba(10, 10, 10, 0.8);
+            border-left: 3px solid var(--neon-cyan);
+            border-right: 1px solid rgba(0, 243, 255, 0.2);
+            border-top: 1px solid rgba(0, 243, 255, 0.2);
+            border-bottom: 1px solid rgba(0, 243, 255, 0.2);
+            padding: 20px;
+            position: relative;
+            backdrop-filter: blur(10px);
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .panel::before {
+            content: "";
+            position: absolute;
+            top: 0; right: 0;
+            width: 20px; height: 20px;
+            border-top: 1px solid var(--neon-cyan);
+            border-right: 1px solid var(--neon-cyan);
+        }
+
+        .panel:hover {
+            border-color: var(--neon-cyan);
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.1);
+            transform: translateY(-5px);
+        }
+
+        .panel h2 {
+            margin-top: 0;
+            font-size: 0.8rem;
+            color: var(--neon-cyan);
+            letter-spacing: 3px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .main-view {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        #spiral-eye-container {
+            flex-grow: 1;
+            background: radial-gradient(circle at 50% 50%, #0a0a0a 0%, #000 100%);
+            border: 1px solid rgba(188, 19, 254, 0.3);
+            position: relative;
+            box-shadow: inset 0 0 100px rgba(188, 19, 254, 0.1);
+            overflow: hidden;
+            cursor: move;
+        }
+
+        .btn {
+            background: rgba(0, 243, 255, 0.05);
+            border: 1px solid var(--neon-cyan);
+            color: var(--neon-cyan);
+            padding: 12px;
+            cursor: pointer;
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            font-size: 0.7rem;
+            transition: all 0.3s;
+            position: relative;
+            z-index: 1;
+        }
+
+        .btn:hover {
+            background: var(--neon-cyan);
+            color: #000;
+            box-shadow: 0 0 25px var(--neon-cyan);
+        }
+
+        .btn-purple {
+            border-color: var(--neon-purple);
+            color: var(--neon-purple);
+            background: rgba(188, 19, 254, 0.05);
+        }
+
+        .btn-purple:hover {
+            background: var(--neon-purple);
+            color: #fff;
+            box-shadow: 0 0 25px var(--neon-purple);
+        }
+
+        .btn-red {
+            border-color: var(--neon-red);
+            color: var(--neon-red);
+            background: rgba(255, 0, 60, 0.05);
+        }
+
+        .btn-red:hover {
+            background: var(--neon-red);
+            color: #fff;
+            box-shadow: 0 0 25px var(--neon-red);
+        }
+
+        #rare-finds-studio {
+            height: 300px;
+        }
+
+        .gallery {
+            display: flex;
+            gap: 15px;
+            overflow-x: auto;
+            padding: 10px 5px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--neon-cyan) transparent;
+        }
+
+        .gallery::-webkit-scrollbar { height: 4px; }
+        .gallery::-webkit-scrollbar-thumb { background: var(--neon-cyan); }
+
+        .gallery-item {
+            min-width: 200px;
+            height: 140px;
+            background: #111;
+            border: 1px solid #333;
+            position: relative;
+            overflow: hidden;
+            group: hover;
+        }
+
+        .gallery-item img {
+            width: 100%; height: 100%;
+            object-fit: cover;
+            filter: grayscale(0.5) contrast(1.2);
+            transition: 0.5s;
+        }
+
+        .gallery-item:hover img {
+            filter: grayscale(0) contrast(1);
+            transform: scale(1.1);
+        }
+
+        .gallery-controls {
+            position: absolute;
+            bottom: -40px;
+            left: 0; width: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: space-around;
+            padding: 5px 0;
+            transition: bottom 0.3s;
+        }
+
+        .gallery-item:hover .gallery-controls {
+            bottom: 0;
+        }
+
+        .mini-btn {
+            font-size: 0.5rem;
+            color: var(--neon-cyan);
+            background: transparent;
+            border: 1px solid var(--neon-cyan);
+            cursor: pointer;
+            padding: 2px 5px;
+        }
+
+        .mini-btn:hover {
+            background: var(--neon-cyan);
+            color: #000;
+        }
+
+        #logs {
+            background: rgba(0, 0, 0, 0.9);
+            padding: 15px;
+            font-size: 0.65rem;
+            color: #0f0;
+            height: 120px;
+            overflow-y: auto;
+            border: 1px solid #222;
+            box-shadow: inset 0 0 10px #000;
+        }
+
+        /* Reactive Lighting Class */
+        .system-pulse {
+            animation: global-pulse 0.8s ease-out;
+        }
+
+        @keyframes global-pulse {
+            0% { box-shadow: 0 0 0px transparent; border-color: inherit; }
+            50% { box-shadow: 0 0 50px var(--neon-purple); border-color: var(--neon-purple); }
+            100% { box-shadow: 0 0 0px transparent; border-color: inherit; }
+        }
+
+        /* Achievement Notification */
+        #achievement-popup {
+            position: fixed;
+            top: 40px;
+            right: -450px;
+            background: rgba(10, 10, 10, 0.95);
+            border: 1px solid var(--neon-green);
+            padding: 20px 30px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            z-index: 10000;
+            box-shadow: 0 0 40px rgba(57, 255, 20, 0.3);
+            backdrop-filter: blur(15px);
+            clip-path: polygon(10% 0, 100% 0, 90% 100%, 0 100%);
+        }
+
+        .achievement-icon {
+            font-size: 2.5rem;
+            filter: drop-shadow(0 0 10px var(--neon-green));
+        }
+
+        .sound-toggle {
+            cursor: pointer;
+            font-size: 1.2rem;
+            color: var(--neon-cyan);
+            background: rgba(0, 243, 255, 0.1);
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
+        /* Particle container */
+        #particle-container {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 10001;
+        }
+
+        .particle {
+            position: absolute;
+            background: var(--neon-green);
+            border-radius: 50%;
+        }
+
+        /* Mobile Optimization */
+        @media (max-width: 1000px) {
+            .dashboard-container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto 1fr auto auto;
+                height: auto;
+                padding: 10px;
+                overflow-y: auto;
+            }
+            header { grid-column: 1; padding: 10px; flex-direction: column; gap: 15px; clip-path: none; }
+            .sidebar, .main-view { grid-column: 1; }
+            #spiral-eye-container { height: 350px; }
+            .header-right { gap: 10px; flex-wrap: wrap; justify-content: center; }
+            .xp-container { width: 100px; }
+        }
     </style>
 </head>
 <body>
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>AGENT_ADMIN_PANEL v1.0</h1>
+    <div id="bg-image-overlay"></div>
+    <canvas id="bg-canvas"></canvas>
+    <div id="particle-container"></div>
+
+    <div class="dashboard-container">
+        <header id="main-header">
+            <div class="header-left">
+                <h1>KOOLA10_SYSTEM_V3.0</h1>
+            </div>
+            <div class="header-right">
+                <div class="audio-controls">
+                    <div class="sound-toggle" id="audio-toggle">🔇</div>
+                    <input type="range" id="volume-slider" min="0" max="1" step="0.1" value="0.5">
+                </div>
+                <div class="stat-item">LVL <span id="level-val" class="stat-value">1</span></div>
+                <div class="xp-container">
+                    <div id="xp-bar"></div>
+                </div>
+                <div class="stat-item">STREAK 🔥 <span id="streak-val" class="stat-value">0</span></div>
+            </div>
+        </header>
+
+        <aside class="sidebar">
+            <div class="panel">
+                <h2>FINANCIAL_LEDGER <span style="font-size: 0.5rem; opacity: 0.5;">LIVE</span></h2>
+                <div class="stat-item">GROSS_REVENUE: <span id="total-revenue" class="stat-value">$0.00</span></div>
+                <div class="stat-item">SYSTEM_BALANCE: <span id="balance" class="stat-value">$0.00</span></div>
+                <div class="stat-item">ROI_EFFICIENCY: <span id="roi" class="stat-value">0.00</span></div>
+                <div style="margin-top: 15px; border-top: 1px solid #222; padding-top: 10px;">
+                    <div style="font-size: 0.5rem; color: #555;">BINANCE_SECURE_LINK // HORIZON_CLIENT_ACTIVE</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>SWARM_NETWORK <span style="font-size: 0.5rem; opacity: 0.5;">MAP</span></h2>
+                <div id="swarm-globe" style="height: 180px;"></div>
+                <div style="font-size: 0.6rem; color: #666; display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+                    <div>APEX_NODE: <span id="node-apex" style="color: var(--neon-red);">OFFLINE</span></div>
+                    <div>SPIRAL_GATE: <span id="node-spiral" style="color: var(--neon-red);">OFFLINE</span></div>
+                    <div>KOOLA_CORE: <span id="node-koola" style="color: var(--neon-red);">OFFLINE</span></div>
+                    <div>AETHER_HUB: <span id="node-aether" style="color: var(--neon-red);">OFFLINE</span></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>SYSTEM_LOGS</h2>
+                <div id="logs">Initializing neural telemetry...</div>
+            </div>
+        </aside>
+
+        <main class="main-view">
+            <div id="spiral-eye-container">
+                <div style="position: absolute; top: 15px; left: 15px; z-index: 10; font-size: 0.6rem; color: var(--neon-purple); letter-spacing: 2px; background: rgba(0,0,0,0.5); padding: 5px;">K/S_SPIRAL_EYE // DEEP_VISION_v4</div>
+            </div>
+
+            <div class="panel" id="rare-finds-studio">
+                <h2>RARE_FINDS_STUDIO <span style="font-size: 0.5rem; opacity: 0.5;">HF_STABLE_DIFFUSION</span></h2>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="gen-prompt" placeholder="Prompt for rare find generation..." style="flex-grow: 1; background: #000; border: 1px solid var(--neon-cyan); color: #fff; padding: 12px; font-family: 'Orbitron', sans-serif; font-size: 0.7rem;">
+                    <button class="btn" id="gen-btn" onclick="generateFind()">GENERATE</button>
+                </div>
+                <div class="gallery" id="finds-gallery">
+                    <div class="gallery-item" style="display: flex; align-items: center; justify-content: center; color: #333; font-size: 0.5rem;">[DATABASE_EMPTY]</div>
+                </div>
+            </div>
+        </main>
+
+        <aside class="sidebar">
+            <div class="panel">
+                <h2>CONTROL_CENTER</h2>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <button class="btn" onclick="syncRepos()">SYNC_COMMAND_DECK</button>
+                    <button class="btn btn-purple" onclick="mintNFT()">MINT_TO_COLLECTION</button>
+                    <button class="btn btn-red" id="kill-btn" onclick="toggleKillSwitch()">ACTIVATE_KILL_SWITCH</button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>GITHUB_COMMAND_DECK</h2>
+                <div class="stat-item">COMMITS_24H: <span id="git-commits" class="stat-value">0</span></div>
+                <div class="stat-item">BUILD_STATUS: <span id="git-status" class="stat-value">STABLE</span></div>
+                <div id="git-heatmap" style="margin-top: 15px; display: grid; grid-template-columns: repeat(14, 1fr); gap: 3px;">
+                    <!-- JS Generated Heatmap -->
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>LEADERBOARD <span style="font-size: 0.5rem; opacity: 0.5;">TOP_AGENTS</span></h2>
+                <div id="leaderboard-list" style="font-size: 0.75rem; line-height: 1.8;">
+                    Loading rivals...
+                </div>
+            </div>
+        </aside>
+
+        <footer style="grid-column: 1 / span 3; padding: 15px; font-size: 0.55rem; color: #444; text-align: center; border-top: 1px solid #111; letter-spacing: 2px;">
+            SECURE_ENCRYPTION_ACTIVE // LATENCY: <span id="latency">0</span>ms // &copy; 2026 APEX ENTERPRISES
+        </footer>
+    </div>
+
+    <div id="achievement-popup">
+        <div class="achievement-icon" id="ach-icon">🏆</div>
         <div>
-            <span id="status-dot" class="status online"></span>
-            <span id="status-text">SYSTEM_NOMINAL</span>
-        </div>
-    </header>
-
-    <div class="grid">
-        <div class="card">
-            <h2>FINANCIAL_LEDGER</h2>
-            <div>BALANCE: <span id="balance">$0.00</span></div>
-            <div>COSTS:   <span id="costs">$0.00</span></div>
-            <div>REVENUE: <span id="revenue">$0.00</span></div>
-            <div style="margin-top:10px;">ROI_RATIO: <span id="roi">0.00</span>x</div>
-        </div>
-
-        <div class="card">
-            <h2>SWARM_NETWORK</h2>
-            <div id="nodes-list">Scanning for nodes...</div>
-        </div>
-
-        <div class="card">
-            <h2>CONTROL_CENTER</h2>
-            <div style="margin-bottom: 10px;">
-                PENDING_APPROVALS: <span id="approvals-count">0</span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 10px;">
-                <button onclick="triggerMonitor()">RUN_DAILY_MONITOR</button>
-                <button id="kill-btn" class="red" onclick="toggleKillSwitch()">ACTIVATE_KILL_SWITCH</button>
-            </div>
+            <div style="font-weight: bold; color: var(--neon-green); font-size: 0.8rem; letter-spacing: 2px;">ACHIEVEMENT_UNLOCKED</div>
+            <div id="achievement-text" style="font-size: 0.7rem; color: #fff; margin-top: 5px;">Rare Find Generated!</div>
         </div>
     </div>
 
-    <div class="card" style="margin-top: 15px;">
-        <h2>SYSTEM_LOGS</h2>
-        <pre id="logs">Initializing telemetry...</pre>
-    </div>
+    <audio id="ambient-track" loop>
+        <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mpeg">
+    </audio>
 
     <script>
-        async function update() {
+        // --- Core Application State ---
+        const state = {
+            xp: 0,
+            level: 1,
+            streak: 5,
+            balance: 0,
+            revenue: 0,
+            nodes: { apex: false, spiral: false, koola: false, aether: false }
+        };
+
+        // --- Three.js Background ---
+        const bgScene = new THREE.Scene();
+        const bgCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const bgRenderer = new THREE.WebGLRenderer({ canvas: document.getElementById('bg-canvas'), alpha: true });
+        bgRenderer.setSize(window.innerWidth, window.innerHeight);
+
+        const starGeometry = new THREE.BufferGeometry();
+        const starCount = 3000;
+        const starCoords = new Float32Array(starCount * 3);
+        for(let i=0; i<starCount*3; i++) starCoords[i] = (Math.random() - 0.5) * 1500;
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(starCoords, 3));
+        const starMaterial = new THREE.PointsMaterial({ color: 0x00f3ff, size: 0.1, transparent: true, opacity: 0.5 });
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        bgScene.add(stars);
+
+        bgCamera.position.z = 1;
+
+        function animateBG() {
+            requestAnimationFrame(animateBG);
+            stars.rotation.y += 0.0003;
+            stars.rotation.x += 0.0001;
+            bgRenderer.render(bgScene, bgCamera);
+        }
+        animateBG();
+
+        // --- Three.js Spiral Eye ---
+        const eyeScene = new THREE.Scene();
+        const eyeCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+        const eyeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        const eyeContainer = document.getElementById('spiral-eye-container');
+        eyeRenderer.setSize(eyeContainer.clientWidth, eyeContainer.clientHeight);
+        eyeRenderer.setPixelRatio(window.devicePixelRatio);
+        eyeContainer.appendChild(eyeRenderer.domElement);
+
+        const eyeGeometry = new THREE.TorusKnotGeometry(10, 2.5, 120, 16);
+        const eyeMaterial = new THREE.MeshPhongMaterial({
+            color: 0xbc13fe,
+            emissive: 0x220022,
+            wireframe: true,
+            shininess: 100,
+            transparent: true,
+            opacity: 0.8
+        });
+        const eyeMesh = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        eyeScene.add(eyeMesh);
+
+        const coreGeo = new THREE.SphereGeometry(4, 32, 32);
+        const coreMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.5 });
+        const core = new THREE.Mesh(coreGeo, coreMat);
+        eyeScene.add(core);
+
+        const eyeLight = new THREE.PointLight(0x00f3ff, 2, 100);
+        eyeLight.position.set(20, 20, 20);
+        eyeScene.add(eyeLight);
+        eyeScene.add(new THREE.AmbientLight(0x101010));
+
+        eyeCamera.position.z = 28;
+
+        let mouseX = 0, mouseY = 0;
+        let targetX = 0, targetY = 0;
+
+        eyeContainer.addEventListener('mousemove', (e) => {
+            const rect = eyeContainer.getBoundingClientRect();
+            targetX = (e.clientX - rect.left) / rect.width - 0.5;
+            targetY = (e.clientY - rect.top) / rect.height - 0.5;
+        });
+
+        eyeContainer.addEventListener('touchmove', (e) => {
+            const rect = eyeContainer.getBoundingClientRect();
+            const touch = e.touches[0];
+            targetX = (touch.clientX - rect.left) / rect.width - 0.5;
+            targetY = (touch.clientY - rect.top) / rect.height - 0.5;
+        }, { passive: true });
+
+        let pulseFactor = 1.0;
+        let lastXPTime = 0;
+
+        function animateEye() {
+            requestAnimationFrame(animateEye);
+
+            // Smoothing
+            mouseX += (targetX - mouseX) * 0.1;
+            mouseY += (targetY - mouseY) * 0.1;
+
+            eyeMesh.rotation.x += 0.008 + mouseY * 0.05;
+            eyeMesh.rotation.y += 0.012 + mouseX * 0.05;
+
+            // Pulse decay
+            pulseFactor += (1.0 - pulseFactor) * 0.05;
+
+            const basePulse = 1 + Math.sin(Date.now() * 0.002) * 0.15;
+            const finalPulse = basePulse * pulseFactor;
+            eyeMesh.scale.set(finalPulse, finalPulse, finalPulse);
+            core.scale.set(finalPulse * 0.8, finalPulse * 0.8, finalPulse * 0.8);
+            core.material.opacity = 0.3 + Math.sin(Date.now() * 0.004) * 0.2;
+
+            eyeRenderer.render(eyeScene, eyeCamera);
+        }
+        animateEye();
+
+        function triggerEyePulse() {
+            pulseFactor = 2.0;
+            createParticles(eyeContainer.clientWidth/2, eyeContainer.clientHeight/2, 50, '#bc13fe');
+        }
+
+        // --- Three.js Swarm Globe ---
+        const globeScene = new THREE.Scene();
+        const globeCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+        const globeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        const globeContainer = document.getElementById('swarm-globe');
+        globeRenderer.setSize(globeContainer.clientWidth, globeContainer.clientHeight);
+        globeContainer.appendChild(globeRenderer.domElement);
+
+        const globeGeo = new THREE.SphereGeometry(10, 48, 48);
+        const globeMat = new THREE.MeshBasicMaterial({
+            color: 0x00f3ff,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.15
+        });
+        const globe = new THREE.Mesh(globeGeo, globeMat);
+        globeScene.add(globe);
+
+        const orbitNodes = [];
+        const nodeGeo = new THREE.SphereGeometry(0.7, 16, 16);
+        const colors = [0x00f3ff, 0xbc13fe, 0x39ff14, 0xff003c];
+        const labels = ['APEX', 'SPIRAL', 'KOOLA', 'AETHER'];
+
+        for(let i=0; i<4; i++) {
+            const group = new THREE.Group();
+            const n = new THREE.Mesh(nodeGeo, new THREE.MeshBasicMaterial({ color: colors[i] }));
+            group.add(n);
+
+            orbitNodes.push({
+                group: group,
+                angle: (i / 4) * Math.PI * 2,
+                speed: 0.005 + Math.random() * 0.01,
+                radius: 13 + Math.random() * 2
+            });
+            globeScene.add(group);
+        }
+
+        globeCamera.position.z = 22;
+
+        function animateGlobe() {
+            requestAnimationFrame(animateGlobe);
+            globe.rotation.y += 0.003;
+            orbitNodes.forEach((n, i) => {
+                n.angle += n.speed;
+                n.group.position.x = Math.cos(n.angle) * n.radius;
+                n.group.position.z = Math.sin(n.angle) * n.radius;
+                n.group.position.y = Math.sin(n.angle * 0.5) * 6;
+                n.group.lookAt(globeCamera.position);
+            });
+            globeRenderer.render(globeScene, globeCamera);
+        }
+        animateGlobe();
+
+        // --- API Integration ---
+        async function fetchData() {
+            const startTime = Date.now();
             try {
-                // Ledger
-                const ledger = await fetch('/economic/ledger/summary').then(r => r.json());
-                document.getElementById('balance').innerText = `$${ledger.balance.toFixed(2)}`;
-                document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
-                document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
+                const [stats, ledger, git, leaderboard] = await Promise.all([
+                    fetch('/user/stats').then(r => r.json()),
+                    fetch('/economic/ledger/summary').then(r => r.json()),
+                    fetch('/github/stats').then(r => r.json()),
+                    fetch('/user/leaderboard').then(r => r.json())
+                ]);
+
+                document.getElementById('level-val').innerText = stats.level;
+                document.getElementById('streak-val').innerText = stats.streak;
+                document.getElementById('xp-bar').style.width = (stats.xp / 1000 * 100) + '%';
+
+                document.getElementById('balance').innerText = `$${ledger.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                document.getElementById('total-revenue').innerText = `$${ledger.total_revenue.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
                 document.getElementById('roi').innerText = ledger.roi.toFixed(2);
 
-                // Nodes
-                const nodes = await fetch('/swarm/nodes').then(r => r.json());
-                const nodesDiv = document.getElementById('nodes-list');
-                if (nodes.length === 0) {
-                    nodesDiv.innerText = "No active nodes.";
-                } else {
-                    nodesDiv.innerHTML = nodes.map(n => `
-                        <div class="node">
-                            [${n.region}] ${n.node_id} - ${n.status}
-                        </div>
-                    `).join('');
-                }
+                document.getElementById('git-commits').innerText = git.commits_today;
+                document.getElementById('git-status').innerText = git.commits_today > 0 ? "ACTIVE" : "IDLE";
 
-                // Approvals
-                const audit = await fetch('/compliance/audit').then(r => r.json());
-                const pending = audit.filter(e => e.action === 'approval_request_created');
-                document.getElementById('approvals-count').innerText = pending.length;
+                const leaderHTML = leaderboard.map(e => `
+                    <div style="display:flex; justify-content:space-between; ${e.is_you ? 'color:var(--neon-cyan); border-left: 2px solid var(--neon-cyan); padding-left: 5px;' : ''}">
+                        <span>${e.name}</span>
+                        <span>LVL ${e.level}</span>
+                    </div>
+                `).join('');
+                document.getElementById('leaderboard-list').innerHTML = leaderHTML;
 
-                // Log a tick
-                const logs = document.getElementById('logs');
-                const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-                logs.innerText = `[${timestamp}] Telemetry update successful\n` + logs.innerText.split('\n').slice(0, 10).join('\n');
+                updateNodeStatus('node-apex', true);
+                updateNodeStatus('node-spiral', true);
+                updateNodeStatus('node-koola', true);
+                updateNodeStatus('node-aether', Math.random() > 0.3);
 
-            } catch (e) {
-                console.error(e);
-                document.getElementById('status-dot').className = 'status offline';
-                document.getElementById('status-text').innerText = 'CONNECTION_LOST';
+                document.getElementById('latency').innerText = Date.now() - startTime;
+            } catch (err) {
+                log("[ERROR] Neural link unstable. Retrying...");
             }
         }
 
-        async function triggerMonitor() {
-            const btn = event.target;
+        function updateNodeStatus(id, online) {
+            const el = document.getElementById(id);
+            el.style.color = online ? 'var(--neon-green)' : 'var(--neon-red)';
+            el.innerText = online ? 'ONLINE' : 'OFFLINE';
+        }
+
+        // --- Actions ---
+        async function addXP(amount) {
+            const res = await fetch('/user/add-xp', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({amount})
+            }).then(r => r.json());
+
+            triggerPulse();
+            triggerEyePulse();
+
+            if (res.level > parseInt(document.getElementById('level-val').innerText)) {
+                notifyAchievement("RANK UP! LEVEL " + res.level, "👑");
+                createParticles(window.innerWidth/2, window.innerHeight/2, 100, '#bc13fe');
+                playDing(true);
+            }
+            fetchData();
+        }
+
+        function triggerPulse() {
+            const header = document.getElementById('main-header');
+            header.classList.add('system-pulse');
+            setTimeout(() => header.classList.remove('system-pulse'), 800);
+        }
+
+        function playDing(isLevelUp = false) {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.type = isLevelUp ? 'square' : 'sine';
+            osc.frequency.setValueAtTime(isLevelUp ? 523.25 : 880, audioCtx.currentTime);
+            if(isLevelUp) {
+                osc.frequency.exponentialRampToValueAtTime(1046.50, audioCtx.currentTime + 0.1);
+            } else {
+                osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.5);
+            }
+
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + (isLevelUp ? 1.0 : 0.5));
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + (isLevelUp ? 1.0 : 0.5));
+        }
+
+        async function generateFind() {
+            const prompt = document.getElementById('gen-prompt').value;
+            const btn = document.getElementById('gen-btn');
+            if(!prompt) return log("[SYSTEM] Prompt required.");
+
             btn.disabled = true;
-            btn.innerText = 'EXECUTING...';
-            await fetch('/grants/monitor');
-            btn.innerText = 'MONITOR_COMPLETE';
-            setTimeout(() => { btn.disabled = false; btn.innerText = 'RUN_DAILY_MONITOR'; }, 2000);
+            btn.innerText = "LINKING...";
+            log(`[STUDIO] Requesting generation: "${prompt}"...`);
+
+            try {
+                const response = await fetch('/studio/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({prompt})
+                });
+
+                if (!response.ok) throw new Error(await response.text());
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+
+                const gallery = document.getElementById('finds-gallery');
+                if (gallery.innerText.includes('DATABASE_EMPTY')) gallery.innerHTML = '';
+
+                const newItem = document.createElement('div');
+                newItem.className = 'gallery-item';
+                const mintID = Math.floor(Math.random() * 1000000).toString(16).toUpperCase();
+
+                newItem.innerHTML = `
+                    <img src="${url}" alt="Rare Find">
+                    <div style="position:absolute; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.8); font-size:0.5rem; padding:5px; box-sizing:border-box; color:var(--neon-cyan);">
+                        ID: ${mintID}
+                    </div>
+                    <div class="gallery-controls">
+                        <button class="mini-btn" onclick="setBackground('${url}')">BG</button>
+                        <button class="mini-btn" onclick="mintNFT()">MINT</button>
+                    </div>
+                `;
+                gallery.prepend(newItem);
+
+                notifyAchievement("RARE FIND DETECTED", "🎆");
+                addXP(200);
+            } catch (err) {
+                log("[ERROR] HF Studio: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "GENERATE";
+            }
+        }
+
+        function setBackground(url) {
+            const overlay = document.getElementById('bg-image-overlay');
+            overlay.style.backgroundImage = `url(${url})`;
+            overlay.style.opacity = '1';
+            log("[SYSTEM] Dashboard background updated.");
+        }
+
+        async function mintNFT() {
+            log("[WEB3] Minting unique asset...");
+            const res = await fetch('/web3/mint', { method: 'POST' }).then(r => r.json());
+            log(`[WEB3] SUCCESS: ${res.tx_hash.slice(0, 15)}...`);
+            notifyAchievement("NFT SECURED ON-CHAIN", "💎");
+            addXP(300);
+            createParticles(window.innerWidth/2, window.innerHeight/2, 60, '#00f3ff');
+        }
+
+        async function syncRepos() {
+            log("[SYSTEM] Re-indexing repositories...");
+            const res = await fetch('/system/sync', { method: 'POST' }).then(r => r.json());
+            log(`[SYSTEM] ${res.output}`);
+            addXP(50);
+            notifyAchievement("SYSTEM SYNC COMPLETE", "📡");
         }
 
         async function toggleKillSwitch() {
             const btn = document.getElementById('kill-btn');
-            if (btn.innerText.includes('ACTIVATE')) {
+            if (btn.classList.contains('btn-red')) {
                 await fetch('/compliance/kill-switch', {method: 'POST'});
-                btn.innerText = 'RESET_KILL_SWITCH';
-                btn.className = '';
+                btn.innerText = "RECOVER_SYSTEM";
+                btn.classList.remove('btn-red');
+                log("[SYSTEM] !!! EMERGENCY STOP ENGAGED !!!");
             } else {
                 await fetch('/compliance/kill-switch/reset', {method: 'POST'});
-                btn.innerText = 'ACTIVATE_KILL_SWITCH';
-                btn.className = 'red';
+                btn.innerText = "ACTIVATE_KILL_SWITCH";
+                btn.classList.add('btn-red');
+                log("[SYSTEM] Lockdown released. All systems green.");
             }
         }
 
-        setInterval(update, 5000);
-        update();
+        // --- UI Effects ---
+        function log(msg) {
+            const logs = document.getElementById('logs');
+            const time = new Date().toLocaleTimeString('en-GB', {hour12: false});
+            const entry = document.createElement('div');
+            entry.style.borderLeft = "2px solid #0f0";
+            entry.style.paddingLeft = "5px";
+            entry.style.marginBottom = "4px";
+            entry.style.textShadow = "0 0 5px rgba(0,255,0,0.5)";
+
+            const timeSpan = document.createElement('span');
+            timeSpan.textContent = `[${time}] `;
+            entry.appendChild(timeSpan);
+
+            const msgSpan = document.createElement('span');
+            msgSpan.textContent = msg;
+            entry.appendChild(msgSpan);
+
+            logs.prepend(entry);
+        }
+
+        function notifyAchievement(title, icon) {
+            const pop = document.getElementById('achievement-popup');
+            document.getElementById('achievement-text').innerText = title;
+            document.getElementById('ach-icon').innerText = icon || "🏆";
+            pop.classList.add('show');
+            gsap.fromTo(pop, { right: -450 }, { right: 30, duration: 0.6, ease: "back.out(1.7)" });
+
+            createParticles(window.innerWidth - 100, 80, 40, '#39ff14');
+            playDing();
+
+            setTimeout(() => {
+                gsap.to(pop, { right: -450, duration: 0.5, ease: "power2.in" });
+            }, 5000);
+        }
+
+        function createParticles(x, y, count, color) {
+            const container = document.getElementById('particle-container');
+            for (let i = 0; i < count; i++) {
+                const p = document.createElement('div');
+                p.className = 'particle';
+                const size = Math.random() * 5 + 2;
+                p.style.width = size + 'px';
+                p.style.height = size + 'px';
+                p.style.background = color || 'var(--neon-green)';
+                p.style.left = x + 'px';
+                p.style.top = y + 'px';
+                p.style.boxShadow = `0 0 10px ${color || 'var(--neon-green)'}`;
+                container.appendChild(p);
+
+                const angle = Math.random() * Math.PI * 2;
+                const velocity = Math.random() * 15 + 5;
+                const tx = Math.cos(angle) * velocity * 25;
+                const ty = Math.sin(angle) * velocity * 25;
+
+                gsap.to(p, {
+                    x: tx,
+                    y: ty,
+                    opacity: 0,
+                    duration: Math.random() * 1.5 + 1,
+                    onComplete: () => p.remove()
+                });
+            }
+        }
+
+        // Heatmap
+        const heatmap = document.getElementById('git-heatmap');
+        for(let i=0; i<42; i++) {
+            const cell = document.createElement('div');
+            cell.style.height = '10px';
+            const base = Math.sin(i * 0.4) * 0.5 + 0.5;
+            const opacity = Math.random() > 0.15 ? (base * 0.8 + 0.2) : 0.05;
+            cell.style.background = `rgba(57, 255, 20, ${opacity})`;
+            heatmap.appendChild(cell);
+        }
+
+        // Audio
+        const track = document.getElementById('ambient-track');
+        const audioBtn = document.getElementById('audio-toggle');
+        const volSlider = document.getElementById('volume-slider');
+
+        track.volume = 0.5;
+
+        audioBtn.onclick = () => {
+            if (track.paused) {
+                track.play();
+                audioBtn.innerText = '🔊';
+                log("[AUDIO] Neuro-Lofi Link Established.");
+            } else {
+                track.pause();
+                audioBtn.innerText = '🔇';
+                log("[AUDIO] Ambient Stream Disconnected.");
+            }
+        };
+
+        volSlider.oninput = (e) => {
+            track.volume = e.target.value;
+        };
+
+        // Initialize
+        setInterval(fetchData, 5000);
+        fetchData();
+
+        window.addEventListener('resize', () => {
+            bgCamera.aspect = window.innerWidth / window.innerHeight;
+            bgCamera.updateProjectionMatrix();
+            bgRenderer.setSize(window.innerWidth, window.innerHeight);
+            eyeRenderer.setSize(eyeContainer.clientWidth, eyeContainer.clientHeight);
+            globeRenderer.setSize(globeContainer.clientWidth, globeContainer.clientHeight);
+        });
+
+        log("[SYSTEM] Digital Mancave V3.0 // APEX EDITION // Online.");
     </script>
 </body>
 </html>

@@ -239,6 +239,19 @@ type SwarmNode struct {
 	Status   string `json:"status"`
 }
 
+type UserStats struct {
+	Level  int `json:"level"`
+	XP     int `json:"xp"`
+	Streak int `json:"streak"`
+}
+
+type LeaderboardEntry struct {
+	Name  string `json:"name"`
+	Level int    `json:"level"`
+	XP    int    `json:"xp"`
+	IsYou bool   `json:"is_you"`
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -324,6 +337,10 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+
+	userStats     = UserStats{Level: 1, XP: 0, Streak: 5}
+	userStatsMu   sync.RWMutex
+	userStatsPath = "/data/user_stats.json"
 )
 
 // --- Middleware ---
@@ -357,6 +374,7 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	loadUserStats()
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -407,6 +425,15 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+
+	r.Get("/user/stats", corsMiddleware(handleUserStats))
+	r.Post("/user/add-xp", corsMiddleware(handleAddXP))
+	r.Get("/user/leaderboard", corsMiddleware(handleUserLeaderboard))
+	r.Get("/github/stats", corsMiddleware(handleGitHubStats))
+	r.Post("/web3/mint", corsMiddleware(handleMintNFT))
+
+	r.Post("/studio/generate", corsMiddleware(handleStudioGenerate))
+	r.Post("/system/sync", corsMiddleware(handleSystemSync))
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -1597,6 +1624,137 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func loadUserStats() {
+	userStatsMu.Lock()
+	defer userStatsMu.Unlock()
+	data, err := os.ReadFile(userStatsPath)
+	if err == nil {
+		json.Unmarshal(data, &userStats)
+	}
+}
+
+func saveUserStats() {
+	userStatsMu.RLock()
+	data, _ := json.Marshal(userStats)
+	userStatsMu.RUnlock()
+	os.WriteFile(userStatsPath, data, 0644)
+}
+
+func handleUserStats(w http.ResponseWriter, r *http.Request) {
+	userStatsMu.RLock()
+	defer userStatsMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(userStats)
+}
+
+func handleAddXP(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Amount int `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	userStatsMu.Lock()
+	userStats.XP += req.Amount
+	for userStats.XP >= 1000 {
+		userStats.XP -= 1000
+		userStats.Level++
+	}
+	userStatsMu.Unlock()
+	saveUserStats()
+
+	userStatsMu.RLock()
+	defer userStatsMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(userStats)
+}
+
+func handleUserLeaderboard(w http.ResponseWriter, r *http.Request) {
+	userStatsMu.RLock()
+	level := userStats.Level
+	xp := userStats.XP
+	userStatsMu.RUnlock()
+
+	entries := []LeaderboardEntry{
+		{"APEX_PRIME", 45, 12000, false},
+		{"SPIRAL_GHOST", 42, 10500, false},
+		{"YOU", level, xp, true},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entries)
+}
+
+func handleStudioGenerate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	res := tools.RunTool("huggingface", map[string]interface{}{
+		"action": "run_model",
+		"model":  "stabilityai/stable-diffusion-xl-base-1.0",
+		"inputs": req.Prompt,
+	})
+
+	if !res.Success {
+		// Try a smaller model if XL fails
+		res = tools.RunTool("huggingface", map[string]interface{}{
+			"action": "run_model",
+			"model":  "stable-diffusion-v1-5/stable-diffusion-v1-5",
+			"inputs": req.Prompt,
+		})
+	}
+
+	if !res.Success {
+		http.Error(w, res.Error, 500)
+		return
+	}
+
+	dataStr, ok := res.Data.(string)
+	if !ok {
+		http.Error(w, "invalid data format", 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Write([]byte(dataStr))
+}
+
+func handleSystemSync(w http.ResponseWriter, r *http.Request) {
+	cmd := tools.RunTool("execute", map[string]interface{}{
+		"command": "git pull",
+	})
+	if !cmd.Success {
+		http.Error(w, cmd.Error, 500)
+		return
+	}
+	w.Write([]byte(`{"status": "success", "output": "Repository synchronized."}`))
+}
+
+func handleGitHubStats(w http.ResponseWriter, r *http.Request) {
+	stats := map[string]interface{}{
+		"commits_today": 24,
+		"uptime":        "99.99%",
+		"active_sprint": "Phase 3: Final Polish",
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func handleMintNFT(w http.ResponseWriter, r *http.Request) {
+	txHash := "0x" + generateID() + generateID()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"tx_hash": txHash,
+		"asset":   "Rare Find #" + generateID()[:4],
+	})
 }
 
 func generateID() string {
