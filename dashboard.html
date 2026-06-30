@@ -18,11 +18,6 @@
             --glass: rgba(255, 255, 255, 0.05);
         }
 
-        @font-face {
-            font-family: 'Cyber';
-            /* Fixed by @import or link */
-        }
-
         body, html {
             margin: 0; padding: 0;
             background: var(--deep-black);
@@ -30,6 +25,19 @@
             font-family: 'Orbitron', sans-serif;
             overflow: hidden;
             height: 100vh;
+            user-select: none;
+        }
+
+        /* Dynamic Background Image */
+        #bg-image-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-size: cover;
+            background-position: center;
+            opacity: 0;
+            transition: opacity 2s ease-in-out;
+            z-index: -2;
+            filter: brightness(0.3) blur(2px);
         }
 
         /* Scanline Effect */
@@ -203,6 +211,8 @@
             border: 1px solid rgba(188, 19, 254, 0.3);
             position: relative;
             box-shadow: inset 0 0 100px rgba(188, 19, 254, 0.1);
+            overflow: hidden;
+            cursor: move;
         }
 
         .btn {
@@ -251,7 +261,7 @@
         }
 
         #rare-finds-studio {
-            height: 280px;
+            height: 300px;
         }
 
         .gallery {
@@ -267,12 +277,13 @@
         .gallery::-webkit-scrollbar-thumb { background: var(--neon-cyan); }
 
         .gallery-item {
-            min-width: 180px;
-            height: 120px;
+            min-width: 200px;
+            height: 140px;
             background: #111;
             border: 1px solid #333;
             position: relative;
             overflow: hidden;
+            group: hover;
         }
 
         .gallery-item img {
@@ -285,6 +296,35 @@
         .gallery-item:hover img {
             filter: grayscale(0) contrast(1);
             transform: scale(1.1);
+        }
+
+        .gallery-controls {
+            position: absolute;
+            bottom: -40px;
+            left: 0; width: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: space-around;
+            padding: 5px 0;
+            transition: bottom 0.3s;
+        }
+
+        .gallery-item:hover .gallery-controls {
+            bottom: 0;
+        }
+
+        .mini-btn {
+            font-size: 0.5rem;
+            color: var(--neon-cyan);
+            background: transparent;
+            border: 1px solid var(--neon-cyan);
+            cursor: pointer;
+            padding: 2px 5px;
+        }
+
+        .mini-btn:hover {
+            background: var(--neon-cyan);
+            color: #000;
         }
 
         #logs {
@@ -361,16 +401,18 @@
                 grid-template-rows: auto auto auto 1fr auto auto;
                 height: auto;
                 padding: 10px;
+                overflow-y: auto;
             }
-            header { grid-column: 1; padding: 10px; }
+            header { grid-column: 1; padding: 10px; flex-direction: column; gap: 15px; clip-path: none; }
             .sidebar, .main-view { grid-column: 1; }
             #spiral-eye-container { height: 350px; }
-            .header-right { gap: 10px; }
+            .header-right { gap: 10px; flex-wrap: wrap; justify-content: center; }
             .xp-container { width: 100px; }
         }
     </style>
 </head>
 <body>
+    <div id="bg-image-overlay"></div>
     <canvas id="bg-canvas"></canvas>
     <div id="particle-container"></div>
 
@@ -538,7 +580,6 @@
         const eyeMesh = new THREE.Mesh(eyeGeometry, eyeMaterial);
         eyeScene.add(eyeMesh);
 
-        // Inner glowing core
         const coreGeo = new THREE.SphereGeometry(4, 32, 32);
         const coreMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.5 });
         const core = new THREE.Mesh(coreGeo, coreMat);
@@ -552,27 +593,51 @@
         eyeCamera.position.z = 28;
 
         let mouseX = 0, mouseY = 0;
+        let targetX = 0, targetY = 0;
+
         eyeContainer.addEventListener('mousemove', (e) => {
             const rect = eyeContainer.getBoundingClientRect();
-            mouseX = (e.clientX - rect.left) / rect.width - 0.5;
-            mouseY = (e.clientY - rect.top) / rect.height - 0.5;
+            targetX = (e.clientX - rect.left) / rect.width - 0.5;
+            targetY = (e.clientY - rect.top) / rect.height - 0.5;
         });
+
+        eyeContainer.addEventListener('touchmove', (e) => {
+            const rect = eyeContainer.getBoundingClientRect();
+            const touch = e.touches[0];
+            targetX = (touch.clientX - rect.left) / rect.width - 0.5;
+            targetY = (touch.clientY - rect.top) / rect.height - 0.5;
+        }, { passive: true });
+
+        let pulseFactor = 1.0;
+        let lastXPTime = 0;
 
         function animateEye() {
             requestAnimationFrame(animateEye);
 
-            // Interaction: Rotate towards mouse
+            // Smoothing
+            mouseX += (targetX - mouseX) * 0.1;
+            mouseY += (targetY - mouseY) * 0.1;
+
             eyeMesh.rotation.x += 0.008 + mouseY * 0.05;
             eyeMesh.rotation.y += 0.012 + mouseX * 0.05;
 
-            const pulse = 1 + Math.sin(Date.now() * 0.002) * 0.15;
-            eyeMesh.scale.set(pulse, pulse, pulse);
-            core.scale.set(pulse * 0.8, pulse * 0.8, pulse * 0.8);
+            // Pulse decay
+            pulseFactor += (1.0 - pulseFactor) * 0.05;
+
+            const basePulse = 1 + Math.sin(Date.now() * 0.002) * 0.15;
+            const finalPulse = basePulse * pulseFactor;
+            eyeMesh.scale.set(finalPulse, finalPulse, finalPulse);
+            core.scale.set(finalPulse * 0.8, finalPulse * 0.8, finalPulse * 0.8);
             core.material.opacity = 0.3 + Math.sin(Date.now() * 0.004) * 0.2;
 
             eyeRenderer.render(eyeScene, eyeCamera);
         }
         animateEye();
+
+        function triggerEyePulse() {
+            pulseFactor = 2.0;
+            createParticles(eyeContainer.clientWidth/2, eyeContainer.clientHeight/2, 50, '#bc13fe');
+        }
 
         // --- Three.js Swarm Globe ---
         const globeScene = new THREE.Scene();
@@ -593,13 +658,22 @@
         globeScene.add(globe);
 
         const orbitNodes = [];
-        const nodeGeo = new THREE.SphereGeometry(0.6, 16, 16);
+        const nodeGeo = new THREE.SphereGeometry(0.7, 16, 16);
         const colors = [0x00f3ff, 0xbc13fe, 0x39ff14, 0xff003c];
+        const labels = ['APEX', 'SPIRAL', 'KOOLA', 'AETHER'];
 
         for(let i=0; i<4; i++) {
-            const n = new THREE.Mesh(nodeGeo, new THREE.MeshBasicMaterial({ color: colors[i], emissive: colors[i] }));
-            orbitNodes.push({ mesh: n, angle: (i / 4) * Math.PI * 2, speed: 0.01 + Math.random() * 0.01, radius: 14 });
-            globeScene.add(n);
+            const group = new THREE.Group();
+            const n = new THREE.Mesh(nodeGeo, new THREE.MeshBasicMaterial({ color: colors[i] }));
+            group.add(n);
+
+            orbitNodes.push({
+                group: group,
+                angle: (i / 4) * Math.PI * 2,
+                speed: 0.005 + Math.random() * 0.01,
+                radius: 13 + Math.random() * 2
+            });
+            globeScene.add(group);
         }
 
         globeCamera.position.z = 22;
@@ -609,9 +683,10 @@
             globe.rotation.y += 0.003;
             orbitNodes.forEach((n, i) => {
                 n.angle += n.speed;
-                n.mesh.position.x = Math.cos(n.angle) * n.radius;
-                n.mesh.position.z = Math.sin(n.angle) * n.radius;
-                n.mesh.position.y = Math.sin(n.angle * 0.5) * 5;
+                n.group.position.x = Math.cos(n.angle) * n.radius;
+                n.group.position.z = Math.sin(n.angle) * n.radius;
+                n.group.position.y = Math.sin(n.angle * 0.5) * 6;
+                n.group.lookAt(globeCamera.position);
             });
             globeRenderer.render(globeScene, globeCamera);
         }
@@ -628,7 +703,6 @@
                     fetch('/user/leaderboard').then(r => r.json())
                 ]);
 
-                // Update UI
                 document.getElementById('level-val').innerText = stats.level;
                 document.getElementById('streak-val').innerText = stats.streak;
                 document.getElementById('xp-bar').style.width = (stats.xp / 1000 * 100) + '%';
@@ -648,7 +722,6 @@
                 `).join('');
                 document.getElementById('leaderboard-list').innerHTML = leaderHTML;
 
-                // Node status simulation
                 updateNodeStatus('node-apex', true);
                 updateNodeStatus('node-spiral', true);
                 updateNodeStatus('node-koola', true);
@@ -656,7 +729,6 @@
 
                 document.getElementById('latency').innerText = Date.now() - startTime;
             } catch (err) {
-                console.error("Sync error:", err);
                 log("[ERROR] Neural link unstable. Retrying...");
             }
         }
@@ -676,11 +748,12 @@
             }).then(r => r.json());
 
             triggerPulse();
+            triggerEyePulse();
 
             if (res.level > parseInt(document.getElementById('level-val').innerText)) {
-                notifyAchievement("LEVEL UP! REACHED RANK " + res.level, "🚀");
-                createParticles(window.innerWidth/2, window.innerHeight/2, 80, '#bc13fe');
-                playDing();
+                notifyAchievement("RANK UP! LEVEL " + res.level, "👑");
+                createParticles(window.innerWidth/2, window.innerHeight/2, 100, '#bc13fe');
+                playDing(true);
             }
             fetchData();
         }
@@ -691,29 +764,36 @@
             setTimeout(() => header.classList.remove('system-pulse'), 800);
         }
 
-        function playDing() {
+        function playDing(isLevelUp = false) {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.connect(gain);
             gain.connect(audioCtx.destination);
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.5);
+
+            osc.type = isLevelUp ? 'square' : 'sine';
+            osc.frequency.setValueAtTime(isLevelUp ? 523.25 : 880, audioCtx.currentTime);
+            if(isLevelUp) {
+                osc.frequency.exponentialRampToValueAtTime(1046.50, audioCtx.currentTime + 0.1);
+            } else {
+                osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.5);
+            }
+
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + (isLevelUp ? 1.0 : 0.5));
+
             osc.start();
-            osc.stop(audioCtx.currentTime + 0.5);
+            osc.stop(audioCtx.currentTime + (isLevelUp ? 1.0 : 0.5));
         }
 
         async function generateFind() {
             const prompt = document.getElementById('gen-prompt').value;
             const btn = document.getElementById('gen-btn');
-            if(!prompt) return log("[SYSTEM] Prompt required for generation.");
+            if(!prompt) return log("[SYSTEM] Prompt required.");
 
             btn.disabled = true;
-            btn.innerText = "GENERATING...";
-            log(`[STUDIO] Requesting Rare Find: "${prompt}"...`);
+            btn.innerText = "LINKING...";
+            log(`[STUDIO] Requesting generation: "${prompt}"...`);
 
             try {
                 const response = await fetch('/studio/generate', {
@@ -733,69 +813,77 @@
                 const newItem = document.createElement('div');
                 newItem.className = 'gallery-item';
                 const mintID = Math.floor(Math.random() * 1000000).toString(16).toUpperCase();
-                newItem.innerHTML = `<img src="${url}" alt="Rare Find">
-                                     <div style="position:absolute; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.7); font-size:0.5rem; padding:5px; box-sizing:border-box;">
-                                        MINT_ID: ${mintID}
-                                     </div>`;
+
+                newItem.innerHTML = `
+                    <img src="${url}" alt="Rare Find">
+                    <div style="position:absolute; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.8); font-size:0.5rem; padding:5px; box-sizing:border-box; color:var(--neon-cyan);">
+                        ID: ${mintID}
+                    </div>
+                    <div class="gallery-controls">
+                        <button class="mini-btn" onclick="setBackground('${url}')">BG</button>
+                        <button class="mini-btn" onclick="mintNFT()">MINT</button>
+                    </div>
+                `;
                 gallery.prepend(newItem);
 
-                notifyAchievement("RARE FIND COLLECTED", "💎");
-                addXP(150);
-                log(`[STUDIO] Generation complete. Asset stored.`);
+                notifyAchievement("RARE FIND DETECTED", "🎆");
+                addXP(200);
             } catch (err) {
-                console.error(err);
-                log("[ERROR] Studio generation failed: " + err.message);
+                log("[ERROR] HF Studio: " + err.message);
             } finally {
                 btn.disabled = false;
                 btn.innerText = "GENERATE";
             }
         }
 
+        function setBackground(url) {
+            const overlay = document.getElementById('bg-image-overlay');
+            overlay.style.backgroundImage = `url(${url})`;
+            overlay.style.opacity = '1';
+            log("[SYSTEM] Dashboard background updated.");
+        }
+
         async function mintNFT() {
-            log("[WEB3] Initiating Stellar Transaction...");
+            log("[WEB3] Minting unique asset...");
             const res = await fetch('/web3/mint', { method: 'POST' }).then(r => r.json());
-            log(`[WEB3] SUCCESS: ${res.asset} minted.`);
-            log(`[WEB3] TX_HASH: ${res.tx_hash.slice(0, 20)}...`);
-            notifyAchievement("NFT MINTED TO CHAIN", "🔗");
+            log(`[WEB3] SUCCESS: ${res.tx_hash.slice(0, 15)}...`);
+            notifyAchievement("NFT SECURED ON-CHAIN", "💎");
             addXP(300);
-            createParticles(window.innerWidth/2, window.innerHeight/2, 40, '#00f3ff');
+            createParticles(window.innerWidth/2, window.innerHeight/2, 60, '#00f3ff');
         }
 
         async function syncRepos() {
-            log("[SYSTEM] Synchronizing repository state...");
-            try {
-                const res = await fetch('/system/sync', { method: 'POST' }).then(r => r.json());
-                log(`[SYSTEM] SUCCESS: ${res.output}`);
-                addXP(50);
-                notifyAchievement("REPOS SYNCHRONIZED", "🔄");
-            } catch (err) {
-                log(`[ERROR] Sync failed: ${err.message}`);
-            }
+            log("[SYSTEM] Re-indexing repositories...");
+            const res = await fetch('/system/sync', { method: 'POST' }).then(r => r.json());
+            log(`[SYSTEM] ${res.output}`);
+            addXP(50);
+            notifyAchievement("SYSTEM SYNC COMPLETE", "📡");
         }
 
         async function toggleKillSwitch() {
             const btn = document.getElementById('kill-btn');
             if (btn.classList.contains('btn-red')) {
                 await fetch('/compliance/kill-switch', {method: 'POST'});
-                btn.innerText = "RESET_SYSTEM";
+                btn.innerText = "RECOVER_SYSTEM";
                 btn.classList.remove('btn-red');
-                log("[SYSTEM] !!! KILL SWITCH ACTIVATED !!!");
+                log("[SYSTEM] !!! EMERGENCY STOP ENGAGED !!!");
             } else {
                 await fetch('/compliance/kill-switch/reset', {method: 'POST'});
                 btn.innerText = "ACTIVATE_KILL_SWITCH";
                 btn.classList.add('btn-red');
-                log("[SYSTEM] System recovered from emergency stop.");
+                log("[SYSTEM] Lockdown released. All systems green.");
             }
         }
 
-        // --- Effects ---
+        // --- UI Effects ---
         function log(msg) {
             const logs = document.getElementById('logs');
             const time = new Date().toLocaleTimeString('en-GB', {hour12: false});
             const entry = document.createElement('div');
             entry.style.borderLeft = "2px solid #0f0";
             entry.style.paddingLeft = "5px";
-            entry.style.marginBottom = "3px";
+            entry.style.marginBottom = "4px";
+            entry.style.textShadow = "0 0 5px rgba(0,255,0,0.5)";
 
             const timeSpan = document.createElement('span');
             timeSpan.textContent = `[${time}] `;
@@ -813,14 +901,14 @@
             document.getElementById('achievement-text').innerText = title;
             document.getElementById('ach-icon').innerText = icon || "🏆";
             pop.classList.add('show');
-            gsap.to(pop, { right: 30, duration: 0.6, ease: "back.out(1.7)" });
+            gsap.fromTo(pop, { right: -450 }, { right: 30, duration: 0.6, ease: "back.out(1.7)" });
 
-            createParticles(window.innerWidth - 100, 100, 30, '#39ff14');
+            createParticles(window.innerWidth - 100, 80, 40, '#39ff14');
             playDing();
 
             setTimeout(() => {
                 gsap.to(pop, { right: -450, duration: 0.5, ease: "power2.in" });
-            }, 4000);
+            }, 5000);
         }
 
         function createParticles(x, y, count, color) {
@@ -828,39 +916,38 @@
             for (let i = 0; i < count; i++) {
                 const p = document.createElement('div');
                 p.className = 'particle';
-                const size = Math.random() * 4 + 2;
+                const size = Math.random() * 5 + 2;
                 p.style.width = size + 'px';
                 p.style.height = size + 'px';
                 p.style.background = color || 'var(--neon-green)';
                 p.style.left = x + 'px';
                 p.style.top = y + 'px';
+                p.style.boxShadow = `0 0 10px ${color || 'var(--neon-green)'}`;
                 container.appendChild(p);
 
                 const angle = Math.random() * Math.PI * 2;
-                const velocity = Math.random() * 10 + 5;
-                const tx = Math.cos(angle) * velocity * 20;
-                const ty = Math.sin(angle) * velocity * 20;
+                const velocity = Math.random() * 15 + 5;
+                const tx = Math.cos(angle) * velocity * 25;
+                const ty = Math.sin(angle) * velocity * 25;
 
                 gsap.to(p, {
                     x: tx,
                     y: ty,
                     opacity: 0,
-                    duration: Math.random() * 1 + 1,
+                    duration: Math.random() * 1.5 + 1,
                     onComplete: () => p.remove()
                 });
             }
         }
 
-        // Heatmap generation
+        // Heatmap
         const heatmap = document.getElementById('git-heatmap');
         for(let i=0; i<42; i++) {
             const cell = document.createElement('div');
             cell.style.height = '10px';
-            // Clustered activity pattern
-            const base = Math.sin(i * 0.5) * 0.5 + 0.5;
-            const opacity = Math.random() > 0.2 ? (base * 0.7 + 0.3) : 0.05;
+            const base = Math.sin(i * 0.4) * 0.5 + 0.5;
+            const opacity = Math.random() > 0.15 ? (base * 0.8 + 0.2) : 0.05;
             cell.style.background = `rgba(57, 255, 20, ${opacity})`;
-            cell.style.border = '1px solid rgba(0,0,0,0.2)';
             heatmap.appendChild(cell);
         }
 
@@ -875,11 +962,11 @@
             if (track.paused) {
                 track.play();
                 audioBtn.innerText = '🔊';
-                log("[AUDIO] Neuro-Lofi Stream started.");
+                log("[AUDIO] Neuro-Lofi Link Established.");
             } else {
                 track.pause();
                 audioBtn.innerText = '🔇';
-                log("[AUDIO] Muting ambient stream.");
+                log("[AUDIO] Ambient Stream Disconnected.");
             }
         };
 
@@ -887,7 +974,7 @@
             track.volume = e.target.value;
         };
 
-        // --- Initialization ---
+        // Initialize
         setInterval(fetchData, 5000);
         fetchData();
 
@@ -899,7 +986,7 @@
             globeRenderer.setSize(globeContainer.clientWidth, globeContainer.clientHeight);
         });
 
-        log("[SYSTEM] Digital Mancave Dashboard Online.");
+        log("[SYSTEM] Digital Mancave V3.0 // APEX EDITION // Online.");
     </script>
 </body>
 </html>
