@@ -232,6 +232,29 @@ type SwarmTask struct {
 	Results    map[string]interface{} `json:"results"`
 }
 
+
+type VaultSummary struct {
+	TotalRevenue   float64 `json:"total_revenue"`
+	OperationsFund float64 `json:"operations_fund"`
+	SpendableFund  float64 `json:"spendable_fund"`
+}
+
+type Subscription struct {
+	ID        string    `json:"id"`
+	Service   string    `json:"service"`
+	Amount    float64   `json:"amount"`
+	CardID    string    `json:"card_id"`
+	Status    string    `json:"status"`
+	Frequency string    `json:"frequency"`
+	LastPaid  time.Time `json:"last_paid"`
+}
+
+type SubscriptionManager struct {
+	Subscriptions []Subscription `json:"subscriptions"`
+	storagePath   string
+	mu            sync.RWMutex
+}
+
 type SwarmNode struct {
 	ID       string `json:"node_id"`
 	Region   string `json:"region"`
@@ -287,6 +310,10 @@ var (
 	auditPath      = "/data/audit_chain.jsonl"
 	usagePath      = "/data/usage.jsonl"
 	killSwitchPath = "/data/kill_switch"
+	subsPath       = "/data/subscriptions.json"
+	serverLogPath  = "/data/server.log"
+	lastProcessedAuditOffset int64
+
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
 
@@ -305,6 +332,7 @@ var (
 	}
 
 	fundManager *financial.FundManager
+	subManager  *SubscriptionManager
 
 	globalSwarmManager = agents.NewSwarmManager()
 
@@ -324,6 +352,8 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+	//go:embed bpa.html
+	bpaHTML string
 )
 
 // --- Middleware ---
@@ -357,6 +387,12 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	if data, err := os.ReadFile("/data/audit_offset.txt"); err == nil {
+		fmt.Sscanf(string(data), "%d", &lastProcessedAuditOffset)
+	}
+	subManager = NewSubscriptionManager(subsPath)
+	go startMaintenanceLoop()
+
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -369,6 +405,7 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
+	globalSwarmManager.RevenueLogger = fundManager.RouteRevenue
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
 	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
@@ -376,6 +413,10 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
+	globalSwarmManager.Factories["maintenance"] = agents.MaintenanceFactory
+
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -407,6 +448,21 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
+	r.Get("/logs", corsMiddleware(handleLogs))
+	r.Get("/bpa", corsMiddleware(handleBPA))
+	r.Post("/admin/subscriptions/run", authMiddleware(handleAdminSubscriptionsRun))
+	r.Post("/admin/agentcards/create", authMiddleware(handleAdminAgentCardsCreate))
+	r.Get("/admin/subscriptions", authMiddleware(handleAdminSubscriptionsList))
+	r.Post("/admin/stellar/send", authMiddleware(handleAdminStellarSend))
+	r.Get("/admin/stellar/balance", authMiddleware(handleAdminStellarBalance))
+	r.Route("/api/v1/bpa", func(r chi.Router) {
+		r.Get("/leads", corsMiddleware(handleBPALeads))
+		r.Get("/compliance", corsMiddleware(handleBPACompliance))
+		r.Get("/content", corsMiddleware(handleBPAContent))
+		r.Post("/trial", corsMiddleware(handleBPATrial))
+	})
+
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -1601,4 +1657,210 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func NewSubscriptionManager(path string) *SubscriptionManager {
+	sm := &SubscriptionManager{
+		storagePath:   path,
+		Subscriptions: []Subscription{},
+	}
+	sm.Load()
+	return sm
+}
+
+func (sm *SubscriptionManager) Load() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	data, err := os.ReadFile(sm.storagePath)
+	if err == nil {
+		json.Unmarshal(data, sm)
+	}
+}
+
+func (sm *SubscriptionManager) Save() {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	data, _ := json.MarshalIndent(sm, "", "  ")
+	os.WriteFile(sm.storagePath, data, 0644)
+}
+
+func (sm *SubscriptionManager) AddSubscription(sub Subscription) {
+	sm.mu.Lock()
+	if sub.ID == "" {
+		sub.ID = generateID()
+	}
+	sm.Subscriptions = append(sm.Subscriptions, sub)
+	sm.mu.Unlock()
+	sm.Save()
+}
+
+func (sm *SubscriptionManager) RunTick(fm *financial.FundManager) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	now := time.Now()
+	changed := false
+	for i, sub := range sm.Subscriptions {
+		if sub.LastPaid.IsZero() || now.Sub(sub.LastPaid) > 30*24*time.Hour {
+			log.Printf("[Scheduler] Paying subscription for %s: $%.2f", sub.Service, sub.Amount)
+			fm.PaySubscription(sub.Service, sub.Amount)
+			sm.Subscriptions[i].LastPaid = now
+			changed = true
+		}
+	}
+	if changed {
+		sm.Save()
+	}
+}
+
+func startMaintenanceLoop() {
+	log.Printf("Starting autonomous self-healing maintenance loop...")
+	ticker := time.NewTicker(1 * time.Minute)
+	for range ticker.C {
+		f, err := os.Open(auditPath)
+		if err != nil {
+			continue
+		}
+
+		f.Seek(lastProcessedAuditOffset, io.SeekStart)
+
+		scanner := bufio.NewScanner(f)
+		var lastError string
+		var newOffset int64 = lastProcessedAuditOffset
+
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			newOffset += int64(len(line) + 1)
+			var entry AuditEntry
+			if err := json.Unmarshal(line, &entry); err == nil {
+				if strings.Contains(strings.ToLower(entry.Action), "fail") ||
+					strings.Contains(strings.ToLower(fmt.Sprintf("%v", entry.Details)), "error") {
+					lastError = fmt.Sprintf("Action: %s, Details: %v", entry.Action, entry.Details)
+				}
+			}
+		}
+		f.Close()
+		lastProcessedAuditOffset = newOffset
+		os.WriteFile("/data/audit_offset.txt", []byte(fmt.Sprintf("%d", lastProcessedAuditOffset)), 0644)
+
+		if lastError != "" {
+			log.Printf("[Self-Healing] Detected system failure: %s. Dispatching repair task.", lastError)
+			globalSwarmManager.DeploySwarms("maintenance", 3)
+			globalSwarmManager.DispatchTask("maintenance", "repair: "+lastError)
+		}
+	}
+}
+
+func handleVaultSummary(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+	status := fundManager.GetStatus()
+	total := globalLedger.TotalRevenue + status.TotalEarned
+	json.NewEncoder(w).Encode(VaultSummary{
+		TotalRevenue:   total,
+		OperationsFund: total * 0.30,
+		SpendableFund:  total * 0.70,
+	})
+}
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		apiKey := os.Getenv("ADMIN_API_KEY")
+		providedKey := r.Header.Get("X-Admin-API-Key")
+		if providedKey == "" {
+			authHeader := r.Header.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				providedKey = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+		}
+		if apiKey == "" || providedKey != apiKey {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func handleAdminStellarSend(w http.ResponseWriter, r *http.Request) {
+	var req struct { To string; Amount float64; Asset string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400); return
+	}
+	res := tools.RunTool("stellar", map[string]interface{}{"action": "send", "to": req.To, "amount": req.Amount, "asset": req.Asset})
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleAdminStellarBalance(w http.ResponseWriter, r *http.Request) {
+	res := tools.RunTool("stellar", map[string]interface{}{"action": "balance"})
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleAdminSubscriptionsRun(w http.ResponseWriter, r *http.Request) {
+	subManager.RunTick(fundManager)
+	w.Write([]byte(`{"status":"triggered"}`))
+}
+
+func handleAdminAgentCardsCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct { Service string; Amount float64 }
+	json.NewDecoder(r.Body).Decode(&req)
+	client := financial.NewAgentCardClient()
+	card, err := client.CreateCard(int(req.Amount * 100))
+	if err != nil { http.Error(w, err.Error(), 500); return }
+	sub := Subscription{Service: req.Service, Amount: req.Amount, CardID: card.ID, Status: "active", Frequency: "monthly"}
+	subManager.AddSubscription(sub)
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "created", "card": card, "sub": sub})
+}
+
+func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
+	subManager.mu.RLock(); defer subManager.mu.RUnlock()
+	json.NewEncoder(w).Encode(subManager.Subscriptions)
+}
+
+func handleLogs(w http.ResponseWriter, r *http.Request) {
+	service := r.URL.Query().Get("service")
+	f, err := os.Open(serverLogPath)
+	if err != nil { f, err = os.Open("server.log") }
+	if err != nil { http.Error(w, "logs not found", 404); return }
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if service == "" || strings.Contains(strings.ToLower(line), strings.ToLower(service)) {
+			fmt.Fprintln(w, line)
+		}
+	}
+}
+
+func handleBPA(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(bpaHTML))
+}
+
+func handleBPALeads(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("query")
+	if query == "" { query = "general" }
+	res, _ := globalSwarmManager.DispatchTask("leadgen", query)
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "data": res})
+}
+
+func handleBPACompliance(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("query")
+	if query == "" { query = "standard" }
+	res, _ := globalSwarmManager.DispatchTask("compliance", query)
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "data": res})
+}
+
+func handleBPAContent(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("query")
+	if query == "" { query = "viral_hook" }
+	res, _ := globalSwarmManager.DispatchTask("content", query)
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "data": res})
+}
+
+func handleBPATrial(w http.ResponseWriter, r *http.Request) {
+	var req struct { Email string }
+	json.NewDecoder(r.Body).Decode(&req)
+	apiKey := generateID()
+	tools.RunTool("agentmail", map[string]interface{}{"to": req.Email, "subject": "BPA Trial Activated", "body": "Key: " + apiKey})
+	json.NewEncoder(w).Encode(map[string]string{"status": "trial_started", "key": apiKey})
 }
