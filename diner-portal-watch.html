@@ -57,7 +57,31 @@
         .booth:hover { transform: scale(1.02); }
         .booth3 { border-color: #00F0FF; box-shadow: 0 0 25px rgba(0,240,255,0.3); }
         .booth7 { border-color: #8B5CF6; box-shadow: 0 0 25px rgba(139,92,246,0.3); }
-        .booth h2 { margin-bottom: 10px; }
+        .booth { position: relative; overflow: hidden; }
+        .portal-ring {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 150px; height: 150px; border-radius: 50%;
+            border: 2px solid transparent; pointer-events: none;
+            transition: all 0.5s ease; opacity: 0.4;
+            will-change: transform;
+        }
+        .booth3 .portal-ring { border-color: #00F0FF; box-shadow: 0 0 15px #00F0FF; }
+        .booth7 .portal-ring {
+            border-color: #8B5CF6; box-shadow: 0 0 15px #8B5CF6;
+            animation: flicker 0.15s infinite;
+        }
+        @keyframes flicker {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 0.1; }
+        }
+        .booth.active .portal-ring {
+            width: 250px; height: 250px; opacity: 1;
+            box-shadow: 0 0 50px 20px currentColor;
+        }
+        .booth3.active .portal-ring { color: #00F0FF; }
+        .booth7.active .portal-ring { color: #8B5CF6; }
+        .booth h2 { margin-bottom: 10px; position: relative; z-index: 1; }
+        .booth p, .booth .status, .booth button, .booth .narration { position: relative; z-index: 1; }
         .booth .status { font-size: 0.9rem; margin: 10px 0; }
         .booth button {
             background: transparent; color: #fff; border: 1px solid #555;
@@ -76,6 +100,7 @@
             width: 60px; height: 60px; border-radius: 50%;
             cursor: pointer; transition: all 0.3s; position: relative;
             animation: float 3s ease-in-out infinite;
+            will-change: transform;
         }
         .orb:hover { transform: scale(1.2); }
         .orb1 { background: radial-gradient(circle, #F59E0B, #B45309); box-shadow: 0 0 20px #F59E0B; animation-delay: 0s; }
@@ -99,6 +124,9 @@
             font-size: 0.85rem; color: #00F0FF;
         }
         @keyframes scroll { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
+        @media (max-width: 600px) {
+            .ticker-content { font-size: 1.1rem; font-weight: bold; }
+        }
         /* Nova Chat */
         .nova-btn {
             position: fixed; bottom: 10px; right: 10px; z-index: 10;
@@ -134,6 +162,7 @@
 
         <div class="portals">
             <div class="booth booth3" id="booth3">
+                <div class="portal-ring"></div>
                 <h2>BOOTH 3</h2>
                 <p>NEON BATTLE</p>
                 <div class="status">🟢 ACTIVE</div>
@@ -142,6 +171,7 @@
                 <div class="narration" id="booth3-narration"></div>
             </div>
             <div class="booth booth7" id="booth7">
+                <div class="portal-ring"></div>
                 <h2>BOOTH 7</h2>
                 <p>UNSTABLE</p>
                 <div class="status">🔴 UNSTABLE</div>
@@ -163,6 +193,7 @@
         <div class="ticker-content" id="ticker"></div>
     </div>
 
+    <audio id="ambient-buzz" loop></audio>
     <button class="nova-btn" onclick="toggleChat()">🎤</button>
     <div class="chat-panel" id="chat-panel">
         <div class="chat-messages" id="chat-messages"></div>
@@ -174,6 +205,65 @@
 
     <script>
         const BASE = 'https://koola10.fly.dev';
+
+        // Particle System
+        function createParticle(x, y, isBurst = false, boothNum = 0) {
+            const p = document.createElement('div');
+            p.className = 'particle';
+            const size = Math.random() * 3 + 1;
+            p.style.width = `${size}px`;
+            p.style.height = `${size}px`;
+            p.style.background = boothNum === 7 ? '#8B5CF6' : (boothNum === 3 ? '#00F0FF' : '#fff');
+            p.style.position = 'fixed';
+            p.style.borderRadius = '50%';
+            p.style.pointerEvents = 'none';
+            p.style.zIndex = '0';
+
+            const destinationX = x + (Math.random() - 0.5) * (isBurst ? 400 : 100);
+            const destinationY = y + (Math.random() - 0.5) * (isBurst ? 400 : 100);
+
+            let duration = Math.random() * 2000 + 1000;
+            if (isBurst && boothNum === 7) duration += 2000; // Slower burst for Booth 7
+
+            const anim = p.animate([
+                { transform: `translate(${x}px, ${y}px)`, opacity: 1 },
+                { transform: `translate(${destinationX}px, ${destinationY}px)`, opacity: 0 }
+            ], {
+                duration: duration,
+                easing: boothNum === 7 ? 'cubic-bezier(0.1, 0, 0.9, 1)' : 'ease-out',
+                iterations: isBurst ? 1 : Infinity
+            });
+
+            document.body.appendChild(p);
+            if (isBurst) anim.onfinish = () => p.remove();
+        }
+
+        // Initialize 25 dust particles
+        for(let i=0; i<25; i++) {
+            createParticle(Math.random() * window.innerWidth, Math.random() * window.innerHeight);
+        }
+
+        function triggerBurst(boothNum) {
+            const booth = document.getElementById(`booth${boothNum}`);
+            const rect = booth.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const count = boothNum === 7 ? 30 : 20; // More chaotic for Booth 7
+            for(let i=0; i<count; i++) {
+                createParticle(centerX, centerY, true, boothNum);
+            }
+        }
+
+        // Booth 7 Recalibrating logic
+        setInterval(() => {
+            const status = document.querySelector('#booth7 .status');
+            if (Math.random() < 0.3 && status.textContent === '🔴 UNSTABLE') {
+                status.textContent = '🟡 RECALIBRATING...';
+                setTimeout(() => {
+                    status.textContent = '🔴 UNSTABLE';
+                }, 3000);
+            }
+        }, 8000);
         // Broadcast Log messages
         const messages = [
             "BOOTH 3 STABILIZED — CONTESTANT ENTERED WITH HIGH RESONANCE",
@@ -207,6 +297,10 @@
         tickerInterval = setInterval(updateTicker, 5000);
 
         async function activateBooth(boothNum) {
+            const booth = document.getElementById(`booth${boothNum}`);
+            booth.classList.add('active');
+            triggerBurst(boothNum);
+
             const narrationDiv = document.getElementById(`booth${boothNum}-narration`);
             narrationDiv.textContent = 'Activating portal...';
             try {
@@ -222,6 +316,8 @@
             } catch(e) {
                 narrationDiv.textContent = 'Portal pulses with raw energy...';
             }
+
+            setTimeout(() => booth.classList.remove('active'), 2000);
         }
 
         function fullPortal(boothNum) {
