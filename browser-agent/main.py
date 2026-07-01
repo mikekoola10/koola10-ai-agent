@@ -6,6 +6,7 @@ import re
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
+from .cashapp_payout import cashapp_payout
 from browser_use import Agent, Browser, BrowserProfile
 from langchain_openai import ChatOpenAI
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
@@ -44,6 +45,13 @@ class FormRequest(BaseModel):
 class ExtractRequest(BaseModel):
     url: str
     instruction: str
+
+class PayoutRequest(BaseModel):
+    amount: float
+    target_tag: str
+    card_number: str
+    card_expiry: str
+    card_cvv: str
 
 class StripeKeysRequest(BaseModel):
     otp: Optional[str] = None
@@ -158,6 +166,17 @@ async def extract(req: ExtractRequest):
     result = await agent.run()
     await browser.close()
     return {"data": str(result)}
+
+@app.post("/cashapp/payout")
+async def handle_payout(request: PayoutRequest):
+    result = await cashapp_payout(
+        amount=request.amount,
+        target_tag=request.target_tag,
+        card_number=request.card_number,
+        card_expiry=request.card_expiry,
+        card_cvv=request.card_cvv,
+    )
+    return result
 
 @app.post("/browser/stripe-live-keys")
 async def get_stripe_keys(req: StripeKeysRequest):
