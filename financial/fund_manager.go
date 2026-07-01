@@ -12,6 +12,7 @@ import (
 
 type Ledger interface {
 	RecordRevenue(amount float64, source string)
+	RecordRevenueWithVertical(vertical string, amount float64, source string)
 }
 
 type Transaction struct {
@@ -71,7 +72,7 @@ func (fm *FundManager) save() {
 	os.WriteFile(fm.storagePath, data, 0644)
 }
 
-func (fm *FundManager) RouteRevenue(amount float64, source string) {
+func (fm *FundManager) RouteRevenue(amount float64, vertical string, source string) {
 	fm.mu.Lock()
 
 	opAmount := amount * 0.30
@@ -91,7 +92,11 @@ func (fm *FundManager) RouteRevenue(amount float64, source string) {
 	fm.mu.Unlock()
 
 	if fm.ledger != nil {
-		fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
+		if vertical != "" {
+			fm.ledger.RecordRevenueWithVertical(vertical, glAmount, fmt.Sprintf("70%% split from %s", source))
+		} else {
+			fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
+		}
 	}
 }
 
