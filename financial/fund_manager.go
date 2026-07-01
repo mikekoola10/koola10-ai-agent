@@ -14,7 +14,7 @@ type Ledger interface {
 	RecordRevenue(amount float64, source string)
 }
 
-type Transaction struct {
+type FundTransaction struct {
 	Timestamp   time.Time `json:"timestamp"`
 	Amount      float64   `json:"amount"`
 	Source      string    `json:"source"`
@@ -30,11 +30,11 @@ type FundStatus struct {
 }
 
 type FundManager struct {
-	Balance             float64       `json:"balance"`
-	TotalEarned         float64       `json:"total_earned"`
-	TotalSpent          float64       `json:"total_spent"`
-	ReinvestmentHistory []string      `json:"reinvestment_history"`
-	Transactions        []Transaction `json:"transactions"`
+	Balance             float64           `json:"balance"`
+	TotalEarned         float64           `json:"total_earned"`
+	TotalSpent          float64           `json:"total_spent"`
+	ReinvestmentHistory []string          `json:"reinvestment_history"`
+	Transactions        []FundTransaction `json:"transactions"`
 	storagePath         string
 	mu                  sync.RWMutex
 	ledger              Ledger
@@ -45,7 +45,7 @@ func NewFundManager(path string, ledger Ledger) *FundManager {
 		storagePath:         path,
 		ledger:              ledger,
 		ReinvestmentHistory: []string{},
-		Transactions:        []Transaction{},
+		Transactions:        []FundTransaction{},
 	}
 	fm.load()
 	return fm
@@ -62,7 +62,7 @@ func (fm *FundManager) load() {
 		fm.ReinvestmentHistory = []string{}
 	}
 	if fm.Transactions == nil {
-		fm.Transactions = []Transaction{}
+		fm.Transactions = []FundTransaction{}
 	}
 }
 
@@ -80,7 +80,7 @@ func (fm *FundManager) RouteRevenue(amount float64, source string) {
 	fm.Balance += opAmount
 	fm.TotalEarned += opAmount
 
-	fm.Transactions = append(fm.Transactions, Transaction{
+	fm.Transactions = append(fm.Transactions, FundTransaction{
 		Timestamp:   time.Now(),
 		Amount:      opAmount,
 		Source:      source,
@@ -103,7 +103,7 @@ func (fm *FundManager) CoverStripeFees(transactionAmount float64) {
 	fm.Balance -= fee
 	fm.TotalSpent += fee
 
-	fm.Transactions = append(fm.Transactions, Transaction{
+	fm.Transactions = append(fm.Transactions, FundTransaction{
 		Timestamp:   time.Now(),
 		Amount:      fee,
 		Source:      "stripe",
@@ -120,7 +120,7 @@ func (fm *FundManager) PaySubscription(service string, amount float64) {
 	fm.Balance -= amount
 	fm.TotalSpent += amount
 
-	fm.Transactions = append(fm.Transactions, Transaction{
+	fm.Transactions = append(fm.Transactions, FundTransaction{
 		Timestamp:   time.Now(),
 		Amount:      amount,
 		Source:      service,
@@ -196,7 +196,7 @@ func (fm *FundManager) PayFlyInvoice() {
 				if fm.Balance >= amount {
 					fm.Balance -= amount
 					fm.TotalSpent += amount
-					fm.Transactions = append(fm.Transactions, Transaction{
+					fm.Transactions = append(fm.Transactions, FundTransaction{
 						Timestamp:   time.Now(),
 						Amount:      amount,
 						Source:      "fly.io",
@@ -222,7 +222,7 @@ func (fm *FundManager) ReinvestSurplus(threshold, percentage float64) {
 		msg := fmt.Sprintf("Reinvested %.2f (%.0f%% of surplus above %.2f) into swarm scaling", reinvestAmount, percentage, threshold)
 		fm.ReinvestmentHistory = append(fm.ReinvestmentHistory, fmt.Sprintf("%s: %s", time.Now().Format(time.RFC3339), msg))
 
-		fm.Transactions = append(fm.Transactions, Transaction{
+		fm.Transactions = append(fm.Transactions, FundTransaction{
 			Timestamp:   time.Now(),
 			Amount:      reinvestAmount,
 			Source:      "internal",
@@ -244,11 +244,11 @@ func (fm *FundManager) GetStatus() FundStatus {
 	}
 }
 
-func (fm *FundManager) GetHistory(days int) []Transaction {
+func (fm *FundManager) GetHistory(days int) []FundTransaction {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
 
-	var history []Transaction
+	var history []FundTransaction
 	cutoff := time.Now().AddDate(0, 0, -days)
 	for _, tx := range fm.Transactions {
 		if tx.Timestamp.After(cutoff) {
