@@ -72,7 +72,26 @@ func (fm *FundManager) save() {
 }
 
 func (fm *FundManager) RouteRevenue(amount float64, source string) {
+	fm.RouteRevenueWithVertical("", amount, source)
+}
+
+func (fm *FundManager) RouteRevenueWithVertical(vertical string, amount float64, source string) {
 	fm.mu.Lock()
+
+	if vertical != "" && (vertical == "spiral" || (len(vertical) > 7 && vertical[:7] == "spiral_")) {
+		// Spiral revenue goes 100% to its ledger (which we handle in RecordRevenueWithVertical)
+		fm.mu.Unlock()
+		if fm.ledger != nil {
+			if l, ok := fm.ledger.(interface {
+				RecordRevenueWithVertical(string, float64, string)
+			}); ok {
+				l.RecordRevenueWithVertical(vertical, amount, source)
+			} else {
+				fm.ledger.RecordRevenue(amount, source)
+			}
+		}
+		return
+	}
 
 	opAmount := amount * 0.30
 	glAmount := amount * 0.70
@@ -91,7 +110,13 @@ func (fm *FundManager) RouteRevenue(amount float64, source string) {
 	fm.mu.Unlock()
 
 	if fm.ledger != nil {
-		fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
+		if l, ok := fm.ledger.(interface {
+			RecordRevenueWithVertical(string, float64, string)
+		}); ok {
+			l.RecordRevenueWithVertical(vertical, glAmount, fmt.Sprintf("70%% split from %s", source))
+		} else {
+			fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
+		}
 	}
 }
 
