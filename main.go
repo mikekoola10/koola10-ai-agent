@@ -376,6 +376,9 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
+	globalSwarmManager.Factories["repurpose"] = agents.RepurposeFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -1475,6 +1478,12 @@ func handleCreateCheckout(w http.ResponseWriter, r *http.Request) {
 	case "echo_api":
 		priceID = os.Getenv("STRIPE_ECHO_PRICE_ID")
 		mode = "payment"
+	case "bpa_pro":
+		priceID = os.Getenv("STRIPE_BPA_PRO_PRICE_ID")
+		mode = "subscription"
+	case "bpa_enterprise":
+		priceID = os.Getenv("STRIPE_BPA_ENT_PRICE_ID")
+		mode = "subscription"
 	default:
 		http.Error(w, "unknown product", 400)
 		return
@@ -1578,8 +1587,43 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDailyReport(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+
+	var dailyRevenue float64
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for _, tx := range globalLedger.Transactions {
+		if tx.Type == "revenue" {
+			t, err := time.Parse(time.RFC3339, tx.Timestamp)
+			if err == nil && t.After(cutoff) {
+				dailyRevenue += tx.Amount
+			}
+		}
+	}
+
+	target := 1000.0
+	progress := (dailyRevenue / target) * 100
+	if progress > 100 {
+		progress = 100
+	}
+
+	globalSwarmManager.Mu.RLock()
+	activeSwarms := len(globalSwarmManager.Swarms)
+	globalSwarmManager.Mu.RUnlock()
+
+	report := fmt.Sprintf("# Koola10 Daily Revenue Report\n\n"+
+		"**Date:** %s\n\n"+
+		"## Phase 1 Metrics\n"+
+		"- **Daily Revenue:** $%.2f\n"+
+		"- **Target:** $%.2f/day\n"+
+		"- **Progress:** %.1f%%\n"+
+		"- **Active Swarms:** %d\n\n"+
+		"## Status\n"+
+		"All systems operational. Scaling swarms to meet $1k/day target.",
+		time.Now().Format("2006-01-02"), dailyRevenue, target, progress, activeSwarms)
+
 	w.Header().Set("Content-Type", "text/markdown")
-	w.Write([]byte("# Daily Report\n\nAll systems operational."))
+	w.Write([]byte(report))
 }
 
 func handleCollaborate(w http.ResponseWriter, r *http.Request) {
