@@ -132,9 +132,11 @@ type Meeting struct {
 }
 
 type Entity struct {
-	Name  string   `json:"name"`
-	Type  string   `json:"type"`
-	Tasks []string `json:"tasks,omitempty"`
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`
+	Tasks           []string `json:"tasks,omitempty"`
+	LoyaltyPoints   int      `json:"loyalty_points,omitempty"`
+	ActivityHistory []string `json:"activity_history,omitempty"`
 }
 
 type Edge struct {
@@ -194,12 +196,13 @@ type UsageLog struct {
 }
 
 type Transaction struct {
-	Timestamp   string  `json:"timestamp"`
-	Type        string  `json:"type"`
-	Category    string  `json:"category"`
-	Vertical    string  `json:"vertical,omitempty"`
-	Amount      float64 `json:"amount"`
-	Description string  `json:"description"`
+	Timestamp    string  `json:"timestamp"`
+	Type         string  `json:"type"`
+	Category     string  `json:"category"`
+	Vertical     string  `json:"vertical,omitempty"`
+	ProfitCenter string  `json:"profit_center,omitempty"`
+	Amount       float64 `json:"amount"`
+	Description  string  `json:"description"`
 }
 
 type EconomicLedger struct {
@@ -390,6 +393,10 @@ func main() {
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
 
+	// Register StripMall verticals
+	globalSwarmManager.Factories["retail"] = agents.RetailSwarmFactory
+	globalSwarmManager.Factories["restaurant"] = agents.RestaurantSwarmFactory
+
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
 			redisClient = redis.NewClient(opt)
@@ -409,6 +416,13 @@ func main() {
 	r.Get("/", corsMiddleware(handleRoot))
 
 	r.Get("/health", corsMiddleware(handleHealth))
+
+	// StripMall Endpoints
+	r.Get("/retail/inventory", corsMiddleware(handleRetailInventory))
+	r.Post("/retail/pricing", corsMiddleware(handleRetailPricing))
+	r.Get("/restaurant/menu", corsMiddleware(handleRestaurantMenu))
+	r.Get("/restaurant/tables", corsMiddleware(handleRestaurantTables))
+	r.Get("/loyalty/status", corsMiddleware(handleLoyaltyStatus))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
@@ -998,16 +1012,37 @@ func (l *EconomicLedger) Load() {
 }
 func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
 	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
+	l.Transactions = append(l.Transactions, Transaction{
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Type:        "cost",
+		Category:    category,
+		Vertical:    vertical,
+		Amount:      amount,
+		Description: description,
+	})
 	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
 }
 func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
-	l.RecordRevenueWithVertical("", amount, source)
+	l.RecordRevenueWithProfitCenter(amount, source, "")
+}
+func (l *EconomicLedger) RecordRevenueWithProfitCenter(amount float64, source string, profitCenter string) {
+	l.RecordRevenueWithVerticalAndProfitCenter("", amount, source, profitCenter)
 }
 func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
+	l.RecordRevenueWithVerticalAndProfitCenter(vertical, amount, source, "")
+}
+func (l *EconomicLedger) RecordRevenueWithVerticalAndProfitCenter(vertical string, amount float64, source string, profitCenter string) {
 	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+	l.Transactions = append(l.Transactions, Transaction{
+		Timestamp:    time.Now().Format(time.RFC3339),
+		Type:         "revenue",
+		Category:     "revenue_split",
+		Vertical:     vertical,
+		ProfitCenter: profitCenter,
+		Amount:       amount,
+		Description:  "Revenue: " + source,
+	})
+	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical, "profit_center": profitCenter})
 }
 
 // --- Financial Handlers ---
@@ -1202,6 +1237,59 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Status check")
 	w.Write([]byte(`{"data": "pending"}`))
 }
+func handleRetailInventory(w http.ResponseWriter, r *http.Request) {
+	res, err := globalSwarmManager.DispatchTask("retail", "Check inventory levels and suggest reorders")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleRetailPricing(w http.ResponseWriter, r *http.Request) {
+	res, err := globalSwarmManager.DispatchTask("retail", "Analyze competitor prices and update dynamic pricing")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleRestaurantMenu(w http.ResponseWriter, r *http.Request) {
+	res, err := globalSwarmManager.DispatchTask("restaurant", "Optimize menu based on sales data and seasonality")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleRestaurantTables(w http.ResponseWriter, r *http.Request) {
+	res, err := globalSwarmManager.DispatchTask("restaurant", "Manage table wait-times and assignments")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleLoyaltyStatus(w http.ResponseWriter, r *http.Request) {
+	customerID := r.URL.Query().Get("customer_id")
+	globalGraph.mu.RLock()
+	defer globalGraph.mu.RUnlock()
+	entity, ok := globalGraph.Entities[customerID]
+	if !ok {
+		http.Error(w, "customer not found", 404)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entity)
+}
+
 func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -72,6 +72,10 @@ func (fm *FundManager) save() {
 }
 
 func (fm *FundManager) RouteRevenue(amount float64, source string) {
+	fm.RouteRevenueWithProfitCenter(amount, source, "")
+}
+
+func (fm *FundManager) RouteRevenueWithProfitCenter(amount float64, source string, profitCenter string) {
 	fm.mu.Lock()
 
 	opAmount := amount * 0.30
@@ -91,7 +95,13 @@ func (fm *FundManager) RouteRevenue(amount float64, source string) {
 	fm.mu.Unlock()
 
 	if fm.ledger != nil {
-		fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
+		if l, ok := fm.ledger.(interface {
+			RecordRevenueWithProfitCenter(amount float64, source string, profitCenter string)
+		}); ok {
+			l.RecordRevenueWithProfitCenter(glAmount, fmt.Sprintf("70%% split from %s", source), profitCenter)
+		} else {
+			fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
+		}
 	}
 }
 
