@@ -268,6 +268,12 @@ type VideoJob struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type SSEEvent struct {
+	Type      string                 `json:"type"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp string                 `json:"timestamp"`
+}
+
 // --- Global States ---
 
 var (
@@ -278,6 +284,9 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+
+	sseClients = make(map[chan SSEEvent]bool)
+	sseMu      sync.Mutex
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -478,6 +487,9 @@ func main() {
 	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+
+	r.Post("/agent/send-to-cashapp", corsMiddleware(handleSendToCashApp))
+	r.Post("/voice/confirm", corsMiddleware(handleVoiceConfirm))
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -1055,6 +1067,123 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleSendToCashApp(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Cashtag string  `json:"cashtag"`
+		Amount  float64 `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	if req.Amount > 50.0 {
+		approvalID := generateID()
+		approvalReq := &ApprovalRequest{
+			ID:        approvalID,
+			Action:    "cashapp_payout",
+			Details:   map[string]interface{}{"cashtag": req.Cashtag, "amount": req.Amount},
+			Status:    "pending",
+			CreatedAt: time.Now().Format(time.RFC3339),
+		}
+		approvalMu.Lock()
+		approvalStore[approvalID] = approvalReq
+		approvalMu.Unlock()
+
+		AddAuditEntry("approval_request_created", map[string]interface{}{
+			"approval_id": approvalID,
+			"action":      "cashapp_payout",
+			"amount":      req.Amount,
+			"cashtag":     req.Cashtag,
+		})
+
+		broadcastSSE(SSEEvent{
+			Type: "jarvis_notification",
+			Data: map[string]interface{}{
+				"title":   "Cash App Payout Approval Required",
+				"message": fmt.Sprintf("George, a payout of $%.2f to %s requires your approval. Would you like to proceed?", req.Amount, req.Cashtag),
+				"voice":   true,
+				"id":      approvalID,
+			},
+			Timestamp: time.Now().Format(time.RFC3339),
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":      "pending_approval",
+			"approval_id": approvalID,
+		})
+		return
+	}
+
+	// Immediate payout
+	result := tools.RunTool("cashapp", map[string]interface{}{
+		"action":  "send_to_cashtag",
+		"cashtag": req.Cashtag,
+		"amount":  req.Amount,
+	})
+
+	if result.Success {
+		globalLedger.RecordCost("cashapp", "cashapp_payout", req.Amount, fmt.Sprintf("Payout to %s", req.Cashtag))
+		AddAuditEntry("cashapp_payout_executed", map[string]interface{}{
+			"cashtag": req.Cashtag,
+			"amount":  req.Amount,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func handleVoiceConfirm(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ApprovalID string `json:"approval_id"`
+		Command    string `json:"command"` // e.g., "Proceed"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	approvalMu.Lock()
+	ap, ok := approvalStore[req.ApprovalID]
+	approvalMu.Unlock()
+
+	if !ok {
+		http.Error(w, "approval not found", 404)
+		return
+	}
+
+	if strings.ToLower(req.Command) == "proceed" || strings.ToLower(req.Command) == "yes" {
+		ap.Status = "approved"
+
+		// Execute the payout
+		cashtag, _ := ap.Details["cashtag"].(string)
+		amount, _ := ap.Details["amount"].(float64)
+
+		result := tools.RunTool("cashapp", map[string]interface{}{
+			"action":  "send_to_cashtag",
+			"cashtag": cashtag,
+			"amount":  amount,
+		})
+
+		if result.Success {
+			globalLedger.RecordCost("cashapp", "cashapp_payout", amount, fmt.Sprintf("Approved payout to %s", cashtag))
+			AddAuditEntry("cashapp_payout_executed", map[string]interface{}{
+				"approval_id": req.ApprovalID,
+				"cashtag":     cashtag,
+				"amount":      amount,
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func EvaluateAction(actionType string, estimatedCost float64) EconomicEvaluation {
 	roiThreshold := 2.0; projectedRevenue := 0.0; if actionType == "grant_submit" { projectedRevenue = 500.0 }
 	roi := 0.0; if estimatedCost > 0 { roi = projectedRevenue / estimatedCost }
@@ -1591,7 +1720,46 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	client := make(chan SSEEvent, 10)
+	sseMu.Lock()
+	sseClients[client] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, client)
+		sseMu.Unlock()
+	}()
+
+	notify := r.Context().Done()
 	w.Write([]byte("event: connected\ndata: {}\n\n"))
+	flusher, _ := w.(http.Flusher)
+	flusher.Flush()
+
+	for {
+		select {
+		case event := <-client:
+			data, _ := json.Marshal(event)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, string(data))
+			flusher.Flush()
+		case <-notify:
+			return
+		}
+	}
+}
+
+func broadcastSSE(event SSEEvent) {
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	for client := range sseClients {
+		// Non-blocking send
+		select {
+		case client <- event:
+		default:
+		}
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
