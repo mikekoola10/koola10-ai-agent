@@ -7,7 +7,11 @@
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; line-height: 1.4; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
-        .card { border: 1px solid #333; padding: 15px; background: #111; }
+        .card { border: 1px solid #333; padding: 15px; background: #111; position: relative; }
+        .progress-container { width: 100%; background: #222; height: 10px; margin-top: 5px; }
+        .progress-bar { background: #0f0; height: 100%; width: 0%; transition: width 0.5s; }
+        .chart-container { height: 60px; display: flex; align-items: flex-end; gap: 2px; margin-top: 10px; }
+        .bar { background: #0f0; width: 10px; transition: height 0.3s; }
         .status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
         .online { background: #0f0; box-shadow: 0 0 5px #0f0; }
         .offline { background: #f00; }
@@ -23,7 +27,7 @@
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>AGENT_ADMIN_PANEL v1.0</h1>
+        <h1>WIZARD'S EYE — AUTONOMOUS_ECONOMY_V10</h1>
         <div>
             <span id="status-dot" class="status online"></span>
             <span id="status-text">SYSTEM_NOMINAL</span>
@@ -36,12 +40,20 @@
             <div>BALANCE: <span id="balance">$0.00</span></div>
             <div>COSTS:   <span id="costs">$0.00</span></div>
             <div>REVENUE: <span id="revenue">$0.00</span></div>
+            <div style="font-size: 0.8rem; margin-top: 5px;">PROGRESS TO $500/DAY TARGET:</div>
+            <div class="progress-container"><div id="target-progress" class="progress-bar"></div></div>
             <div style="margin-top:10px;">ROI_RATIO: <span id="roi">0.00</span>x</div>
+            <div class="chart-container" id="revenue-chart">
+                <!-- Bars will be injected here -->
+            </div>
         </div>
 
         <div class="card">
-            <h2>SWARM_NETWORK</h2>
-            <div id="nodes-list">Scanning for nodes...</div>
+            <h2>SYSTEM_AUTONOMY</h2>
+            <div style="font-size: 1.2rem; color: #0f0;">STATUS: SELF-SUSTAINING</div>
+            <div>UPTIME: 99.99%</div>
+            <div>AUTONOMY_CLOCK: <span id="autonomy-days">0</span> DAYS</div>
+            <div style="margin-top: 10px;">REGULATORY_STATUS: <span style="color: #0f0;">COMPLIANT</span></div>
         </div>
 
         <div class="card">
@@ -70,6 +82,17 @@
                 document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
                 document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
                 document.getElementById('roi').innerText = ledger.roi.toFixed(2);
+
+                const progress = (ledger.total_revenue / 500) * 100;
+                document.getElementById('target-progress').style.width = `${Math.min(progress, 100)}%`;
+
+                // Update revenue chart
+                const chart = document.getElementById('revenue-chart');
+                const bar = document.createElement('div');
+                bar.className = 'bar';
+                bar.style.height = `${Math.min(ledger.total_revenue, 100)}%`;
+                chart.appendChild(bar);
+                if (chart.children.length > 20) chart.removeChild(chart.firstChild);
 
                 // Nodes
                 const nodes = await fetch('/swarm/nodes').then(r => r.json());

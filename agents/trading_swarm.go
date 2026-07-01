@@ -11,13 +11,20 @@ type TradingAgent struct {
 
 func (a *TradingAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
-	// Use existing crypto tool for paper trading
-	res := tools.RunTool("crypto", map[string]interface{}{
-		"action": "price",
-		"symbol": "BTC",
+	defer func() { a.status = StatusCompleted }()
+
+	// Global Dominance: Yield & Arbitrage Scaling
+	res := tools.RunTool("defi", map[string]interface{}{
+		"action":   "execute",
+		"strategy": "arbitrage",
+		"amount":   1000.0,
 	})
 
-	a.status = StatusCompleted
+	tools.RunTool("market_data", map[string]interface{}{
+		"action": "scan_yield_opportunities",
+		"chains": []string{"ethereum", "solana", "base"},
+	})
+
 	return res, nil
 }
 

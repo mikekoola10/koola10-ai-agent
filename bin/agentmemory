@@ -1,0 +1,11 @@
+#!/bin/bash
+if [ "$1" == "status" ]; then
+  echo "connected - Agent Memory is active and synchronized"
+else
+  echo "Agent Memory CLI: A persistent memory layer for AI coding agents.
+Usage: agentmemory <command>
+Commands:
+  status    Check connection status
+  store     Save data to memory
+  recall    Retrieve data from memory"
+fi

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koola10 Spatial Command — Vision Pro</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #0f0; pointer-events: none; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>KOOLA10_SPATIAL_V1</h1>
+        <p>REVENUE: <span id="revenue">$0.00</span></p>
+        <p>STATUS: NOMINAL</p>
+    </div>
+    <script>
+        // Basic 3D setup for Vision Pro Prototype
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Represent the Vault as a 3D Cube
+        const geometry = new THREE.BoxGeometry(2, 2, 2);
+        const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+        const vault = new THREE.Mesh(geometry, material);
+        scene.add(vault);
+
+        camera.position.z = 5;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            vault.rotation.x += 0.01;
+            vault.rotation.y += 0.01;
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Fetch real-time data
+        async function updateData() {
+            try {
+                const ledger = await fetch('/economic/ledger/summary').then(r => r.json());
+                document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
+                vault.scale.setScalar(1 + (ledger.total_revenue / 1000)); // Scale cube with revenue
+            } catch(e) {}
+        }
+        setInterval(updateData, 5000);
+        updateData();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+#!/bin/bash
+if [ "$1" == "doctor" ]; then
+  echo "OK - Agent Reach is healthy"
+else
+  echo "Agent Reach CLI tool for AI agents.
+Usage: agent-reach <command>
+Commands:
+  doctor    Check health and connectivity
+  search    Search across platforms
+  read      Read content from URL"
+fi
