@@ -1,0 +1,9 @@
+DEPLOYMENT CHECKLIST
+
+[ ] Dockerfile contains Node.js and Python.
+[ ] tools/mcp_client.go exists.
+[ ] /admin/mcp-test endpoint added to main.go.
+[ ] go.mod updated (go mod tidy).
+[ ] spiral-mcp-client.ts exists.
+[ ] All documentation created.
+[ ] Compilation check (go build) passes.

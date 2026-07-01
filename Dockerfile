@@ -2,8 +2,8 @@
 FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
-COPY go.mod ./
-# RUN go mod download
+COPY go.mod go.sum ./
+RUN go mod download
 
 COPY . .
 RUN go build -o agent main.go
@@ -12,13 +12,16 @@ RUN go build -o agent main.go
 FROM alpine:latest
 
 # Install necessary runtime dependencies
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates nodejs npm python3 py3-pip
 
 WORKDIR /app
 COPY --from=builder /app/agent .
 
 # Create data directory for MetaClaw persistence
 RUN mkdir -p /data/applications && chown -R 1000:1000 /data
+
+# Install MCP SDK and server-everything for testing
+RUN npm install @modelcontextprotocol/sdk @modelcontextprotocol/server-everything
 
 USER 1000:1000
 
