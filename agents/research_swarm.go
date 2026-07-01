@@ -1,6 +1,7 @@
 package agents
 
 type ResearchAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }

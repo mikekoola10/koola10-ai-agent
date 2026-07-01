@@ -12,7 +12,7 @@ primary_region = 'ams'
   PORT = '8080'
 
 [processes]
-  app = './agent'
+  app = './koola10'
 
 [[mounts]]
   source = 'metaclaw_data'

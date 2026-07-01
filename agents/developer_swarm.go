@@ -7,6 +7,7 @@ import (
 )
 
 type DeveloperAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }
@@ -33,6 +34,16 @@ func (a *DeveloperAgent) Run(task string) (interface{}, error) {
 		}, nil
 	}
 
+	// SaaS Building logic
+	if a.specialty == "Backend (Go)" || a.specialty == "Frontend (React)" {
+		log.Printf("[DeveloperAgent] Autonomous SaaS Building: %s", task)
+		return map[string]interface{}{
+			"status": "success",
+			"artifact": fmt.Sprintf("SaaS boilerplate for %s", task),
+			"deployment": "fly.io",
+		}, nil
+	}
+
 	// Fallback for simple string tasks
 	log.Printf("[DeveloperAgent] Processing simple task: %s", task)
 	return fmt.Sprintf("Completed %s task: %s", a.specialty, task), nil
@@ -40,6 +51,18 @@ func (a *DeveloperAgent) Run(task string) (interface{}, error) {
 
 func (a *DeveloperAgent) Status() AgentStatus { return a.status }
 func (a *DeveloperAgent) Specialty() string    { return a.specialty }
+
+func (a *DeveloperAgent) Capabilities() []string {
+	return []string{"software_development", "ci_cd", "saas_building", "testing"}
+}
+
+func (a *DeveloperAgent) InputSchema() map[string]string {
+	return map[string]string{
+		"repositories": "[]string",
+		"tasks":        "[]string",
+		"auto_merge":   "bool",
+	}
+}
 
 func DeveloperFactory() []SpecialistAgent {
 	specialties := []string{

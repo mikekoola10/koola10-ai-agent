@@ -1,6 +1,7 @@
 package agents
 
 type ComplianceAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }

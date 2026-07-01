@@ -1,6 +1,7 @@
 package agents
 
 type GrantSwarmAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }

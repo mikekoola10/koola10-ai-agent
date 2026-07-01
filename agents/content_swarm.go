@@ -1,6 +1,7 @@
 package agents
 
 type ContentAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }

@@ -3,213 +3,223 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koola10 AI Agent — Command Center</title>
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#00ff41">
-    <link rel="apple-touch-icon" href="https://img.icons8.com/nolan/512/safe.png">
+    <title>Koola10 — Master Command Portal</title>
     <style>
         :root {
-            --primary: #00ff41;
-            --bg: #000000;
-            --card-bg: #0a0a0a;
-            --border: #00ff41;
-            --text: #00ff41;
-            --font: 'Courier New', Courier, monospace;
+            --neon-green: #00ff41;
+            --neon-blue: #00f2ff;
+            --dark-bg: #050505;
+            --card-bg: rgba(10, 10, 10, 0.9);
+            --border: 1px solid var(--neon-green);
         }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: var(--bg);
-            font-family: var(--font);
-            color: var(--text);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
+            background-color: var(--dark-bg);
+            color: var(--neon-green);
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
             padding: 20px;
-            overflow: hidden;
+            overflow-x: hidden;
         }
-
-        /* Matrix Background Effect */
-        #matrix {
+        .matrix-bg {
             position: fixed;
             top: 0;
             left: 0;
+            width: 100%;
+            height: 100%;
             z-index: -1;
+            opacity: 0.1;
         }
-
-        .container {
-            max-width: 800px;
-            width: 100%;
-            text-align: center;
-            z-index: 1;
-        }
-
-        header {
-            margin-bottom: 50px;
-            border: 2px solid var(--border);
+        .header {
+            border: var(--border);
             padding: 20px;
-            background: rgba(0, 0, 0, 0.8);
-            box-shadow: 0 0 20px var(--primary);
+            text-align: center;
+            box-shadow: 0 0 15px var(--neon-green);
+            margin-bottom: 30px;
         }
-
-        h1 {
-            font-size: 2.5rem;
-            text-transform: uppercase;
-            letter-spacing: 5px;
-            margin-bottom: 10px;
-            animation: glitch 1s linear infinite;
-        }
-
-        @keyframes glitch {
-            2%, 64% { transform: translate(2px, 0) skew(0deg); }
-            4%, 60% { transform: translate(-2px, 0) skew(0deg); }
-            62% { transform: translate(0, 0) skew(5deg); }
-        }
-
-        .subtitle {
-            font-size: 1rem;
-            opacity: 0.8;
-            text-transform: uppercase;
-        }
-
-        .nav-grid {
+        .portal-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
             gap: 20px;
-            width: 100%;
         }
-
-        .nav-card {
-            background: rgba(10, 10, 10, 0.9);
-            border: 1px solid var(--border);
-            padding: 30px;
-            text-decoration: none;
-            color: var(--text);
-            transition: all 0.3s;
-            position: relative;
-            overflow: hidden;
+        .card {
+            background: var(--card-bg);
+            border: var(--border);
+            padding: 20px;
+            box-shadow: inset 0 0 10px rgba(0, 255, 65, 0.2);
         }
-
-        .nav-card:hover {
-            background: var(--primary);
-            color: #000;
-            box-shadow: 0 0 30px var(--primary);
-            transform: translateY(-5px);
-        }
-
-        .nav-card h2 {
-            font-size: 1.5rem;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-        }
-
-        .nav-card p {
-            font-size: 0.9rem;
-            opacity: 0.8;
-        }
-
-        .footer {
-            margin-top: 50px;
+        .telemetry {
             font-size: 0.8rem;
-            opacity: 0.5;
+            color: var(--neon-blue);
+            height: 150px;
+            overflow-y: auto;
+            border-top: 1px solid #222;
+            margin-top: 10px;
+            padding-top: 10px;
         }
-
-        /* Scanline effect */
-        body::before {
-            content: " ";
-            display: block;
-            position: fixed;
-            top: 0;
-            left: 0;
-            bottom: 0;
-            right: 0;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-            z-index: 2;
-            background-size: 100% 2px, 3px 100%;
-            pointer-events: none;
+        .shield-gate {
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid #f00;
+            padding: 15px;
+            margin-top: 20px;
+            display: none;
+        }
+        button {
+            background: transparent;
+            color: var(--neon-green);
+            border: var(--border);
+            padding: 10px 20px;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: 0.3s;
+        }
+        button:hover {
+            background: var(--neon-green);
+            color: #000;
+            box-shadow: 0 0 20px var(--neon-green);
+        }
+        .status-badge {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--neon-green);
+            box-shadow: 0 0 5px var(--neon-green);
+            margin-right: 10px;
         }
     </style>
 </head>
 <body>
-    <canvas id="matrix"></canvas>
+    <div class="matrix-bg" id="matrix"></div>
 
-    <div class="container">
-        <header>
-            <h1>KOOLA10_SYSTEM</h1>
-            <p class="subtitle">Autonomous AI Agent Ecosystem — v1.5.0</p>
-        </header>
+    <div class="header">
+        <h1>KOOLA10_MASTER_COMMAND_PORTAL_v2.0</h1>
+        <p><span class="status-badge"></span> SYSTEM_STATE: ACTIVE | ENCRYPTION: WIZARD_SIG_v4</p>
+    </div>
 
-        <div class="nav-grid">
-            <a href="vault.html" class="nav-card">
-                <h2>🏦 THE_VAULT</h2>
-                <p>Personal Finance Command Center. Track transactions, manage income, and secure your financial future via Supabase.</p>
-            </a>
-            <a href="dashboard.html" class="nav-card">
-                <h2>📊 ADMIN_PANEL</h2>
-                <p>System monitoring, node management, and real-time telemetry for the Koola10 swarm network.</p>
-            </a>
-            <a href="nova-studio.html" class="nav-card">
-                <h2>🎨 NOVA_STUDIO</h2>
-                <p>Creative production engine for AI-driven media and content generation.</p>
-            </a>
-            <a href="diner-portal-watch.html" class="nav-card">
-                <h2>👁️ PORTAL_WATCH</h2>
-                <p>Real-time monitoring and event tracking for the Diner portal ecosystem.</p>
-            </a>
+    <div class="portal-grid">
+        <!-- Revenue Flywheel -->
+        <div class="card">
+            <h2>PROFIT_ENGINE</h2>
+            <div id="ledger-stats">
+                BALANCE: <span id="balance">$0.00</span><br>
+                DAILY_ROI: <span id="roi">0.00</span>x<br>
+                AGI_INDEX: <span id="agi-index">0.85</span>
+            </div>
+            <div class="telemetry" id="revenue-telemetry">
+                [SYSTEM] Initializing profit tracking...
+            </div>
         </div>
 
-        <div class="footer">
-            [ SYSTEM_STATUS: OPERATIONAL ] [ ENCRYPTION: AES-256 ] [ ACCESS_LEVEL: ROOT ]
+        <!-- Swarm Oversight -->
+        <div class="card">
+            <h2>SWARM_OVERSIGHT</h2>
+            <div id="swarm-status">
+                ACTIVE_SWARMS: 11<br>
+                TOTAL_AGENTS: 110<br>
+                LEARNING_PROGRESS: <progress value="65" max="100"></progress> 65%
+            </div>
+            <div class="telemetry" id="swarm-telemetry">
+                [SWARM] Echoing node heartbeats...
+            </div>
+        </div>
+
+        <!-- Wizard's Shield -->
+        <div class="card">
+            <h2>BLACKBOARD_CONTEXT</h2>
+            <div id="blackboard-data" class="telemetry" style="height: 250px;">
+                [BLACKBOARD] Listening for cross-agent signals...
+            </div>
+        </div>
+
+        <!-- Wizard's Shield -->
+        <div class="card">
+            <h2>WIZARD_SHIELD</h2>
+            <p>Manual Approval Gate for Critical Actions</p>
+            <div id="approval-gate" class="shield-gate">
+                <p id="approval-desc">NO_PENDING_ACTIONS</p>
+                <button onclick="approveAction()">APPROVE</button>
+                <button onclick="rejectAction()" style="border-color: #f00; color: #f00;">REJECT</button>
+            </div>
+            <div class="telemetry" id="shield-telemetry">
+                [SHIELD] Monitoring protected paths...
+            </div>
         </div>
     </div>
 
     <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js');
-            });
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'telemetry') {
+                logTelemetry(msg.source, msg.text);
+            } else if (msg.type === 'approval_request') {
+                showShieldGate(msg);
+            } else if (msg.type === 'blackboard_update') {
+                updateBlackboard(msg.data);
+            }
+        };
+
+        function updateBlackboard(data) {
+            const div = document.getElementById('blackboard-data');
+            div.innerHTML = Object.entries(data).map(([key, entries]) => `
+                <div style="margin-bottom:10px;">
+                    <strong>${key}</strong>: ${entries[entries.length-1].content}
+                    <br><small>Source: ${entries[entries.length-1].source}</small>
+                </div>
+            `).join('');
         }
-        const canvas = document.getElementById('matrix');
-        const ctx = canvas.getContext('2d');
 
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-
-        const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$+-*/=%&@#";
-        const fontSize = 16;
-        const columns = canvas.width / fontSize;
-
-        const drops = [];
-        for (let i = 0; i < columns; i++) {
-            drops[i] = 1;
-        }
-
-        function draw() {
-            ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            ctx.fillStyle = "#00ff41";
-            ctx.font = fontSize + "px monospace";
-
-            for (let i = 0; i < drops.length; i++) {
-                const text = letters.charAt(Math.floor(Math.random() * letters.length));
-                ctx.fillText(text, i * fontSize, drops[i] * fontSize);
-
-                if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
-                    drops[i] = 0;
-                }
-                drops[i]++;
+        function logTelemetry(source, text) {
+            const div = document.getElementById(`${source}-telemetry`);
+            if (div) {
+                const p = document.createElement('p');
+                p.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+                div.prepend(p);
             }
         }
 
-        setInterval(draw, 33);
+        function showShieldGate(req) {
+            const gate = document.getElementById('approval-gate');
+            const desc = document.getElementById('approval-desc');
+            gate.style.display = 'block';
+            desc.textContent = `ACTION: ${req.action} | PATH: ${req.path}`;
+            window.currentApprovalId = req.id;
+        }
 
-        window.addEventListener('resize', () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        });
+        async function approveAction() {
+            await fetch(`/compliance/approve?id=${window.currentApprovalId}`, { method: 'POST' });
+            document.getElementById('approval-gate').style.display = 'none';
+            logTelemetry('shield', `Approved action ${window.currentApprovalId}`);
+        }
+
+        async function rejectAction() {
+            await fetch(`/compliance/reject?id=${window.currentApprovalId}`, { method: 'POST' });
+            document.getElementById('approval-gate').style.display = 'none';
+            logTelemetry('shield', `Rejected action ${window.currentApprovalId}`);
+        }
+
+        // Matrix background
+        const canvas = document.createElement('canvas');
+        document.getElementById('matrix').appendChild(canvas);
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$+-*/=%&@#";
+        const drops = Array(Math.floor(canvas.width / 20)).fill(1);
+        function drawMatrix() {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "#00ff41";
+            ctx.font = "15px monospace";
+            drops.forEach((y, i) => {
+                const text = characters[Math.floor(Math.random() * characters.length)];
+                ctx.fillText(text, i * 20, y * 20);
+                if (y * 20 > canvas.height && Math.random() > 0.975) drops[i] = 0;
+                drops[i]++;
+            });
+        }
+        setInterval(drawMatrix, 50);
     </script>
 </body>
 </html>

@@ -5,24 +5,46 @@ import (
 )
 
 type TradingAgent struct {
+	BaseAGISkills
 	specialty string
 	status    AgentStatus
 }
 
 func (a *TradingAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
+	defer func() { a.status = StatusCompleted }()
+
+	if a.specialty == "Arbitrage Scanner (DEX)" || a.specialty == "Arbitrage Scanner (CEX)" {
+		// Use market data tool for arbitrage scanning
+		res := tools.RunTool("market_data", map[string]interface{}{
+			"symbol": "BTC/USD",
+		})
+		return res, nil
+	}
+
 	// Use existing crypto tool for paper trading
 	res := tools.RunTool("crypto", map[string]interface{}{
 		"action": "price",
 		"symbol": "BTC",
 	})
 
-	a.status = StatusCompleted
 	return res, nil
 }
 
 func (a *TradingAgent) Status() AgentStatus { return a.status }
 func (a *TradingAgent) Specialty() string    { return a.specialty }
+
+func (a *TradingAgent) Capabilities() []string {
+	return []string{"market_analysis", "paper_trading", "arbitrage_scanning"}
+}
+
+func (a *TradingAgent) InputSchema() map[string]string {
+	return map[string]string{
+		"action": "string (price|buy|sell)",
+		"symbol": "string (e.g. BTC)",
+		"amount": "float64",
+	}
+}
 
 func TradingFactory() []SpecialistAgent {
 	specialties := []string{
