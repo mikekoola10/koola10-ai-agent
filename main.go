@@ -25,6 +25,7 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/mirror"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -358,6 +359,9 @@ func main() {
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
+	userMirror := mirror.NewMirror("/data/user_mirror.json")
+	agents.SetSwarmMirror(userMirror)
+
 	// Automated invoice payment check (every 24h)
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
@@ -371,6 +375,7 @@ func main() {
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
 	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
+	globalSwarmManager.Factories["ghost-town"] = agents.GhostTownFactory
 	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
 	globalSwarmManager.Factories["echo"] = agents.APIFactory
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
@@ -463,6 +468,10 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+
+	r.Get("/spatial", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "spatial/index.html")
+	}))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
