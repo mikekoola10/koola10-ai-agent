@@ -15,7 +15,7 @@ func (a *LeadGenAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
 
 	// Simulate daily CSV production
-	dir := "/data/leads/"
+	dir := "data/leads/"
 	os.MkdirAll(dir, 0755)
 	filename := fmt.Sprintf("%s_leads.csv", a.specialty)
 	content := "name,company,email,status\nJohn Doe,Acme Corp,john@acme.com,qualified"

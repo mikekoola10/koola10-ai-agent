@@ -279,16 +279,16 @@ var (
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
 
-	cachePath      = "/data/grants_cache.json"
-	appsDir        = "/data/applications"
-	memoryPath     = "/data/memory.json"
-	graphPath      = "/data/memory_graph.json"
-	semanticPath   = "/data/semantic_index.json"
-	auditPath      = "/data/audit_chain.jsonl"
-	usagePath      = "/data/usage.jsonl"
-	killSwitchPath = "/data/kill_switch"
-	ledgerPath     = "/data/economic_ledger.json"
-	fundPath       = "/data/operational_fund.json"
+	cachePath      = "data/grants_cache.json"
+	appsDir        = "data/applications"
+	memoryPath     = "data/memory.json"
+	graphPath      = "data/memory_graph.json"
+	semanticPath   = "data/semantic_index.json"
+	auditPath      = "data/audit_chain.jsonl"
+	usagePath      = "data/usage.jsonl"
+	killSwitchPath = "data/kill_switch"
+	ledgerPath     = "data/economic_ledger.json"
+	fundPath       = "data/operational_fund.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
