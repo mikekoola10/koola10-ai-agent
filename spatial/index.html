@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>APEX Spatial Interface</title>
+    <style>
+        body { margin: 0; background-color: #000; font-family: monospace; }
+        #info {
+            position: absolute; top: 10px; width: 100%; text-align: center;
+            color: #00ff88; pointer-events: none; z-index: 1;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">APEX_SPATIAL_INTERFACE v1.0<br/>FOR_VISION_PRO</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+        let camera, scene, renderer;
+        let panels = [];
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050505);
+
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 10);
+            camera.position.set(0, 1.6, 3);
+
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(1, 1, 1).normalize();
+            scene.add(light);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            document.body.appendChild(VRButton.createButton(renderer));
+
+            // Create floating panels
+            createPanel("REVENUE & OPS", 0x00ff88, new THREE.Vector3(-1.5, 1.6, -2));
+            createPanel("SWARM ACTIVITY", 0x00aaff, new THREE.Vector3(0, 2.0, -2.5));
+            createPanel("MEMORY RECALL", 0xffaa00, new THREE.Vector3(1.5, 1.6, -2));
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createPanel(title, color, position) {
+            const group = new THREE.Group();
+
+            // Panel geometry
+            const geometry = new THREE.PlaneGeometry(1.2, 0.8);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x111111,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.8,
+                emissive: color,
+                emissiveIntensity: 0.1
+            });
+            const panel = new THREE.Mesh(geometry, material);
+            group.add(panel);
+
+            // Border
+            const edges = new THREE.EdgesGeometry(geometry);
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: color }));
+            group.add(line);
+
+            group.position.copy(position);
+            scene.add(group);
+            panels.push({ group, title, color });
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        function render() {
+            // Subtle floating animation
+            const time = Date.now() * 0.001;
+            panels.forEach((p, i) => {
+                p.group.position.y += Math.sin(time + i) * 0.0005;
+                p.group.rotation.y = Math.sin(time * 0.5 + i) * 0.02;
+            });
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>

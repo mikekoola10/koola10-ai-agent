@@ -116,6 +116,31 @@
             opacity: 0.5;
         }
 
+        .voice-controls {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            z-index: 10;
+        }
+
+        .voice-btn {
+            background: rgba(10, 10, 10, 0.9);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 10px 20px;
+            font-family: var(--font);
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.3s;
+        }
+
+        .voice-btn:hover {
+            background: var(--primary);
+            color: #000;
+            box-shadow: 0 0 20px var(--primary);
+        }
+
         /* Scanline effect */
         body::before {
             content: " ";
@@ -158,6 +183,11 @@
                 <h2>👁️ PORTAL_WATCH</h2>
                 <p>Real-time monitoring and event tracking for the Diner portal ecosystem.</p>
             </a>
+        </div>
+
+        <div class="voice-controls">
+            <button class="voice-btn" onclick="startVoiceRecognition()">🎤 Listen</button>
+            <button class="voice-btn" id="tts-toggle" onclick="toggleTTS()">🔊 TTS: ON</button>
         </div>
 
         <div class="footer">
@@ -210,6 +240,62 @@
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
         });
+
+        let ttsEnabled = true;
+
+        function toggleTTS() {
+            ttsEnabled = !ttsEnabled;
+            document.getElementById('tts-toggle').innerText = `🔊 TTS: ${ttsEnabled ? 'ON' : 'OFF'}`;
+        }
+
+        function speak(text) {
+            if (!ttsEnabled) return;
+            const utterance = new SpeechSynthesisUtterance(text);
+            const voices = window.speechSynthesis.getVoices();
+            utterance.voice = voices.find(v => v.lang === 'en-US') || voices[0];
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function startVoiceRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert("Speech recognition not supported in this browser.");
+                return;
+            }
+
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            recognition.onstart = () => {
+                console.log("Voice recognition started...");
+            };
+
+            recognition.onresult = async (event) => {
+                const transcript = event.results[0][0].transcript;
+                console.log("Voice Transcript:", transcript);
+
+                try {
+                    const response = await fetch('/ai/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt: transcript })
+                    });
+                    const data = await response.json();
+                    speak(data.response);
+                } catch (err) {
+                    console.error("Chat fetch failed", err);
+                    speak("Sorry, I could not connect to the chat service.");
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error("Speech recognition error", event.error);
+            };
+
+            recognition.start();
+        }
     </script>
 </body>
 </html>

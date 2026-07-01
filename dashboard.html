@@ -62,18 +62,39 @@
     </div>
 
     <script>
-        async function update() {
+        async function safeFetch(url) {
             try {
-                // Ledger
-                const ledger = await fetch('/economic/ledger/summary').then(r => r.json());
-                document.getElementById('balance').innerText = `$${ledger.balance.toFixed(2)}`;
-                document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
-                document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
-                document.getElementById('roi').innerText = ledger.roi.toFixed(2);
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const contentType = response.headers.get("content-type");
+                if (!contentType || !contentType.includes("application/json")) {
+                    throw new Error("Invalid content-type: " + contentType);
+                }
+                return await response.json();
+            } catch (e) {
+                console.warn(`Fetch failed for ${url}:`, e);
+                return null;
+            }
+        }
 
-                // Nodes
-                const nodes = await fetch('/swarm/nodes').then(r => r.json());
-                const nodesDiv = document.getElementById('nodes-list');
+        async function update() {
+            let connectionHealthy = true;
+
+            // Financials from /monitor
+            const monitor = await safeFetch('/monitor');
+            if (monitor) {
+                document.getElementById('balance').innerText = `$${monitor.revenue.spendable.toFixed(2)}`;
+                document.getElementById('costs').innerText = `$${monitor.revenue.total_costs.toFixed(2)}`;
+                document.getElementById('revenue').innerText = `$${monitor.revenue.total.toFixed(2)}`;
+                document.getElementById('roi').innerText = monitor.revenue.roi.toFixed(2);
+            } else {
+                connectionHealthy = false;
+            }
+
+            // Nodes
+            const nodes = await safeFetch('/swarm/nodes');
+            const nodesDiv = document.getElementById('nodes-list');
+            if (nodes) {
                 if (nodes.length === 0) {
                     nodesDiv.innerText = "No active nodes.";
                 } else {
@@ -83,22 +104,33 @@
                         </div>
                     `).join('');
                 }
+            } else {
+                nodesDiv.innerText = "Error syncing nodes.";
+                connectionHealthy = false;
+            }
 
-                // Approvals
-                const audit = await fetch('/compliance/audit').then(r => r.json());
+            // Approvals
+            const audit = await safeFetch('/compliance/audit');
+            if (audit) {
                 const pending = audit.filter(e => e.action === 'approval_request_created');
                 document.getElementById('approvals-count').innerText = pending.length;
-
-                // Log a tick
-                const logs = document.getElementById('logs');
-                const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-                logs.innerText = `[${timestamp}] Telemetry update successful\n` + logs.innerText.split('\n').slice(0, 10).join('\n');
-
-            } catch (e) {
-                console.error(e);
-                document.getElementById('status-dot').className = 'status offline';
-                document.getElementById('status-text').innerText = 'CONNECTION_LOST';
+            } else {
+                connectionHealthy = false;
             }
+
+            // Global Status Update
+            if (connectionHealthy) {
+                document.getElementById('status-dot').className = 'status online';
+                document.getElementById('status-text').innerText = 'SYSTEM_NOMINAL';
+            } else {
+                document.getElementById('status-dot').className = 'status offline';
+                document.getElementById('status-text').innerText = 'TELEMETRY_DEGRADED';
+            }
+
+            // Log a tick
+            const logs = document.getElementById('logs');
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            logs.innerText = `[${timestamp}] Telemetry update ${connectionHealthy ? 'successful' : 'partial'}\n` + logs.innerText.split('\n').slice(0, 10).join('\n');
         }
 
         async function triggerMonitor() {

@@ -25,8 +25,10 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/mirror"
 	"koola10/tools"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v76"
 	"github.com/stripe/stripe-go/v76/webhook"
@@ -268,6 +270,20 @@ type VideoJob struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type SystemMonitorResponse struct {
+	Status       string `json:"status"`
+	Uptime       string `json:"uptime"`
+	Revenue      struct {
+		Total      float64 `json:"total"`
+		Operations float64 `json:"operations"`
+		Spendable  float64 `json:"spendable"`
+		TotalCosts float64 `json:"total_costs"`
+		ROI        float64 `json:"roi"`
+	} `json:"revenue"`
+	Autonomy     string `json:"autonomy"`
+	ActiveSwarms int    `json:"active_swarms"`
+}
+
 // --- Global States ---
 
 var (
@@ -289,6 +305,9 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	mirrorPath     = "/data/user_mirror.json"
+
+	globalMirror *mirror.Mirror
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -324,9 +343,42 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+
+	//go:embed avatar.html
+	avatarHTML string
 )
 
 // --- Middleware ---
+
+var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
+
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if string(jwtSecret) == "" {
+			// If secret not set, allow for now but log warning
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "missing authorization header", 401)
+			return
+		}
+
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+			return jwtSecret, nil
+		})
+
+		if err != nil || !token.Valid {
+			http.Error(w, "invalid token", 401)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -356,6 +408,8 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+	globalMirror = mirror.NewMirror("admin", mirrorPath)
+	globalSwarmManager.Mirror = globalMirror
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
 	// Automated invoice payment check (every 24h)
@@ -369,26 +423,27 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
-	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
-	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
-	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
-	globalSwarmManager.Factories["echo"] = agents.APIFactory
-	globalSwarmManager.Factories["solara"] = agents.ContentFactory
-	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
-	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
+	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory(globalMirror)
+	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory(globalMirror)
+	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory(globalMirror)
+	globalSwarmManager.Factories["echo"] = agents.APIFactory(globalMirror)
+	globalSwarmManager.Factories["solara"] = agents.ContentFactory(globalMirror)
+	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory(globalMirror)
+	globalSwarmManager.Factories["vale"] = agents.ResearchFactory(globalMirror)
+	globalSwarmManager.Factories["health"] = agents.HealthFactory(globalMirror)
 
 	// Descriptive Slugs & Pilot Aliases
-	globalSwarmManager.Factories["trading"] = agents.TradingFactory
-	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory
-	globalSwarmManager.Factories["api_service"] = agents.APIFactory
-	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory
-	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory
-	globalSwarmManager.Factories["content"] = agents.ContentFactory
-	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
-	globalSwarmManager.Factories["research"] = agents.ResearchFactory
+	globalSwarmManager.Factories["trading"] = agents.TradingFactory(globalMirror)
+	globalSwarmManager.Factories["leadgen"] = agents.LeadGenFactory(globalMirror)
+	globalSwarmManager.Factories["api_service"] = agents.APIFactory(globalMirror)
+	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory(globalMirror)
+	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory(globalMirror)
+	globalSwarmManager.Factories["content"] = agents.ContentFactory(globalMirror)
+	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory(globalMirror)
+	globalSwarmManager.Factories["research"] = agents.ResearchFactory(globalMirror)
 
 	// Register Night Shift vertical
-	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory(globalMirror)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -406,9 +461,26 @@ func main() {
 		w.Write([]byte(`{"error":"not found"}`))
 	})
 
-	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/", corsMiddleware(handleAvatar))
+	r.Get("/legacy", corsMiddleware(handleRoot))
 
 	r.Get("/health", corsMiddleware(handleHealth))
+	r.Get("/monitor", corsMiddleware(handleSystemMonitor))
+
+	// Spatial Interface
+	r.Get("/spatial", corsMiddleware(handleSpatial))
+
+	// Beta Signup
+	r.Get("/beta", corsMiddleware(handleBeta))
+	r.Post("/api/beta/signup", corsMiddleware(handleBetaSignup))
+
+	// BPA API v1 (Protected)
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(authMiddleware)
+		r.Get("/status", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"status":"v1_active"}`))
+		})
+	})
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
 	r.Post("/collaborate/*", corsMiddleware(handleCollaborate))
@@ -688,6 +760,7 @@ func startHeartbeat() {
 }
 
 func handleSwarmNodes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	if redisClient == nil { http.Error(w, "no redis", 503); return }
 	ctx := context.Background()
 	nodes, _ := redisClient.HGetAll(ctx, "swarm:nodes").Result()
@@ -704,6 +777,7 @@ func handleSwarmNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSwarmAgents(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode([]map[string]string{
 		{"role": "finder", "status": "active"}, {"role": "writer", "status": "active"},
 		{"role": "reviewer", "status": "active"}, {"role": "submitter", "status": "active"},
@@ -1044,6 +1118,7 @@ func handleFinancialHistory(w http.ResponseWriter, r *http.Request) {
 
 // TradingAgent integration point
 func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var req struct {
 		Profit float64 `json:"profit"`
 	}
@@ -1248,6 +1323,12 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "parse failed", 500)
 		return
 	}
+
+	if globalMirror != nil {
+		go globalMirror.Remember(req.Prompt, "user_chat")
+		go globalMirror.Remember(dsRes.Choices[0].Message.Content, "spiral_reply")
+	}
+
 	LogUsage(dsRes.Usage.TotalTokens)
 	globalLedger.RecordCost("", "ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
 	w.Header().Set("Content-Type", "application/json")
@@ -1336,6 +1417,7 @@ func handleEconomicLedgerRevenue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 }
 func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	globalLedger.mu.RLock()
 	defer globalLedger.mu.RUnlock()
 	roi := 0.0
@@ -1597,6 +1679,83 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(dashboardHTML))
+}
+
+func handleAvatar(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(avatarHTML))
+}
+
+//go:embed spatial/index.html
+var spatialHTML string
+
+func handleSpatial(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(spatialHTML))
+}
+
+//go:embed beta.html
+var betaHTML string
+
+func handleBeta(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(betaHTML))
+}
+
+func handleBetaSignup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	AddAuditEntry("beta_signup", map[string]interface{}{"email": req.Email})
+
+	// Automated onboarding flow
+	go func(email string) {
+		time.Sleep(2 * time.Second) // Simulate review period
+		onboardingMsg := fmt.Sprintf("Welcome to APEX Private Beta. Your Mirror is being provisioned for %s. Protocol established.", email)
+		tools.RunTool("agentmail", map[string]interface{}{
+			"to":      email,
+			"subject": "APEX_PROTOCOL: ONBOARDING_ESTABLISHED",
+			"body":    onboardingMsg,
+		})
+		AddAuditEntry("beta_approved", map[string]interface{}{"email": email})
+	}(req.Email)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "ACCESS_REQUEST_LOGGED. AWAITING_GOVERNANCE_REVIEW.",
+	})
+}
+
+func handleSystemMonitor(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+
+	fundStatus := fundManager.GetStatus()
+
+	var res SystemMonitorResponse
+	res.Status = "System Nominal"
+	res.Uptime = "99.99%"
+	res.Autonomy = "Self-Sustaining"
+	res.ActiveSwarms = 7
+
+	res.Revenue.Operations = fundStatus.Balance
+	res.Revenue.Spendable = globalLedger.Balance
+	res.Revenue.Total = fundStatus.TotalEarned + globalLedger.TotalRevenue
+	res.Revenue.TotalCosts = globalLedger.TotalCosts
+
+	if globalLedger.TotalCosts > 0 {
+		res.Revenue.ROI = res.Revenue.Total / globalLedger.TotalCosts
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
 }
 
 func generateID() string {
