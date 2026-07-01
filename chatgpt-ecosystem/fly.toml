@@ -2,9 +2,7 @@ app = "chatgpt-oracle"
 primary_region = "ams"
 
 [build]
-  dockerfile = "chatgpt-ecosystem/Dockerfile"
-  [build.args]
-    WORKDIR = "chatgpt-ecosystem"
+  dockerfile = "Dockerfile"
 
 [env]
   PORT = "8080"
