@@ -1,0 +1,13 @@
+FROM ollama/ollama:latest
+
+# Performance Optimizations
+ENV OLLAMA_NUM_PARALLEL=4
+ENV OLLAMA_KEEP_ALIVE=24h
+
+# Enable CUDA Graphs
+ENV OLLAMA_CUDA_GRAPHS=1
+
+EXPOSE 11434
+
+ENTRYPOINT ["/bin/ollama"]
+CMD ["serve"]

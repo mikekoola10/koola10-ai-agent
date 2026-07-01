@@ -1,4 +1,4 @@
-module koola10
+module sentinel
 
 go 1.24
 
