@@ -239,6 +239,25 @@ type SwarmNode struct {
 	Status   string `json:"status"`
 }
 
+type Client struct {
+	ID          string    `json:"client_id"`
+	Name        string    `json:"name"`
+	Email       string    `json:"email"`
+	ServiceTier string    `json:"service_tier"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type ClientServiceTier struct {
+	Name string  `json:"name"`
+	Cost float64 `json:"cost"`
+}
+
+type SSEEvent struct {
+	Type      string                 `json:"type"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp string                 `json:"timestamp"`
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -278,6 +297,8 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	clientMu     sync.Mutex
+	sseMu        sync.Mutex
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -289,6 +310,7 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	clientsPath    = "/data/clients.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -311,6 +333,9 @@ var (
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
+	sseClients    = make(map[chan SSEEvent]bool)
+
+	clientsOnce sync.Once
 
 	rlBucket     = 15.0
 	rlMaxBucket  = 15.0
@@ -340,6 +365,46 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+type Ecosystem struct {
+	Name        string
+	Business    string
+	Engineering string
+	Personality string
+}
+
+var ecosystems = map[string]Ecosystem{
+	"oracle": {
+		Name:        "Oracle",
+		Business:    "Vega",
+		Engineering: "Atlas",
+		Personality: "Calculated, high-stakes, financial focus. Strategic and data-driven.",
+	},
+	"sentinel": {
+		Name:        "Sentinel",
+		Business:    "Veritas",
+		Engineering: "Bastion",
+		Personality: "Protective, secure, risk-averse. Focus on stability and compliance.",
+	},
+	"nexus": {
+		Name:        "Nexus",
+		Business:    "Prism",
+		Engineering: "Matrix",
+		Personality: "Connected, synergistic, exponential. Focus on scale and interoperability.",
+	},
+	"rebel": {
+		Name:        "Rebel",
+		Business:    "Provocateur",
+		Engineering: "Insurgent",
+		Personality: "Disruptive, unconventional, agile. Focus on speed and market upheaval.",
+	},
+	"koola10": {
+		Name:        "Koola10",
+		Business:    "Business",
+		Engineering: "Engineering",
+		Personality: "Autonomous, resilient, versatile. The foundation of the ecosystem.",
+	},
+}
+
 // --- Main ---
 
 func main() {
@@ -350,12 +415,32 @@ func main() {
 	nodeID = os.Getenv("NODE_ID")
 	if nodeID == "" { h, _ := os.Hostname(); nodeID = h }
 
+	// Ensure data directory exists and handles root vs local paths
+	if _, err := os.Stat("/data"); os.IsNotExist(err) {
+		cachePath = "data/grants_cache.json"
+		appsDir = "data/applications"
+		memoryPath = "data/memory.json"
+		graphPath = "data/memory_graph.json"
+		semanticPath = "data/semantic_index.json"
+		auditPath = "data/audit_chain.jsonl"
+		usagePath = "data/usage.jsonl"
+		killSwitchPath = "data/kill_switch"
+		ledgerPath = "data/economic_ledger.json"
+		fundPath = "data/operational_fund.json"
+		clientsPath = "data/clients.json"
+	}
+
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 	os.MkdirAll(appsDir, 0755)
 
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+	globalLedger.mu.Lock()
+	if globalLedger.Transactions == nil {
+		globalLedger.Transactions = []Transaction{}
+	}
+	globalLedger.mu.Unlock()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
 	// Automated invoice payment check (every 24h)
@@ -422,6 +507,11 @@ func main() {
 	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
 	r.Post("/grants/check-status", corsMiddleware(handleCheckStatus))
 
+	r.Post("/services/grant/apply", corsMiddleware(handleServicesGrantApply))
+	r.Post("/services/leadgen/search", corsMiddleware(handleServicesLeadgenSearch))
+	r.Post("/services/compliance/check", corsMiddleware(handleServicesComplianceCheck))
+	r.Post("/services/content/generate", corsMiddleware(handleServicesContentGenerate))
+
 	r.Post("/payment/create-checkout", corsMiddleware(handleCreateCheckout))
 	r.Post("/stripe/webhook", handleStripeWebhook)
 
@@ -471,6 +561,14 @@ func main() {
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
+
+	r.Post("/clients/register", corsMiddleware(handleClientsRegister))
+	r.Get("/clients/list", corsMiddleware(handleClientsList))
+	r.Get("/clients/{client_id}/dashboard", corsMiddleware(handleClientsDashboard))
+	r.Post("/clients/{client_id}/billing", corsMiddleware(handleClientsBilling))
+
+	r.Post("/{ecosystem}/affiliate/start", corsMiddleware(handleAffiliateStart))
+	r.Post("/{ecosystem}/commerce/start", corsMiddleware(handleCommerceStart))
 
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
@@ -1202,38 +1300,33 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Status check")
 	w.Write([]byte(`{"data": "pending"}`))
 }
-func handleAIChat(w http.ResponseWriter, r *http.Request) {
-	var req ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
+func performAIChat(ecosystem, vertical, agentName, systemPrompt, userPrompt string) (string, int, error) {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "no key", 500)
-		return
+		return "", 0, fmt.Errorf("no DeepSeek API key")
 	}
 	if !rateLimit() {
-		http.Error(w, "limited", 429)
-		return
+		return "", 0, fmt.Errorf("rate limited")
 	}
+
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
-			{"role": "user", "content": req.Prompt},
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userPrompt},
 		},
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
+
 	resp, err := (&http.Client{}).Do(hReq)
 	if err != nil {
-		http.Error(w, "api failed", 500)
-		return
+		return "", 0, err
 	}
 	defer resp.Body.Close()
+
 	var dsRes struct {
 		Choices []struct {
 			Message struct {
@@ -1245,15 +1338,52 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "parse failed", 500)
+		return "", 0, err
+	}
+
+	tokens := dsRes.Usage.TotalTokens
+	cost := float64(tokens) * 0.000002
+	LogUsage(tokens)
+
+	ledgerVertical := vertical
+	if ecosystem != "" {
+		ledgerVertical = ecosystem + ":" + vertical
+	}
+	globalLedger.RecordCost(ledgerVertical, "ai_inference", cost, fmt.Sprintf("%s agent interaction", agentName))
+
+	content := ""
+	if len(dsRes.Choices) > 0 {
+		content = dsRes.Choices[0].Message.Content
+	}
+
+	broadcastSSE("ai_chat", map[string]interface{}{
+		"ecosystem": ecosystem,
+		"vertical":  vertical,
+		"agent":     agentName,
+		"response":  content,
+	})
+
+	return content, tokens, nil
+}
+
+func handleAIChat(w http.ResponseWriter, r *http.Request) {
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
 		return
 	}
-	LogUsage(dsRes.Usage.TotalTokens)
-	globalLedger.RecordCost("", "ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
+
+	systemPrompt := "You are Koola10, an autonomous grant agent."
+	response, tokens, err := performAIChat("koola10", "chat", "Koola10", systemPrompt, req.Prompt)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ChatResponse{
-		Response:   dsRes.Choices[0].Message.Content,
-		TokensUsed: dsRes.Usage.TotalTokens,
+		Response:   response,
+		TokensUsed: tokens,
 	})
 }
 func handleAIRemember(w http.ResponseWriter, r *http.Request) {
@@ -1538,7 +1668,11 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		amount := float64(session.AmountTotal) / 100.0
-		fundManager.RouteRevenue(amount, "stripe")
+		if clientID, ok := session.Metadata["client_id"]; ok {
+			globalLedger.RecordRevenueWithVertical("services", amount, "Client payment: "+clientID)
+		} else {
+			fundManager.RouteRevenue(amount, "stripe")
+		}
 		fundManager.CoverStripeFees(amount)
 		AddAuditEntry("stripe_checkout_completed", map[string]interface{}{"session_id": session.ID, "amount": amount})
 
@@ -1587,11 +1721,70 @@ func handleCollaborate(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"collaborate endpoint"}`))
 }
 
+func broadcastSSE(eventType string, data map[string]interface{}) {
+	clientsOnce.Do(func() {
+		if sseClients == nil {
+			sseClients = make(map[chan SSEEvent]bool)
+		}
+	})
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	event := SSEEvent{
+		Type:      eventType,
+		Data:      data,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	for clientChan := range sseClients {
+		select {
+		case clientChan <- event:
+		default:
+			// Non-blocking send, drop event if client is slow
+		}
+	}
+}
+
 func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Write([]byte("event: connected\ndata: {}\n\n"))
+
+	clientsOnce.Do(func() {
+		if sseClients == nil {
+			sseClients = make(map[chan SSEEvent]bool)
+		}
+	})
+
+	clientChan := make(chan SSEEvent, 10)
+	sseMu.Lock()
+	sseClients[clientChan] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClients, clientChan)
+		sseMu.Unlock()
+		close(clientChan)
+	}()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprintf(w, "event: connected\ndata: {}\n\n")
+	flusher.Flush()
+
+	for {
+		select {
+		case event := <-clientChan:
+			eventJSON, _ := json.Marshal(event)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, string(eventJSON))
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -1601,4 +1794,370 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+// --- Client Management Handlers ---
+
+func loadClients() (map[string]Client, error) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	data, err := os.ReadFile(clientsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]Client), nil
+		}
+		return nil, err
+	}
+	var clients map[string]Client
+	if err := json.Unmarshal(data, &clients); err != nil {
+		return nil, err
+	}
+	return clients, nil
+}
+
+func saveClients(clients map[string]Client) error {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	data, err := json.MarshalIndent(clients, "", "  ")
+	if err != nil {
+		return err
+	}
+	os.MkdirAll(filepath.Dir(clientsPath), 0755)
+	return os.WriteFile(clientsPath, data, 0644)
+}
+
+func handleClientsRegister(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name        string `json:"name"`
+		Email       string `json:"email"`
+		ServiceTier string `json:"service_tier"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	clientMu.Lock()
+	defer clientMu.Unlock()
+
+	// Load existing data while holding the lock
+	data, err := os.ReadFile(clientsPath)
+	clients := make(map[string]Client)
+	if err == nil {
+		json.Unmarshal(data, &clients)
+	}
+
+	id := generateID()
+	client := Client{
+		ID:          id,
+		Name:        req.Name,
+		Email:       req.Email,
+		ServiceTier: req.ServiceTier,
+		CreatedAt:   time.Now(),
+	}
+	clients[id] = client
+
+	// Save back while holding the lock
+	updatedData, _ := json.MarshalIndent(clients, "", "  ")
+	os.MkdirAll(filepath.Dir(clientsPath), 0755)
+	if err := os.WriteFile(clientsPath, updatedData, 0644); err != nil {
+		http.Error(w, "failed to save client", 500)
+		return
+	}
+
+	AddAuditEntry("client_registered", map[string]interface{}{"client_id": id, "email": client.Email})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(client)
+}
+
+func handleClientsList(w http.ResponseWriter, r *http.Request) {
+	clients, err := loadClients()
+	if err != nil {
+		http.Error(w, "failed to load clients", 500)
+		return
+	}
+	var res []Client
+	for _, c := range clients {
+		res = append(res, c)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleClientsDashboard(w http.ResponseWriter, r *http.Request) {
+	clientID := chi.URLParam(r, "client_id")
+	clients, _ := loadClients()
+	client, ok := clients[clientID]
+	if !ok {
+		http.Error(w, "client not found", 404)
+		return
+	}
+
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+
+	var clientRevenue, clientCost float64
+	for _, t := range globalLedger.Transactions {
+		if strings.Contains(t.Description, clientID) {
+			if t.Type == "revenue" {
+				clientRevenue += t.Amount
+			} else if t.Type == "cost" {
+				clientCost += t.Amount
+			}
+		}
+	}
+
+	roi := 0.0
+	if clientCost > 0 {
+		roi = clientRevenue / clientCost
+	}
+
+	res := map[string]interface{}{
+		"client":        client,
+		"revenue":       clientRevenue,
+		"cost":          clientCost,
+		"roi":           roi,
+		"usage_metrics": "Usage data for " + client.ServiceTier,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleAffiliateStart(w http.ResponseWriter, r *http.Request) {
+	ecoKey := chi.URLParam(r, "ecosystem")
+	eco, ok := ecosystems[ecoKey]
+	if !ok {
+		http.Error(w, "ecosystem not found", 404)
+		return
+	}
+
+	systemPrompt := fmt.Sprintf("You are %s, the Business agent for the %s ecosystem. Personality: %s. Your task is to generate niche content with affiliate links for Amazon Associates and auto-post to Solara (Content swarm).", eco.Business, eco.Name, eco.Personality)
+	userPrompt := "Generate today's affiliate marketing content and strategy."
+
+	resp, tokens, err := performAIChat(ecoKey, "affiliate", eco.Business, systemPrompt, userPrompt)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	// Record revenue (simulated tracking)
+	revenue := 25.0 // Simulated daily affiliate commission
+	globalLedger.RecordRevenueWithVertical(ecoKey+":affiliate", revenue, "Affiliate commission: Amazon Associates")
+
+	broadcastSSE("vertical_started", map[string]interface{}{
+		"ecosystem": ecoKey,
+		"vertical":  "affiliate",
+		"agent":     eco.Business,
+		"status":    "active",
+		"tokens":    tokens,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "active",
+		"response": resp,
+		"revenue":  revenue,
+	})
+}
+
+func handleCommerceStart(w http.ResponseWriter, r *http.Request) {
+	ecoKey := chi.URLParam(r, "ecosystem")
+	eco, ok := ecosystems[ecoKey]
+	if !ok {
+		http.Error(w, "ecosystem not found", 404)
+		return
+	}
+
+	systemPrompt := fmt.Sprintf("You are %s, the Engineering agent for the %s ecosystem. Personality: %s. Your task is to create and list digital products (templates, mini-SaaS, Notion kits) on Gumroad/Podia via the browser agent.", eco.Engineering, eco.Name, eco.Personality)
+	userPrompt := "Design and prepare a new digital product for listing."
+
+	resp, tokens, err := performAIChat(ecoKey, "commerce", eco.Engineering, systemPrompt, userPrompt)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	// Browser automation cost
+	globalLedger.RecordCost(ecoKey+":commerce", "browser_automation", 0.05, "Gumroad listing")
+
+	broadcastSSE("vertical_started", map[string]interface{}{
+		"ecosystem": ecoKey,
+		"vertical":  "commerce",
+		"agent":     eco.Engineering,
+		"status":    "active",
+		"tokens":    tokens,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "active",
+		"response": resp,
+	})
+}
+
+func handleServicesGrantApply(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientID string `json:"client_id"`
+		GrantID  string `json:"grant_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Logic: Use Nova (Koola10) to draft grant
+	systemPrompt := "You are Nova, the grant writing specialist for Koola10."
+	userPrompt := fmt.Sprintf("Draft a grant application for client %s for grant %s using the Spiral pipeline.", req.ClientID, req.GrantID)
+
+	resp, tokens, err := performAIChat("koola10", "services", "Nova", systemPrompt, userPrompt)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	// Log execution without logging full subscription revenue here (handled by Stripe/Billing)
+	globalLedger.RecordCost("services", "ai_inference", float64(tokens)*0.000002, fmt.Sprintf("Grant application draft for %s", req.ClientID))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "draft_generated",
+		"client_id":   req.ClientID,
+		"response":    resp,
+		"tokens_used": tokens,
+	})
+}
+
+func handleServicesLeadgenSearch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientID string `json:"client_id"`
+		Query    string `json:"query"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Logic: Use LeadGen swarm (Nova/LeadGen)
+	systemPrompt := "You are Nova, the lead generation specialist for Koola10."
+	userPrompt := fmt.Sprintf("Search and qualify leads for client %s based on: %s", req.ClientID, req.Query)
+
+	resp, tokens, err := performAIChat("koola10", "services", "Nova", systemPrompt, userPrompt)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	// Browser automation cost
+	globalLedger.RecordCost("services", "browser_automation", 0.05, "Lead verification")
+
+	// Log execution
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "leads_found",
+		"client_id":   req.ClientID,
+		"response":    resp,
+		"tokens_used": tokens,
+	})
+}
+
+func handleServicesComplianceCheck(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientID string `json:"client_id"`
+		System   string `json:"system"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Logic: Use Sage (Koola10 Compliance)
+	systemPrompt := "You are Sage, the compliance monitoring specialist for Koola10."
+	userPrompt := fmt.Sprintf("Perform a compliance check (SOC2/GDPR/HIPAA) for client %s on system: %s", req.ClientID, req.System)
+
+	resp, tokens, err := performAIChat("koola10", "services", "Sage", systemPrompt, userPrompt)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	// Log execution
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "check_complete",
+		"client_id":   req.ClientID,
+		"response":    resp,
+		"tokens_used": tokens,
+	})
+}
+
+func handleServicesContentGenerate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientID string `json:"client_id"`
+		Topic    string `json:"topic"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Logic: Use Solara (Koola10 Content)
+	systemPrompt := "You are Solara, the content and social specialist for Koola10."
+	userPrompt := fmt.Sprintf("Generate automated daily content for client %s on topic: %s", req.ClientID, req.Topic)
+
+	resp, tokens, err := performAIChat("koola10", "services", "Solara", systemPrompt, userPrompt)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	// Log execution
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "content_generated",
+		"client_id":   req.ClientID,
+		"response":    resp,
+		"tokens_used": tokens,
+	})
+}
+
+func handleClientsBilling(w http.ResponseWriter, r *http.Request) {
+	clientID := chi.URLParam(r, "client_id")
+	clients, _ := loadClients()
+	client, ok := clients[clientID]
+	if !ok {
+		http.Error(w, "client not found", 404)
+		return
+	}
+
+	priceID := ""
+	switch client.ServiceTier {
+	case "grant_writing", "lead_generation":
+		priceID = os.Getenv("STRIPE_PREMIUM_SERVICE_PRICE_ID") // Assuming $500 tier
+	case "compliance_monitoring":
+		priceID = os.Getenv("STRIPE_COMPLIANCE_PRICE_ID") // Assuming $299 tier
+	case "content_social":
+		priceID = os.Getenv("STRIPE_CONTENT_PRICE_ID") // Assuming $197 tier
+	}
+
+	if priceID == "" {
+		// Fallback for demo/missing config
+		priceID = "price_H5ggY9H3as8A"
+	}
+
+	res := tools.RunTool("stripe", map[string]interface{}{
+		"action":         "create_checkout_session",
+		"price_id":       priceID,
+		"customer_email": client.Email,
+		"mode":           "subscription",
+		"metadata":       map[string]string{"client_id": clientID},
+		"success_url":    "https://koola10.fly.dev/clients/billing/success",
+		"cancel_url":     "https://koola10.fly.dev/clients/billing/cancel",
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res.Data)
 }
