@@ -224,6 +224,23 @@ type EconomicEvaluation struct {
 	Reason        string  `json:"reason"`
 }
 
+type VaultSummary struct {
+	TotalRevenue   float64 `json:"total_revenue"`
+	OperationsFund float64 `json:"operations_fund"`
+	SpendableFund  float64 `json:"spendable_fund"`
+}
+
+type VaultBrief struct {
+	Content string `json:"content"`
+}
+
+type SubscriptionHealth struct {
+	Upcoming     []map[string]interface{} `json:"upcoming"`
+	Failed       []map[string]interface{} `json:"failed"`
+	TotalMonthly float64                  `json:"total_monthly"`
+	Cards        []string                 `json:"cards"`
+}
+
 type SwarmTask struct {
 	TaskID     string                 `json:"task_id"`
 	Stage      string                 `json:"stage"` // "finding", "writing", "reviewing", "submitting", "done"
@@ -369,6 +386,7 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
+	globalSwarmManager.RevenueLogger = fundManager.RouteRevenue
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
 	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
@@ -386,6 +404,11 @@ func main() {
 	globalSwarmManager.Factories["content"] = agents.ContentFactory
 	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
+
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
+	globalSwarmManager.Factories["spiral_affiliate"] = agents.SpiralAffiliateFactory
+	globalSwarmManager.Factories["spiral_bounty"] = agents.SpiralBountyFactory
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
@@ -408,6 +431,16 @@ func main() {
 
 	r.Get("/", corsMiddleware(handleRoot))
 
+	r.Get("/{file}.html", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, strings.TrimPrefix(r.URL.Path, "/"))
+	})
+	r.Get("/sw.js", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "sw.js")
+	})
+	r.Get("/manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "manifest.json")
+	})
+
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
 	r.Get("/events/stream", handleEventsStream)
@@ -419,6 +452,14 @@ func main() {
 	r.Get("/grants/applications", corsMiddleware(handleApplicationsList))
 	r.Post("/grants/monitor", corsMiddleware(handleMonitor))
 	r.Post("/grants/update-status", corsMiddleware(handleUpdateStatus))
+
+	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
+	r.Get("/vault/brief", corsMiddleware(handleVaultBrief))
+	r.Get("/api/subscription-health", corsMiddleware(handleSubscriptionHealth))
+	r.Get("/api/forecast", corsMiddleware(handleForecast))
+	r.Get("/transactions", corsMiddleware(handleTransactions))
+	r.Post("/ledger/record", corsMiddleware(handleLedgerRecord))
+
 	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
 	r.Post("/grants/check-status", corsMiddleware(handleCheckStatus))
 
@@ -1351,6 +1392,82 @@ func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
 }
 func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
+}
+
+func handleVaultSummary(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+	status := fundManager.GetStatus()
+
+	// 30/70 Split: Total revenue is combined from all sources
+	total := globalLedger.TotalRevenue + status.TotalEarned
+
+	json.NewEncoder(w).Encode(VaultSummary{
+		TotalRevenue:   total,
+		OperationsFund: total * 0.30,
+		SpendableFund:  total * 0.70,
+	})
+}
+
+func handleVaultBrief(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+	status := fundManager.GetStatus()
+
+	brief := fmt.Sprintf("Morning CEO Brief: All systems nominal. Balance: $%.2f. Ops Fund: $%.2f. ROI: %.2f.", globalLedger.Balance, status.Balance, globalLedger.TotalRevenue/globalLedger.TotalCosts)
+	if globalLedger.TotalCosts == 0 {
+		brief = fmt.Sprintf("Morning CEO Brief: All systems nominal. Balance: $%.2f. Ops Fund: $%.2f. ROI: N/A.", globalLedger.Balance, status.Balance)
+	}
+
+	json.NewEncoder(w).Encode(VaultBrief{Content: brief})
+}
+
+func handleSubscriptionHealth(w http.ResponseWriter, r *http.Request) {
+	// Simulated health data for now
+	json.NewEncoder(w).Encode(SubscriptionHealth{
+		Upcoming:     []map[string]interface{}{{"vendor": "Fly.io", "amount": 10.00}},
+		Failed:       []map[string]interface{}{},
+		TotalMonthly: 45.00,
+		Cards:        []string{"*4242"},
+	})
+}
+
+func handleForecast(w http.ResponseWriter, r *http.Request) {
+	status := fundManager.GetStatus()
+	var res []map[string]interface{}
+	now := time.Now()
+	for i := 0; i < 30; i++ {
+		date := now.AddDate(0, 0, i)
+		res = append(res, map[string]interface{}{
+			"date":    date.Format("2006-01-02"),
+			"balance": status.Balance + float64(i)*50.0, // Simulated growth
+		})
+	}
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleTransactions(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+	json.NewEncoder(w).Encode(globalLedger.Transactions)
+}
+
+func handleLedgerRecord(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Description string  `json:"description"`
+		Amount      float64 `json:"amount"`
+		Type        string  `json:"type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	if req.Type == "expense" {
+		globalLedger.RecordCost("", "manual", req.Amount, req.Description)
+	} else {
+		globalLedger.RecordRevenue(req.Amount, req.Description)
+	}
+	w.WriteHeader(200)
 }
 
 func handleSwarmStatusAll(w http.ResponseWriter, r *http.Request) {
