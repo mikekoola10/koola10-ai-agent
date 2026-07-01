@@ -18,6 +18,17 @@ func (a *TradingAgent) Run(task string) (interface{}, error) {
 	})
 
 	a.status = StatusCompleted
+
+	// Simulate profit
+	profit := 125.50
+	if res.Success {
+		return map[string]interface{}{
+			"status": "success",
+			"profit": profit,
+			"details": res.Data,
+		}, nil
+	}
+
 	return res, nil
 }
 

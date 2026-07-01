@@ -198,6 +198,7 @@ type Transaction struct {
 	Type        string  `json:"type"`
 	Category    string  `json:"category"`
 	Vertical    string  `json:"vertical,omitempty"`
+	Ecosystem   string  `json:"ecosystem,omitempty"`
 	Amount      float64 `json:"amount"`
 	Description string  `json:"description"`
 }
@@ -270,6 +271,12 @@ type VideoJob struct {
 
 // --- Global States ---
 
+type SSEEvent struct {
+	Type      string                 `json:"type"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp string                 `json:"timestamp"`
+}
+
 var (
 	cacheMutex   sync.Mutex
 	auditMutex   sync.Mutex
@@ -278,6 +285,10 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	sseMu        sync.Mutex
+	sseOnce      sync.Once
+
+	sseClientsMap map[chan SSEEvent]bool
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -369,6 +380,7 @@ func main() {
 
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
+	globalSwarmManager.RevenueLogger = fundManager.RouteRevenue
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
 	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
@@ -386,6 +398,8 @@ func main() {
 	globalSwarmManager.Factories["content"] = agents.ContentFactory
 	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["commerce"] = agents.CommerceFactory
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
@@ -464,6 +478,9 @@ func main() {
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
 
+	// Ecosystem routes
+	r.Post("/{ecosystem}/{vertical}/start", corsMiddleware(handleEcosystemVerticalStart))
+
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
@@ -478,6 +495,19 @@ func main() {
 	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+
+	// Ensure swarms are deployed for all verticals on startup
+	go func() {
+		time.Sleep(5 * time.Second) // Wait for server to start
+		verticals := []string{"trading", "leadgen", "grant", "affiliate", "commerce"}
+		for _, v := range verticals {
+			globalSwarmManager.DeploySwarms(v, 10)
+		}
+	}()
+
+	// Proactive Agent
+	proactiveAgent := agents.NewProactiveAgent(globalSwarmManager, broadcastSSE)
+	go proactiveAgent.AutoDispatchLoop()
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -990,24 +1020,58 @@ func LogUsage(tokens int) {
 	if f, err := os.OpenFile(usagePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil { json.NewEncoder(f).Encode(logEntry); f.Close() }
 }
 func (l *EconomicLedger) Save() {
-	l.mu.RLock(); defer l.mu.RUnlock(); data, _ := json.Marshal(l); os.WriteFile(ledgerPath, data, 0644)
+	l.mu.RLock(); defer l.mu.RUnlock(); l.save()
+}
+func (l *EconomicLedger) save() {
+	data, _ := json.Marshal(l); os.WriteFile(ledgerPath, data, 0644)
 }
 func (l *EconomicLedger) Load() {
 	l.mu.Lock(); defer l.mu.Unlock(); data, err := os.ReadFile(ledgerPath)
 	if err == nil { json.Unmarshal(data, l) }; if l.Transactions == nil { l.Transactions = []Transaction{} }
 }
 func (l *EconomicLedger) RecordCost(vertical, category string, amount float64, description string) {
-	l.mu.Lock(); l.Balance -= amount; l.TotalCosts += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", category, vertical, amount, description})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
+	l.mu.Lock()
+	l.Balance -= amount
+	l.TotalCosts += amount
+	l.Transactions = append(l.Transactions, Transaction{
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Type:        "cost",
+		Category:    category,
+		Vertical:    vertical,
+		Amount:      amount,
+		Description: description,
+	})
+	l.save()
+	l.mu.Unlock()
+	AddAuditEntry("economic_cost_logged", map[string]interface{}{"amount": amount, "category": category, "vertical": vertical})
 }
 func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
-	l.RecordRevenueWithVertical("", amount, source)
+	l.RecordRevenueWithEcosystem("", "", amount, source)
 }
 func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
-	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
-	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+	l.RecordRevenueWithEcosystem("", vertical, amount, source)
+}
+func (l *EconomicLedger) RecordRevenueWithEcosystem(ecosystem, vertical string, amount float64, source string) {
+	l.mu.Lock()
+	l.Balance += amount
+	l.TotalRevenue += amount
+	l.Transactions = append(l.Transactions, Transaction{
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Type:        "revenue",
+		Category:    "revenue_split",
+		Vertical:    vertical,
+		Ecosystem:   ecosystem,
+		Amount:      amount,
+		Description: "Revenue: " + source,
+	})
+	l.save()
+	l.mu.Unlock()
+	AddAuditEntry("economic_revenue_logged", map[string]interface{}{
+		"amount":    amount,
+		"source":    source,
+		"vertical":  vertical,
+		"ecosystem": ecosystem,
+	})
 }
 
 // --- Financial Handlers ---
@@ -1051,7 +1115,7 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", 400)
 		return
 	}
-	fundManager.RouteRevenue(req.Profit, "trading")
+	fundManager.RouteRevenue(req.Profit, "", "trading", "trading")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1538,7 +1602,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		amount := float64(session.AmountTotal) / 100.0
-		fundManager.RouteRevenue(amount, "stripe")
+		fundManager.RouteRevenue(amount, "", "stripe", "stripe")
 		fundManager.CoverStripeFees(amount)
 		AddAuditEntry("stripe_checkout_completed", map[string]interface{}{"session_id": session.ID, "amount": amount})
 
@@ -1591,7 +1655,33 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Write([]byte("event: connected\ndata: {}\n\n"))
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	clientChan := make(chan SSEEvent, 10)
+	sseMu.Lock()
+	sseOnce.Do(func() { sseClientsMap = make(map[chan SSEEvent]bool) })
+	sseClientsMap[clientChan] = true
+	sseMu.Unlock()
+
+	defer func() {
+		sseMu.Lock()
+		delete(sseClientsMap, clientChan)
+		sseMu.Unlock()
+	}()
+
+	fmt.Fprintf(w, "event: connected\ndata: {}\n\n")
+	w.(http.Flusher).Flush()
+
+	for {
+		select {
+		case event := <-clientChan:
+			data, _ := json.Marshal(event.Data)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, string(data))
+			w.(http.Flusher).Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -1601,4 +1691,61 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func handleEcosystemVerticalStart(w http.ResponseWriter, r *http.Request) {
+	ecosystem := chi.URLParam(r, "ecosystem")
+	vertical := chi.URLParam(r, "vertical")
+
+	// Personality mapping
+	personality := ""
+	switch ecosystem {
+	case "koola10":
+		if vertical == "trading" { personality = "Sterling (aggressive)" } else { personality = "Nova" }
+	case "oracle":
+		if vertical == "trading" { personality = "Sable (conservative)" } else { personality = "Vega" }
+	case "sentinel":
+		if vertical == "trading" { personality = "Fiducia (ethical)" } else { personality = "Veritas" }
+	case "nexus":
+		if vertical == "trading" { personality = "Quantum (algorithmic)" } else { personality = "Prism" }
+	case "rebel":
+		if vertical == "trading" { personality = "Maverick (contrarian)" } else { personality = "Provocateur" }
+	}
+
+	task := fmt.Sprintf("Start %s vertical in %s ecosystem with %s personality", vertical, ecosystem, personality)
+	res, err := globalSwarmManager.DispatchTaskWithEcosystem(ecosystem, vertical, task)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	broadcastSSE("vertical_started", map[string]interface{}{
+		"ecosystem": ecosystem,
+		"vertical": vertical,
+		"personality": personality,
+	})
+
+	json.NewEncoder(w).Encode(res)
+}
+
+func broadcastSSE(eventType string, data map[string]interface{}) {
+	sseOnce.Do(func() {
+		sseClientsMap = make(map[chan SSEEvent]bool)
+	})
+
+	event := SSEEvent{
+		Type: eventType,
+		Data: data,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	for clientChan := range sseClientsMap {
+		select {
+		case clientChan <- event:
+		default:
+			// Client slow or disconnected
+		}
+	}
 }
