@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"koola10/agents"
+	"koola10/beat-smith"
 	"koola10/financial"
 	"koola10/tools"
 
@@ -389,6 +390,7 @@ func main() {
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["beat-smith"] = agents.BeatSmithFactory
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -470,6 +472,12 @@ func main() {
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
 	r.Post("/trading/profit", corsMiddleware(handleTradingProfit))
 
+	r.Post("/beat-smith/loop", corsMiddleware(handleBeatSmithLoop))
+	r.Get("/beat-smith/vsts", corsMiddleware(handleBeatSmithVSTs))
+	r.Post("/beat-smith/arrange", corsMiddleware(handleBeatSmithArrange))
+	r.Post("/beat-smith/profile", corsMiddleware(handleBeatSmithProfile))
+	r.Post("/admin/trigger_beatsmith", corsMiddleware(handleTriggerBeatSmith))
+
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
@@ -481,6 +489,77 @@ func main() {
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
+}
+
+// --- BeatSmith Handlers ---
+
+var beatSmithMirror = beatsmith.NewMirror("/data/beat_smith_mirror.json")
+
+func handleBeatSmithLoop(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Genre string `json:"genre"`
+		BPM   int    `json:"bpm"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.Genre == "" {
+		req.Genre = "Trap"
+	}
+	if req.BPM == 0 {
+		req.BPM = 140
+	}
+
+	lg := &beatsmith.LoopGenerator{LoopsDir: "/data/beat-smith/loops"}
+	path, err := lg.GenerateMIDIPattern(req.Genre, req.BPM)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"loop_path": path})
+}
+
+func handleBeatSmithVSTs(w http.ResponseWriter, r *http.Request) {
+	vm := &beatsmith.VSTManager{}
+	suggestions := vm.SuggestVSTs(beatSmithMirror.Profile)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(suggestions)
+}
+
+func handleBeatSmithArrange(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		FilePath string `json:"file_path"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	aa := &beatsmith.ArrangementAdvisor{}
+	report, err := aa.GenerateReport(req.FilePath)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(report))
+}
+
+func handleBeatSmithProfile(w http.ResponseWriter, r *http.Request) {
+	var p beatsmith.ProducerProfile
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	beatSmithMirror.UpdateProfile(p)
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleTriggerBeatSmith(w http.ResponseWriter, r *http.Request) {
+	// Deploy swarms and dispatch a creative task
+	globalSwarmManager.DeploySwarms("beat-smith", 5)
+	res, err := globalSwarmManager.DispatchTask("beat-smith", "Generate new creative ideas")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	json.NewEncoder(w).Encode(res)
 }
 
 // --- Studio Handlers ---
