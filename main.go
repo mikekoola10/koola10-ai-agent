@@ -25,7 +25,10 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/solara"
+	"koola10/sterling"
 	"koola10/tools"
+	"koola10/vault"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v76"
@@ -305,6 +308,7 @@ var (
 	}
 
 	fundManager *financial.FundManager
+	vaultClient *vault.VaultClient
 
 	globalSwarmManager = agents.NewSwarmManager()
 
@@ -356,7 +360,24 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+
+	vaultURL := "https://script.google.com/macros/s/AKfycbxFFviECwZcWEZy9HLo2aEUlAqB-brL5MZFcn1OtTe8wYurw4G7AJltd5dHAE6bQRRg/exec"
+	vaultClient = vault.NewVaultClient(vaultURL)
+
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
+	// Cash Flow (Sterling)
+	cashFlow := sterling.NewCashFlow(fundManager, vaultClient)
+	cashFlow.AddBill("Fly.io", 25.00, time.Now().AddDate(0, 0, 5))
+	cashFlow.AddBill("OpenAI API", 20.00, time.Now().AddDate(0, 0, 10))
+	go cashFlow.RunDailyPayer(context.Background())
+
+	// Daily Brief (Solara)
+	brief := solara.NewDailyBrief(fundManager, vaultClient, os.Getenv("DEEPSEEK_API_KEY"), func(msg string) error {
+		log.Printf("[Morning Brief] %s", msg)
+		return nil
+	})
+	go brief.StartScheduler(context.Background())
 
 	// Automated invoice payment check (every 24h)
 	go func() {
