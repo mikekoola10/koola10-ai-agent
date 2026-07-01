@@ -206,6 +206,11 @@ type EconomicLedger struct {
 	Balance      float64       `json:"balance"`
 	TotalCosts   float64       `json:"total_costs"`
 	TotalRevenue float64       `json:"total_revenue"`
+
+	SpiralBalance    float64       `json:"spiral_balance"`
+	SpiralRevenue    float64       `json:"spiral_revenue"`
+	SpiralLockedFund float64       `json:"spiral_locked_fund"`
+
 	Transactions []Transaction `json:"transactions"`
 	mu           sync.RWMutex
 }
@@ -215,6 +220,10 @@ type EconomicSummary struct {
 	TotalCosts   float64 `json:"total_costs"`
 	TotalRevenue float64 `json:"total_revenue"`
 	ROI          float64 `json:"roi"`
+
+	SpiralBalance    float64 `json:"spiral_balance"`
+	SpiralRevenue    float64 `json:"spiral_revenue"`
+	SpiralLockedFund float64 `json:"spiral_locked_fund"`
 }
 
 type EconomicEvaluation struct {
@@ -386,6 +395,15 @@ func main() {
 	globalSwarmManager.Factories["content"] = agents.ContentFactory
 	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
+
+	// Register Spiral Swarms
+	globalSwarmManager.Factories["spiral_affiliate"] = agents.SpiralAffiliateFactory
+	globalSwarmManager.Factories["spiral_bounty"] = agents.SpiralBountyFactory
+	globalSwarmManager.Factories["spiral_api"] = agents.SpiralAPIFactory
+	globalSwarmManager.Factories["spiral_content"] = agents.SpiralContentFactory
+	globalSwarmManager.Factories["spiral_ghost_town"] = agents.SpiralGhostTownFactory
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
@@ -463,6 +481,8 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+
+	r.Post("/spiral/notify", corsMiddleware(handleSpiralNotify))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
@@ -1005,9 +1025,38 @@ func (l *EconomicLedger) RecordRevenue(amount float64, source string) {
 	l.RecordRevenueWithVertical("", amount, source)
 }
 func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float64, source string) {
-	l.mu.Lock(); l.Balance += amount; l.TotalRevenue += amount
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	isSpiral := strings.HasPrefix(vertical, "spiral_")
+
+	if isSpiral {
+		l.SpiralBalance += amount
+		l.SpiralRevenue += amount
+		l.SpiralLockedFund += amount // Spiral revenue goes 100% to locked fund
+	} else {
+		l.Balance += amount
+		l.TotalRevenue += amount
+	}
+
 	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "revenue", "revenue_split", vertical, amount, "Revenue: " + source})
-	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+	l.Save()
+	AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
+}
+
+func (l *EconomicLedger) SpiralLockedSpend(amount float64, description string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.SpiralLockedFund < amount {
+		return fmt.Errorf("insufficient spiral locked funds")
+	}
+	l.SpiralLockedFund -= amount
+	l.SpiralBalance -= amount
+	l.TotalCosts += amount // Assets are costs too
+	l.Transactions = append(l.Transactions, Transaction{time.Now().Format(time.RFC3339), "cost", "asset_acquisition", "spiral", amount, description})
+	l.Save()
+	AddAuditEntry("spiral_locked_spend", map[string]interface{}{"amount": amount, "description": description})
+	return nil
 }
 
 // --- Financial Handlers ---
@@ -1045,13 +1094,17 @@ func handleFinancialHistory(w http.ResponseWriter, r *http.Request) {
 // TradingAgent integration point
 func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Profit float64 `json:"profit"`
+		Profit   float64 `json:"profit"`
+		Vertical string  `json:"vertical"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad request", 400)
 		return
 	}
-	fundManager.RouteRevenue(req.Profit, "trading")
+	if req.Vertical == "" {
+		req.Vertical = "trading"
+	}
+	fundManager.RouteRevenueWithVertical(req.Vertical, req.Profit, "trading")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1347,6 +1400,10 @@ func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
 		TotalCosts:   globalLedger.TotalCosts,
 		TotalRevenue: globalLedger.TotalRevenue,
 		ROI:          roi,
+
+		SpiralBalance:    globalLedger.SpiralBalance,
+		SpiralRevenue:    globalLedger.SpiralRevenue,
+		SpiralLockedFund: globalLedger.SpiralLockedFund,
 	})
 }
 func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
@@ -1570,6 +1627,31 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleSpiralNotify(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Subject string                 `json:"subject"`
+		Body    string                 `json:"body"`
+		Details map[string]interface{} `json:"details"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// Spiral can only notify Koola10, Koola10 cannot access Spiral funds.
+	// We record this in the audit log for Koola10 to see.
+	AddAuditEntry("spiral_notification", map[string]interface{}{
+		"subject": req.Subject,
+		"body":    req.Body,
+		"details": req.Details,
+	})
+
+	log.Printf("[Spiral Notification] %s: %s", req.Subject, req.Body)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"notified"}`))
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

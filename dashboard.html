@@ -32,11 +32,18 @@
 
     <div class="grid">
         <div class="card">
-            <h2>FINANCIAL_LEDGER</h2>
-            <div>BALANCE: <span id="balance">$0.00</span></div>
-            <div>COSTS:   <span id="costs">$0.00</span></div>
+            <h2>KOOLA10_LEDGER</h2>
             <div>REVENUE: <span id="revenue">$0.00</span></div>
+            <div>OPS_FUND: <span id="ops-fund">$0.00</span></div>
+            <div>SPENDABLE: <span id="balance">$0.00</span></div>
             <div style="margin-top:10px;">ROI_RATIO: <span id="roi">0.00</span>x</div>
+        </div>
+
+        <div class="card" style="border-color: #00f;">
+            <h2 style="color: #00f;">SPIRAL_LEDGER</h2>
+            <div>SPIRAL_REVENUE: <span id="spiral-revenue">$0.00</span></div>
+            <div>LOCKED_FUND: <span id="spiral-locked">$0.00</span></div>
+            <div>SPIRAL_BALANCE: <span id="spiral-balance">$0.00</span></div>
         </div>
 
         <div class="card">
@@ -66,10 +73,16 @@
             try {
                 // Ledger
                 const ledger = await fetch('/economic/ledger/summary').then(r => r.json());
+                const finStatus = await fetch('/financial/status').then(r => r.json());
+
                 document.getElementById('balance').innerText = `$${ledger.balance.toFixed(2)}`;
-                document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
+                document.getElementById('ops-fund').innerText = `$${finStatus.balance.toFixed(2)}`;
                 document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
                 document.getElementById('roi').innerText = ledger.roi.toFixed(2);
+
+                document.getElementById('spiral-revenue').innerText = `$${(ledger.spiral_revenue || 0).toFixed(2)}`;
+                document.getElementById('spiral-locked').innerText = `$${(ledger.spiral_locked_fund || 0).toFixed(2)}`;
+                document.getElementById('spiral-balance').innerText = `$${(ledger.spiral_balance || 0).toFixed(2)}`;
 
                 // Nodes
                 const nodes = await fetch('/swarm/nodes').then(r => r.json());
