@@ -239,6 +239,16 @@ type SwarmNode struct {
 	Status   string `json:"status"`
 }
 
+type MonitorResponse struct {
+	Status       string             `json:"status"`
+	Uptime       string             `json:"uptime"`
+	Autonomy     float64            `json:"autonomy"`
+	ActiveSwarms int                `json:"active_swarms"`
+	Revenue      map[string]float64 `json:"revenue"`
+	TotalCosts   float64            `json:"total_costs"`
+	ROI          float64            `json:"roi"`
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -321,6 +331,7 @@ var (
 	redisClient *redis.Client
 	nodeID      string
 	region      string
+	startTime   = time.Now()
 
 	//go:embed dashboard.html
 	dashboardHTML string
@@ -417,6 +428,7 @@ func main() {
 	r.Post("/grants/apply", corsMiddleware(handleApply))
 	r.Get("/grants/status", corsMiddleware(handleStatus))
 	r.Get("/grants/applications", corsMiddleware(handleApplicationsList))
+	r.Get("/monitor", corsMiddleware(handleMonitorMetrics))
 	r.Post("/grants/monitor", corsMiddleware(handleMonitor))
 	r.Post("/grants/update-status", corsMiddleware(handleUpdateStatus))
 	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
@@ -1128,6 +1140,44 @@ func handleApplicationsList(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(res)
 }
+func handleMonitorMetrics(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	defer globalLedger.mu.RUnlock()
+
+	roi := 0.0
+	if globalLedger.TotalCosts > 0 {
+		roi = globalLedger.TotalRevenue / globalLedger.TotalCosts
+	}
+
+	uptime := time.Since(startTime).Truncate(time.Second).String()
+
+	globalSwarmManager.Mu.RLock()
+	activeSwarms := len(globalSwarmManager.Swarms)
+	globalSwarmManager.Mu.RUnlock()
+
+	status := "SYSTEM_NOMINAL"
+	if checkKillSwitch() {
+		status = "KILL_SWITCH_ACTIVE"
+	}
+
+	resp := MonitorResponse{
+		Status:       status,
+		Uptime:       uptime,
+		Autonomy:     0.95, // System autonomy constant
+		ActiveSwarms: activeSwarms,
+		Revenue: map[string]float64{
+			"total":      globalLedger.TotalRevenue,
+			"operations": fundManager.TotalEarned,
+			"spendable":  fundManager.Balance,
+		},
+		TotalCosts: globalLedger.TotalCosts,
+		ROI:        roi,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
 func handleMonitor(w http.ResponseWriter, r *http.Request) {
 	if checkKillSwitch() {
 		http.Error(w, "kill-switch", 503)
