@@ -1,6 +1,7 @@
 package agents
 
 type ComplianceAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -29,3 +30,4 @@ func ComplianceFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *ComplianceAgent) SetPrompt(p string) { a.prompt = p }

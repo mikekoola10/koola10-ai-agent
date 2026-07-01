@@ -1,6 +1,7 @@
 package agents
 
 type ResearchAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -29,3 +30,4 @@ func ResearchFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *ResearchAgent) SetPrompt(p string) { a.prompt = p }

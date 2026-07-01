@@ -7,6 +7,7 @@ import (
 )
 
 type LeadGenAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -41,3 +42,4 @@ func LeadGenFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *LeadGenAgent) SetPrompt(p string) { a.prompt = p }

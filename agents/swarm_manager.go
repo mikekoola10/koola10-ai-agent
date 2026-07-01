@@ -18,6 +18,7 @@ type SpecialistAgent interface {
 	Run(task string) (interface{}, error)
 	Status() AgentStatus
 	Specialty() string
+	SetPrompt(prompt string)
 }
 
 type SwarmManager struct {
@@ -27,6 +28,9 @@ type SwarmManager struct {
 	// Callbacks for logging to economic ledger and compliance audit
 	AuditLogger func(action string, details map[string]interface{})
 	LedgerLogger func(vertical, category string, amount float64, description string)
+
+	// Callback to load dynamic prompts
+	PromptLoader func(vertical string) string
 
 	// Factory for creating agents for a vertical
 	Factories map[string]func() []SpecialistAgent
@@ -49,6 +53,12 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 	}
 
 	agents := factory()
+	if sm.PromptLoader != nil {
+		prompt := sm.PromptLoader(vertical)
+		for _, a := range agents {
+			a.SetPrompt(prompt)
+		}
+	}
 	// If count is different from what factory produces, we might need to adjust,
 	// but for now we assume factory produces the right set or we scale it.
 	// The requirement says 10 agents for each.

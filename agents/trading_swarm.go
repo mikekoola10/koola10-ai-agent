@@ -5,6 +5,7 @@ import (
 )
 
 type TradingAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -37,3 +38,4 @@ func TradingFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *TradingAgent) SetPrompt(p string) { a.prompt = p }

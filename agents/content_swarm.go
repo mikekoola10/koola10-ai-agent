@@ -1,6 +1,7 @@
 package agents
 
 type ContentAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -28,3 +29,4 @@ func ContentFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *ContentAgent) SetPrompt(p string) { a.prompt = p }

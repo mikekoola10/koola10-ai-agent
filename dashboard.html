@@ -42,6 +42,22 @@
         <div class="card">
             <h2>SWARM_NETWORK</h2>
             <div id="nodes-list">Scanning for nodes...</div>
+            <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 5px;">
+                ACTIVE_SWARMS:
+                <div id="swarms-active" style="font-size: 0.8em; color: #888;">...</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>AUTONOMOUS_OPS</h2>
+            <div>SELF_HEALING: <span id="healing-status" style="color: #0f0;">ACTIVE</span></div>
+            <div>LAST_FIX: <span id="last-fix">NONE</span></div>
+            <div style="margin-top: 10px;">
+                COPILOT_HIVE: <span id="copilot-count">0</span> AGENTS
+            </div>
+            <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 5px;">
+                GBASE_INSIGHTS: <span id="insights-count">0</span>
+            </div>
         </div>
 
         <div class="card">
@@ -88,6 +104,24 @@
                 const audit = await fetch('/compliance/audit').then(r => r.json());
                 const pending = audit.filter(e => e.action === 'approval_request_created');
                 document.getElementById('approvals-count').innerText = pending.length;
+
+                const lastFixEntry = audit.reverse().find(e => e.action === 'task_executed' && e.details.vertical === 'maintenance');
+                if (lastFixEntry) {
+                    document.getElementById('last-fix').innerText = lastFixEntry.timestamp.split('T')[1].split('Z')[0];
+                }
+
+                // Swarm metrics
+                const swarmMetrics = await fetch('/swarm/metrics').then(r => r.json());
+                const swarmsDiv = document.getElementById('swarms-active');
+                swarmsDiv.innerText = Object.keys(swarmMetrics).join(', ');
+
+                if (swarmMetrics['copilot-hive']) {
+                    document.getElementById('copilot-count').innerText = swarmMetrics['copilot-hive'].total;
+                }
+
+                // Insights
+                const reflections = await fetch('/memory/reflections').then(r => r.json());
+                document.getElementById('insights-count').innerText = reflections.length;
 
                 // Log a tick
                 const logs = document.getElementById('logs');

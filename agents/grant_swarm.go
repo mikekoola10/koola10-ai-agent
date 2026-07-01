@@ -1,6 +1,7 @@
 package agents
 
 type GrantSwarmAgent struct {
+	prompt    string
 	specialty string
 	status    AgentStatus
 }
@@ -27,3 +28,4 @@ func GrantSwarmFactory() []SpecialistAgent {
 	}
 	return agents
 }
+func (a *GrantSwarmAgent) SetPrompt(p string) { a.prompt = p }
