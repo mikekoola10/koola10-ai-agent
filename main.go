@@ -371,7 +371,7 @@ func main() {
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
 
 	// Initialize High-Growth Founder Mode
-	founderPrompt := "High-Growth Founder Mode: Speed is a competitive advantage. Build leverage through automation. First-principles thinking. High agency + extreme ownership. Think in 10x-100x."
+	founderPrompt := "High-Growth Founder Mode: Speed is a competitive advantage. Build leverage through automation. First-principles thinking. High agency + extreme ownership. Antifragility: get stronger from stress. Think in 10x-100x."
 	globalSwarmManager.SetGlobalPrompt(founderPrompt)
 
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
