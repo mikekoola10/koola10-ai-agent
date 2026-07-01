@@ -18,6 +18,8 @@ type SpecialistAgent interface {
 	Run(task string) (interface{}, error)
 	Status() AgentStatus
 	Specialty() string
+	SetPrompt(prompt string)
+	GetPrompt() string
 }
 
 type SwarmManager struct {
@@ -30,12 +32,25 @@ type SwarmManager struct {
 
 	// Factory for creating agents for a vertical
 	Factories map[string]func() []SpecialistAgent
+
+	BasePrompt string
 }
 
 func NewSwarmManager() *SwarmManager {
 	return &SwarmManager{
 		Swarms:    make(map[string][]SpecialistAgent),
 		Factories: make(map[string]func() []SpecialistAgent),
+	}
+}
+
+func (sm *SwarmManager) SetGlobalPrompt(prompt string) {
+	sm.Mu.Lock()
+	defer sm.Mu.Unlock()
+	sm.BasePrompt = prompt
+	for _, swarm := range sm.Swarms {
+		for _, agent := range swarm {
+			agent.SetPrompt(prompt)
+		}
 	}
 }
 
@@ -52,6 +67,9 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 	// If count is different from what factory produces, we might need to adjust,
 	// but for now we assume factory produces the right set or we scale it.
 	// The requirement says 10 agents for each.
+	for _, agent := range agents {
+		agent.SetPrompt(sm.BasePrompt)
+	}
 	sm.Swarms[vertical] = agents
 
 	if sm.AuditLogger != nil {

@@ -9,6 +9,7 @@ import (
 type LeadGenAgent struct {
 	specialty string
 	status    AgentStatus
+	prompt    string
 }
 
 func (a *LeadGenAgent) Run(task string) (interface{}, error) {
@@ -18,15 +19,17 @@ func (a *LeadGenAgent) Run(task string) (interface{}, error) {
 	dir := "/data/leads/"
 	os.MkdirAll(dir, 0755)
 	filename := fmt.Sprintf("%s_leads.csv", a.specialty)
-	content := "name,company,email,status\nJohn Doe,Acme Corp,john@acme.com,qualified"
+	content := fmt.Sprintf("name,company,email,status,prompt\nJohn Doe,Acme Corp,john@acme.com,qualified,%s", a.prompt)
 	os.WriteFile(filepath.Join(dir, filename), []byte(content), 0644)
 
 	a.status = StatusCompleted
-	return "Leads generated in " + filename, nil
+	return "Leads generated in " + filename + " with prompt context", nil
 }
 
 func (a *LeadGenAgent) Status() AgentStatus { return a.status }
 func (a *LeadGenAgent) Specialty() string    { return a.specialty }
+func (a *LeadGenAgent) SetPrompt(p string)   { a.prompt = p }
+func (a *LeadGenAgent) GetPrompt() string    { return a.prompt }
 
 func LeadGenFactory() []SpecialistAgent {
 	specialties := []string{

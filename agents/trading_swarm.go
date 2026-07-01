@@ -7,6 +7,7 @@ import (
 type TradingAgent struct {
 	specialty string
 	status    AgentStatus
+	prompt    string
 }
 
 func (a *TradingAgent) Run(task string) (interface{}, error) {
@@ -23,6 +24,10 @@ func (a *TradingAgent) Run(task string) (interface{}, error) {
 
 func (a *TradingAgent) Status() AgentStatus { return a.status }
 func (a *TradingAgent) Specialty() string    { return a.specialty }
+
+
+func (a *TradingAgent) SetPrompt(p string)   { a.prompt = p }
+func (a *TradingAgent) GetPrompt() string    { return a.prompt }
 
 func TradingFactory() []SpecialistAgent {
 	specialties := []string{

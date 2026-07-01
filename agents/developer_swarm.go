@@ -9,6 +9,7 @@ import (
 type DeveloperAgent struct {
 	specialty string
 	status    AgentStatus
+	prompt    string
 }
 
 type NightShiftTask struct {
@@ -27,7 +28,7 @@ func (a *DeveloperAgent) Run(task string) (interface{}, error) {
 		log.Printf("[DeveloperAgent] Night Shift started: %v on repos %v", nsTask.Tasks, nsTask.Repositories)
 		return map[string]interface{}{
 			"status": "success",
-			"message": fmt.Sprintf("Autonomous developer (%s) processed %d tasks across %d repositories", a.specialty, len(nsTask.Tasks), len(nsTask.Repositories)),
+			"message": fmt.Sprintf("Autonomous developer (%s) processed %d tasks across %d repositories. Prompt: %s", a.specialty, len(nsTask.Tasks), len(nsTask.Repositories), a.prompt),
 			"vertical": "night-shift",
 			"report_sent_to": nsTask.ReportTo,
 		}, nil
@@ -35,11 +36,13 @@ func (a *DeveloperAgent) Run(task string) (interface{}, error) {
 
 	// Fallback for simple string tasks
 	log.Printf("[DeveloperAgent] Processing simple task: %s", task)
-	return fmt.Sprintf("Completed %s task: %s", a.specialty, task), nil
+	return fmt.Sprintf("Completed %s task (Prompt: %s): %s", a.specialty, a.prompt, task), nil
 }
 
 func (a *DeveloperAgent) Status() AgentStatus { return a.status }
 func (a *DeveloperAgent) Specialty() string    { return a.specialty }
+func (a *DeveloperAgent) SetPrompt(p string)   { a.prompt = p }
+func (a *DeveloperAgent) GetPrompt() string    { return a.prompt }
 
 func DeveloperFactory() []SpecialistAgent {
 	specialties := []string{

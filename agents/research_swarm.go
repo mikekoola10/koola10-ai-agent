@@ -3,17 +3,22 @@ package agents
 type ResearchAgent struct {
 	specialty string
 	status    AgentStatus
+	prompt    string
 }
 
 func (a *ResearchAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
-	res := "Market Intel (" + a.specialty + "): " + task
+	res := "Research Report (" + a.specialty + ") (Prompt: " + a.prompt + "): " + task
 	a.status = StatusCompleted
 	return res, nil
 }
 
 func (a *ResearchAgent) Status() AgentStatus { return a.status }
 func (a *ResearchAgent) Specialty() string    { return a.specialty }
+
+
+func (a *ResearchAgent) SetPrompt(p string)   { a.prompt = p }
+func (a *ResearchAgent) GetPrompt() string    { return a.prompt }
 
 func ResearchFactory() []SpecialistAgent {
 	specialties := []string{

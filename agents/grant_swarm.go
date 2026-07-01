@@ -3,17 +3,20 @@ package agents
 type GrantSwarmAgent struct {
 	specialty string
 	status    AgentStatus
+	prompt    string
 }
 
 func (a *GrantSwarmAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
-	res := "Grant Proposal (" + a.specialty + "): " + task
+	res := "Grant Proposal (" + a.specialty + "): " + a.prompt + " | Task: " + task
 	a.status = StatusCompleted
 	return res, nil
 }
 
 func (a *GrantSwarmAgent) Status() AgentStatus { return a.status }
 func (a *GrantSwarmAgent) Specialty() string    { return a.specialty }
+func (a *GrantSwarmAgent) SetPrompt(p string)   { a.prompt = p }
+func (a *GrantSwarmAgent) GetPrompt() string    { return a.prompt }
 
 func GrantSwarmFactory() []SpecialistAgent {
 	specialties := []string{

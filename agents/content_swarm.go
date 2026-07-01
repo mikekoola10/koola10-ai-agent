@@ -3,17 +3,22 @@ package agents
 type ContentAgent struct {
 	specialty string
 	status    AgentStatus
+	prompt    string
 }
 
 func (a *ContentAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
-	res := "Content Result (" + a.specialty + "): " + task
+	res := "Content Result (" + a.specialty + "): " + a.prompt + " | Task: " + task
 	a.status = StatusCompleted
 	return res, nil
 }
 
 func (a *ContentAgent) Status() AgentStatus { return a.status }
 func (a *ContentAgent) Specialty() string    { return a.specialty }
+
+
+func (a *ContentAgent) SetPrompt(p string)   { a.prompt = p }
+func (a *ContentAgent) GetPrompt() string    { return a.prompt }
 
 func ContentFactory() []SpecialistAgent {
 	specialties := []string{
