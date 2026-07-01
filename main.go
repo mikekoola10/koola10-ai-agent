@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"bufio"
 	"bytes"
 	"context"
@@ -25,6 +26,7 @@ import (
 
 	"koola10/agents"
 	"koola10/financial"
+	"koola10/sterling"
 	"koola10/tools"
 
 	"github.com/redis/go-redis/v9"
@@ -343,6 +345,13 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // --- Main ---
 
 func main() {
+	swarmType := flag.String("swarm", "", "Type of swarm to run (affiliate, bounty)")
+	liveMode := flag.Bool("live", false, "Run in live mode")
+	count := flag.Int("count", 3, "Number of items to process/generate")
+	targets := flag.Int("targets", 10, "Number of targets to scan")
+	outputFile := flag.String("output", "", "Output file for results")
+	flag.Parse()
+
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
 	region = os.Getenv("FLY_REGION")
@@ -357,6 +366,34 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
+	vaultClient := sterling.NewVaultClient()
+	deepseekAPIKey := os.Getenv("DEEPSEEK_API_KEY")
+
+	// Local Swarm Execution
+	if *swarmType != "" {
+		fmt.Printf("--- Starting Local Emergency Swarm: %s ---\n", *swarmType)
+		if *swarmType == "affiliate" {
+			contentGen := sterling.NewContentGenerator(globalLedger, vaultClient, deepseekAPIKey)
+			// For affiliate swarm, we process 'count' times
+			for i := 0; i < *count; i++ {
+				fmt.Printf("\n[Affiliate] Generating article %d/%d...\n", i+1, *count)
+				contentGen.RunDailyContentCreation()
+			}
+		} else if *swarmType == "bounty" {
+			bountyHunter := sterling.NewBountyHunter(globalLedger, vaultClient, deepseekAPIKey)
+			// For bounty swarm, we process 'targets'
+			fmt.Printf("\n[Bounty] Scanning targets (limit: %d)...\n", *targets)
+			if *outputFile != "" {
+				fmt.Printf("[Bounty] Output will be saved to: %s\n", *outputFile)
+			}
+			bountyHunter.RunDailyScan(*targets, *outputFile)
+		}
+		fmt.Println("\n--- Local Swarm Execution Complete ---")
+		if !*liveMode {
+			return
+		}
+	}
 
 	// Automated invoice payment check (every 24h)
 	go func() {
