@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koola10 BPA API — Business Process Automation</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#00ff41">
+    <style>
+        :root {
+            --primary: #00ff41;
+            --bg: #000000;
+            --card-bg: #0a0a0a;
+            --border: #00ff41;
+            --text: #00ff41;
+            --font: 'Courier New', Courier, monospace;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg);
+            font-family: var(--font);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            width: 100%;
+            text-align: center;
+        }
+
+        header {
+            margin-bottom: 50px;
+            border: 2px solid var(--border);
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            box-shadow: 0 0 20px var(--primary);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            text-transform: uppercase;
+            letter-spacing: 5px;
+            margin-bottom: 10px;
+        }
+
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+
+        .price-card {
+            background: rgba(10, 10, 10, 0.9);
+            border: 1px solid var(--border);
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s;
+        }
+
+        .price-card:hover {
+            box-shadow: 0 0 30px var(--primary);
+            transform: translateY(-10px);
+        }
+
+        .price-card h2 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .price-card .price {
+            font-size: 3rem;
+            margin: 20px 0;
+            color: #fff;
+        }
+
+        .price-card ul {
+            list-style: none;
+            margin-bottom: 30px;
+            text-align: left;
+            flex-grow: 1;
+        }
+
+        .price-card ul li {
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+
+        .price-card ul li::before {
+            content: "> ";
+        }
+
+        .btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 15px;
+            text-transform: uppercase;
+            cursor: pointer;
+            font-family: var(--font);
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            background: var(--primary);
+            color: #000;
+        }
+
+        .trial-form {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .trial-form input {
+            background: #000;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 10px;
+            font-family: var(--font);
+        }
+
+        #status-msg {
+            margin-top: 20px;
+            font-size: 0.8rem;
+        }
+
+        /* Scanline effect */
+        body::before {
+            content: " ";
+            display: block;
+            position: fixed;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 2;
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>BPA_API_CORE</h1>
+            <p>Enterprise-Grade Business Process Automation</p>
+        </header>
+
+        <div class="pricing-grid">
+            <!-- Free Tier -->
+            <div class="price-card">
+                <h2>FREE_TRIAL</h2>
+                <div class="price">$0</div>
+                <ul>
+                    <li>7-Day Full Access</li>
+                    <li>Lead Generation API</li>
+                    <li>Compliance Audit API</li>
+                    <li>Content Repurposing</li>
+                </ul>
+                <div class="trial-form">
+                    <input type="email" id="trial-email" placeholder="ENTER_EMAIL">
+                    <button class="btn" onclick="startTrial()">START_TRIAL</button>
+                </div>
+            </div>
+
+            <!-- Pro Tier -->
+            <div class="price-card">
+                <h2>PRO_PLAN</h2>
+                <div class="price">$50<span style="font-size: 1rem">/mo</span></div>
+                <ul>
+                    <li>1,000 Requests / day</li>
+                    <li>Priority Swarm Access</li>
+                    <li>Standard Support</li>
+                    <li>Custom CRM Integration</li>
+                </ul>
+                <button class="btn" onclick="checkout('bpa_pro')">UPGRADE_TO_PRO</button>
+            </div>
+
+            <!-- Enterprise Tier -->
+            <div class="price-card">
+                <h2>ENTERPRISE</h2>
+                <div class="price">$200<span style="font-size: 1rem">/mo</span></div>
+                <ul>
+                    <li>Unlimited Requests</li>
+                    <li>Dedicated Specialist Swarm</li>
+                    <li>24/7 Priority Support</li>
+                    <li>Full SLA Guarantee</li>
+                </ul>
+                <button class="btn" onclick="checkout('bpa_enterprise')">GO_ENTERPRISE</button>
+            </div>
+        </div>
+
+        <div id="status-msg"></div>
+
+        <div style="margin-top: 60px; text-align: left; border: 1px solid var(--border); padding: 20px;">
+            <h3>API_DOCUMENTATION_SNIPPET</h3>
+            <pre style="margin-top: 10px; font-size: 0.8rem; overflow-x: auto;">
+curl -X GET "https://koola10.fly.dev/api/v1/bpa/leads?query=tech_founders" \
+     -H "X-API-Key: YOUR_TOKEN"
+
+# Response:
+{
+  "status": "success",
+  "data": "/data/leads/tech_founders_leads.csv"
+}
+            </pre>
+        </div>
+    </div>
+
+    <script>
+        async function startTrial() {
+            const email = document.getElementById('trial-email').value;
+            if (!email) {
+                alert("Email required");
+                return;
+            }
+            const btn = document.querySelector('.trial-form .btn');
+            btn.innerText = "PROCESSING...";
+            try {
+                const res = await fetch('/api/v1/bpa/trial', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const data = await res.json();
+                document.getElementById('status-msg').innerText = "TRIAL_ACTIVATED: Check " + email + " for your API key.";
+                btn.innerText = "TRIAL_STARTED";
+                btn.disabled = true;
+            } catch (err) {
+                document.getElementById('status-msg').innerText = "ERROR_COMMUNICATING_WITH_SERVER";
+                btn.innerText = "RETRY";
+            }
+        }
+
+        async function checkout(product) {
+            const email = prompt("Enter your email for receipt:");
+            if (!email) return;
+
+            try {
+                const res = await fetch('/payment/create-checkout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_name: product, customer_email: email })
+                });
+                const data = await res.json();
+                if (data.url) {
+                    window.location.href = data.url;
+                } else {
+                    alert("Checkout error: " + (data.error || "Unknown"));
+                }
+            } catch (err) {
+                alert("Failed to initiate checkout");
+            }
+        }
+    </script>
+</body>
+</html>
