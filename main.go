@@ -239,6 +239,16 @@ type SwarmNode struct {
 	Status   string `json:"status"`
 }
 
+type ErrorReport struct {
+	Agent     string                 `json:"agent"`
+	TaskID    string                 `json:"task_id"`
+	Step      string                 `json:"step"`
+	Error     string                 `json:"error"`
+	Traceback string                 `json:"traceback"`
+	Details   map[string]interface{} `json:"details"`
+	Timestamp float64                `json:"timestamp"`
+}
+
 // --- Studio Structs ---
 
 type LoreRequest struct {
@@ -311,6 +321,11 @@ var (
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
+
+	errorChan   = make(chan ErrorReport, 100)
+	retryMap    = make(map[string]int)
+	selectorMap = make(map[string]string)
+	mapMu       sync.Mutex
 
 	rlBucket     = 15.0
 	rlMaxBucket  = 15.0
@@ -418,6 +433,7 @@ func main() {
 	r.Get("/grants/status", corsMiddleware(handleStatus))
 	r.Get("/grants/applications", corsMiddleware(handleApplicationsList))
 	r.Post("/grants/monitor", corsMiddleware(handleMonitor))
+	r.Post("/api/v1/error_report", handleErrorReport)
 	r.Post("/grants/update-status", corsMiddleware(handleUpdateStatus))
 	r.Post("/grants/apply-auto", corsMiddleware(handleApplyAuto))
 	r.Post("/grants/check-status", corsMiddleware(handleCheckStatus))
@@ -478,6 +494,8 @@ func main() {
 	r.Get("/studio/episodes", corsMiddleware(handleStudioEpisodesList))
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
+
+	go startSupervisor()
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
@@ -1601,4 +1619,195 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
+}
+
+func handleErrorReport(w http.ResponseWriter, r *http.Request) {
+	var report ErrorReport
+	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	errorChan <- report
+	w.WriteHeader(http.StatusOK)
+}
+
+func attemptAutoFix(report ErrorReport) bool {
+	url := getUrlForTask(report.TaskID)
+	if url == "" {
+		return false
+	}
+	hint := extractHintFromError(report.Error)
+	if hint == "" && report.Step == "create_card" {
+		hint = "Create Card"
+	}
+
+	oldSelector := ""
+	if s, ok := report.Details["selector"].(string); ok {
+		oldSelector = s
+	}
+
+	diagnosePayload := map[string]string{
+		"url":          url,
+		"old_selector": oldSelector,
+		"hint":         hint,
+	}
+	jsonPayload, _ := json.Marshal(diagnosePayload)
+
+	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
+	if browserAgentURL == "" {
+		browserAgentURL = "https://koola10-browser.fly.dev"
+	}
+
+	resp, err := http.Post(browserAgentURL+"/diagnose", "application/json", bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		log.Printf("Diagnose request failed: %v", err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Selector string `json:"selector"`
+		Error    string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false
+	}
+	if result.Selector == "" {
+		return false
+	}
+
+	updateSelectorForTask(report.TaskID, report.Step, result.Selector)
+	return true
+}
+
+func retryTask(report ErrorReport) {
+	browserAgentURL := os.Getenv("BROWSER_AGENT_URL")
+	if browserAgentURL == "" {
+		browserAgentURL = "https://koola10-browser.fly.dev"
+	}
+
+	var endpoint string
+	payload := make(map[string]interface{})
+
+	// Copy original details to payload
+	for k, v := range report.Details {
+		payload[k] = v
+	}
+
+	// Add overridden selectors if any
+	mapMu.Lock()
+	if selector, ok := selectorMap[report.TaskID+"_"+report.Step]; ok {
+		if payload["overridden_selectors"] == nil {
+			payload["overridden_selectors"] = make(map[string]string)
+		}
+		if overridden, ok := payload["overridden_selectors"].(map[string]string); ok {
+			overridden[report.Step] = selector
+		} else if overridden, ok := payload["overridden_selectors"].(map[string]interface{}); ok {
+			overridden[report.Step] = selector
+		}
+	}
+	mapMu.Unlock()
+
+	switch report.TaskID {
+	case "stripe_keys":
+		endpoint = "/browser/stripe-live-keys"
+	case "submit_form":
+		endpoint = "/browser/submit-form"
+	default:
+		log.Printf("Unknown task_id for retry: %s", report.TaskID)
+		return
+	}
+
+	jsonPayload, _ := json.Marshal(payload)
+	_, err := http.Post(browserAgentURL+endpoint, "application/json", bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		log.Printf("Retry request failed: %v", err)
+	}
+}
+
+func sendTelegramNotification(report ErrorReport) {
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	chatID := os.Getenv("TELEGRAM_CHAT_ID")
+	if botToken == "" || chatID == "" {
+		log.Println("Telegram credentials missing, skipping notification")
+		return
+	}
+	text := fmt.Sprintf("🔴 *Koola-10 Auto-fix Failed*\nTask: %s\nStep: %s\nError: %s\nPlease check logs.", report.TaskID, report.Step, report.Error)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
+	payload := map[string]string{
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "Markdown",
+	}
+	jsonPayload, _ := json.Marshal(payload)
+	http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+}
+
+func getRetryCount(key string) int {
+	mapMu.Lock()
+	defer mapMu.Unlock()
+	return retryMap[key]
+}
+
+func incrementRetryCount(key string) {
+	mapMu.Lock()
+	defer mapMu.Unlock()
+	retryMap[key]++
+}
+
+func getUrlForTask(taskID string) string {
+	switch taskID {
+	case "stripe_keys":
+		return "https://dashboard.stripe.com/login"
+	case "submit_form":
+		return "https://www.grants.gov"
+	default:
+		return ""
+	}
+}
+
+func extractHintFromError(errorMsg string) string {
+	if strings.Contains(errorMsg, "Secret key") {
+		return "Secret key"
+	}
+	if strings.Contains(errorMsg, "Reveal") {
+		return "Reveal"
+	}
+	if strings.Contains(errorMsg, "Submit") {
+		return "Submit"
+	}
+	return ""
+}
+
+func updateSelectorForTask(taskID, step, newSelector string) {
+	mapMu.Lock()
+	defer mapMu.Unlock()
+	selectorMap[taskID+"_"+step] = newSelector
+}
+
+func startSupervisor() {
+	for report := range errorChan {
+		log.Printf("🔴 Supervisor received error from %s: %s", report.Agent, report.Error)
+
+		// Limit retries per task_id
+		retryKey := report.TaskID + "_" + report.Step
+		retryCount := getRetryCount(retryKey)
+
+		if retryCount >= 3 {
+			log.Printf("Max retries reached for %s, notifying user", report.TaskID)
+			sendTelegramNotification(report)
+			continue
+		}
+
+		// Try to auto-fix
+		fixed := attemptAutoFix(report)
+		if fixed {
+			incrementRetryCount(retryKey)
+			log.Printf("Auto-fix applied for %s, retrying task", report.TaskID)
+			retryTask(report)
+		} else {
+			log.Printf("Auto-fix failed for %s, notifying user", report.TaskID)
+			sendTelegramNotification(report)
+		}
+	}
 }
