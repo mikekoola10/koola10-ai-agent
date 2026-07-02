@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 )
 
 type CardResponse struct {
@@ -35,8 +34,8 @@ func NewAgentCardClient() *AgentCardClient {
 }
 
 func (ac *AgentCardClient) CreateCard(memo string, amountLimit float64) (*CardResponse, error) {
-	if ac.JWT == "" || ac.JWT == "YOUR_AGENTCARD_JWT" {
-		// Mock for development if JWT is missing or a placeholder
+	if ac.JWT == "" || ac.JWT == "YOUR_AGENTCARD_JWT" || os.Getenv("AGENTCARD_MOCK") == "true" {
+		// Mock for development if JWT is missing, placeholder, or mock requested
 		return &CardResponse{
 			ID:       "mock_" + memo,
 			PAN:      "4111222233334444",
