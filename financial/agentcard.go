@@ -35,8 +35,8 @@ func NewAgentCardClient() *AgentCardClient {
 }
 
 func (ac *AgentCardClient) CreateCard(memo string, amountLimit float64) (*CardResponse, error) {
-	if ac.JWT == "" || ac.JWT == "YOUR_AGENTCARD_JWT" || strings.HasPrefix(ac.JWT, "eyJ") {
-		// Mock for development if JWT is missing, a placeholder, or a generic JWT for local testing
+	if ac.JWT == "" || ac.JWT == "YOUR_AGENTCARD_JWT" {
+		// Mock for development if JWT is missing or a placeholder
 		return &CardResponse{
 			ID:       "mock_" + memo,
 			PAN:      "4111222233334444",
