@@ -9,6 +9,7 @@ import (
 type AffiliateAgent struct {
 	specialty string
 	status    AgentStatus
+	prompt    string
 }
 
 func (a *AffiliateAgent) Run(task string) (interface{}, error) {
@@ -32,6 +33,8 @@ func (a *AffiliateAgent) Run(task string) (interface{}, error) {
 
 func (a *AffiliateAgent) Status() AgentStatus { return a.status }
 func (a *AffiliateAgent) Specialty() string    { return a.specialty }
+func (a *AffiliateAgent) SetPrompt(prompt string) { a.prompt = prompt }
+func (a *AffiliateAgent) GetPrompt() string    { return "affiliate" }
 
 func AffiliateFactory() []SpecialistAgent {
 	specialties := []string{
