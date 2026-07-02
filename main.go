@@ -340,6 +340,32 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		apiKey := os.Getenv("ADMIN_API_KEY")
+		if apiKey == "" {
+			// If not set, allow for development but log warning
+			log.Println("WARNING: ADMIN_API_KEY not set")
+			next(w, r)
+			return
+		}
+
+		providedKey := r.Header.Get("X-Admin-API-Key")
+		if providedKey == "" {
+			authHeader := r.Header.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				providedKey = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+		}
+
+		if providedKey != apiKey {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // --- Main ---
 
 func main() {
@@ -392,8 +418,16 @@ func main() {
 	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
 
+	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
+	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
+
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+
+	// Initial deployment of revenue swarms
+	globalSwarmManager.DeploySwarms("affiliate", 10)
+	globalSwarmManager.DeploySwarms("bounty", 10)
+	globalSwarmManager.DeploySwarms("content", 10)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -453,6 +487,8 @@ func main() {
 	r.Post("/compliance/kill-switch/reset", corsMiddleware(handleComplianceKillSwitchReset))
 	r.Get("/compliance/usage", corsMiddleware(handleComplianceUsage))
 
+	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
+
 	r.Post("/economic/ledger/cost", corsMiddleware(handleEconomicLedgerCost))
 	r.Post("/economic/ledger/revenue", corsMiddleware(handleEconomicLedgerRevenue))
 	r.Get("/economic/ledger/summary", corsMiddleware(handleEconomicLedgerSummary))
@@ -468,6 +504,12 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
+
+	r.Post("/admin/trigger_affiliate", corsMiddleware(authMiddleware(handleTriggerAffiliate)))
+	r.Post("/admin/trigger_bounty", corsMiddleware(authMiddleware(handleTriggerBounty)))
+	r.Post("/admin/bpa/onboard", corsMiddleware(authMiddleware(handleBPAOnboard)))
+	r.Post("/admin/trigger_content", corsMiddleware(authMiddleware(handleTriggerContent)))
+	r.Post("/admin/scheduler/run", corsMiddleware(authMiddleware(handleSchedulerRun)))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
@@ -1354,6 +1396,27 @@ func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
 		ROI:          roi,
 	})
 }
+
+func handleVaultSummary(w http.ResponseWriter, r *http.Request) {
+	globalLedger.mu.RLock()
+	status := fundManager.GetStatus()
+
+	// Total Revenue is globalLedger.TotalRevenue + status.TotalEarned
+	totalGross := globalLedger.TotalRevenue + status.TotalEarned
+
+	summary := map[string]interface{}{
+		"total_revenue":   totalGross,
+		"operations_fund": status.Balance, // Current operational balance
+		"spendable_fund":  globalLedger.Balance, // Current spendable balance
+		"total_costs":     globalLedger.TotalCosts + status.TotalSpent,
+		"timestamp":       time.Now().Format(time.RFC3339),
+	}
+	globalLedger.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summary)
+}
+
 func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
 }
@@ -1396,6 +1459,111 @@ func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(res)
+}
+
+func handleTriggerAffiliate(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Count int }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.Count = 1
+	}
+	if req.Count <= 0 { req.Count = 1 }
+
+	go func() {
+		for i := 0; i < req.Count; i++ {
+			task := fmt.Sprintf("Affiliate article %d", i+1)
+			res, err := globalSwarmManager.DispatchTask("affiliate", task)
+			if err == nil {
+				if m, ok := res.(map[string]interface{}); ok {
+					if profit, ok := m["profit"].(float64); ok {
+						fundManager.RouteRevenue(profit, "affiliate_swarm")
+					}
+				}
+			}
+		}
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status": "Affiliate swarm triggered"}`))
+}
+
+func handleTriggerBounty(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Targets int }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.Targets = 1
+	}
+	if req.Targets <= 0 { req.Targets = 1 }
+
+	go func() {
+		for i := 0; i < req.Targets; i++ {
+			task := fmt.Sprintf("Bounty target %d", i+1)
+			res, err := globalSwarmManager.DispatchTask("bounty", task)
+			if err == nil {
+				if m, ok := res.(map[string]interface{}); ok {
+					if profit, ok := m["profit"].(float64); ok && profit > 0 {
+						fundManager.RouteRevenue(profit, "bounty_swarm")
+					}
+				}
+			}
+		}
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status": "Bounty swarm triggered"}`))
+}
+
+func handleBPAOnboard(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+		Tier  string `json:"tier"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", 400)
+		return
+	}
+
+	// Simulate subscription revenue
+	trialRevenue := 49.0
+	if req.Tier == "pro" {
+		trialRevenue = 99.0
+	}
+	fundManager.RouteRevenue(trialRevenue, "BPA Onboarding: "+req.Email)
+
+	AddAuditEntry("bpa_onboarded", map[string]interface{}{"email": req.Email, "tier": req.Tier})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status": "success", "message": "User onboarded and trial revenue logged"}`))
+}
+
+func handleTriggerContent(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Format string }
+	json.NewDecoder(r.Body).Decode(&req)
+
+	go func() {
+		globalSwarmManager.DispatchTask("content", "Repurposing latest articles into "+req.Format)
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status": "Content repurposing triggered"}`))
+}
+
+func handleSchedulerRun(w http.ResponseWriter, r *http.Request) {
+	subs := []struct {
+		Name   string
+		Amount float64
+	}{
+		{"YouTube", 15.99},
+		{"Zeus", 29.99},
+		{"Amazon Prime", 14.99},
+		{"Hulu", 17.99},
+		{"Starz", 9.99},
+	}
+
+	for _, s := range subs {
+		fundManager.PaySubscription(s.Name, s.Amount)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status": "success", "message": "All subscriptions processed"}`))
 }
 
 func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
