@@ -268,6 +268,114 @@ type VideoJob struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type Subscription struct {
+	Name      string                  `json:"name"`
+	Amount    float64                 `json:"amount"`
+	Interval  string                  `json:"interval"`
+	DueDay    int                     `json:"due_day"`
+	CardID    string                  `json:"card_id,omitempty"`
+	CardLimit float64                 `json:"card_limit"`
+	CardName  string                  `json:"card_name"`
+	CardInfo  *financial.CardResponse `json:"card_info,omitempty"`
+	Status    string                  `json:"status"` // "active"
+	LastPaid  string                  `json:"last_paid,omitempty"`
+}
+
+type SubscriptionManager struct {
+	Subscriptions []Subscription `json:"subscriptions"`
+	StoragePath   string
+	AgentCard     *financial.AgentCardClient
+	mu            sync.RWMutex
+}
+
+func NewSubscriptionManager(path string, ac *financial.AgentCardClient) *SubscriptionManager {
+	sm := &SubscriptionManager{
+		StoragePath: path,
+		AgentCard:   ac,
+	}
+	sm.Load()
+	return sm
+}
+
+func (sm *SubscriptionManager) Load() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	data, err := os.ReadFile(sm.StoragePath)
+	if err == nil {
+		json.Unmarshal(data, &sm.Subscriptions)
+	}
+	if sm.Subscriptions == nil {
+		sm.Subscriptions = []Subscription{}
+	}
+}
+
+func (sm *SubscriptionManager) Save() {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	sm.saveLocked()
+}
+
+func (sm *SubscriptionManager) saveLocked() {
+	data, _ := json.MarshalIndent(sm.Subscriptions, "", "  ")
+	os.WriteFile(sm.StoragePath, data, 0644)
+}
+
+func (sm *SubscriptionManager) Register(sub Subscription) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	found := false
+	for i, s := range sm.Subscriptions {
+		if s.Name == sub.Name {
+			// Preserve card info if not provided in update
+			if sub.CardID == "" {
+				sub.CardID = s.CardID
+			}
+			if sub.CardInfo == nil {
+				sub.CardInfo = s.CardInfo
+			}
+			sm.Subscriptions[i] = sub
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		if sub.CardID == "" {
+			card, err := sm.AgentCard.CreateCard(sub.CardName, sub.CardLimit)
+			if err != nil {
+				return err
+			}
+			sub.CardID = card.ID
+			sub.CardInfo = card
+		}
+		sm.Subscriptions = append(sm.Subscriptions, sub)
+	}
+	sm.saveLocked()
+	return nil
+}
+
+func (sm *SubscriptionManager) Run(force bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	now := time.Now()
+	for i, sub := range sm.Subscriptions {
+		// Check if due today (or force run for verification)
+		if now.Day() == sub.DueDay || force || os.Getenv("FORCE_SUBSCRIPTION_RUN") == "true" {
+			// Check if already paid this month
+			lastPaid, err := time.Parse(time.RFC3339, sub.LastPaid)
+			if err == nil && lastPaid.Month() == now.Month() && lastPaid.Year() == now.Year() {
+				continue
+			}
+
+			log.Printf("[SubscriptionManager] Processing payment for %s ($%.2f)", sub.Name, sub.Amount)
+			fundManager.PaySubscription(sub.Name, sub.Amount)
+			sm.Subscriptions[i].LastPaid = now.Format(time.RFC3339)
+			sm.Subscriptions[i].Status = "active"
+		}
+	}
+	sm.saveLocked()
+}
+
 // --- Global States ---
 
 var (
@@ -289,6 +397,7 @@ var (
 	killSwitchPath = "/data/kill_switch"
 	ledgerPath     = "/data/economic_ledger.json"
 	fundPath       = "/data/operational_fund.json"
+	subPath        = "/data/subscriptions.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -305,6 +414,7 @@ var (
 	}
 
 	fundManager *financial.FundManager
+	subManager  *SubscriptionManager
 
 	globalSwarmManager = agents.NewSwarmManager()
 
@@ -378,11 +488,13 @@ func main() {
 
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 	os.MkdirAll(appsDir, 0755)
+	os.MkdirAll("/data", 0755)
 
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	subManager = NewSubscriptionManager(subPath, financial.NewAgentCardClient())
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -390,6 +502,17 @@ func main() {
 		for {
 			fundManager.PayFlyInvoice()
 			<-ticker.C
+		}
+	}()
+
+	// Automated subscription check (every hour)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		// Initial run
+		subManager.Run(false)
+		for {
+			<-ticker.C
+			subManager.Run(false)
 		}
 	}()
 
@@ -509,6 +632,8 @@ func main() {
 	r.Post("/admin/trigger_bounty", corsMiddleware(authMiddleware(handleTriggerBounty)))
 	r.Post("/admin/bpa/onboard", corsMiddleware(authMiddleware(handleBPAOnboard)))
 	r.Post("/admin/trigger_content", corsMiddleware(authMiddleware(handleTriggerContent)))
+	r.Get("/admin/subscriptions", corsMiddleware(authMiddleware(handleAdminSubscriptionsList)))
+	r.Post("/admin/subscriptions/register", corsMiddleware(authMiddleware(handleAdminSubscriptionsRegister)))
 	r.Post("/admin/scheduler/run", corsMiddleware(authMiddleware(handleSchedulerRun)))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
@@ -1546,24 +1671,32 @@ func handleTriggerContent(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status": "Content repurposing triggered"}`))
 }
 
-func handleSchedulerRun(w http.ResponseWriter, r *http.Request) {
-	subs := []struct {
-		Name   string
-		Amount float64
-	}{
-		{"YouTube", 15.99},
-		{"Zeus", 29.99},
-		{"Amazon Prime", 14.99},
-		{"Hulu", 17.99},
-		{"Starz", 9.99},
-	}
+func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
+	subManager.mu.RLock()
+	defer subManager.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(subManager.Subscriptions)
+}
 
-	for _, s := range subs {
-		fundManager.PaySubscription(s.Name, s.Amount)
+func handleAdminSubscriptionsRegister(w http.ResponseWriter, r *http.Request) {
+	var sub Subscription
+	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+		http.Error(w, "bad request", 400)
+		return
 	}
+	if err := subManager.Register(sub); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(`{"status": "success", "message": "Subscription registered"}`))
+}
+
+func handleSchedulerRun(w http.ResponseWriter, r *http.Request) {
+	subManager.Run(true)
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status": "success", "message": "All subscriptions processed"}`))
+	w.Write([]byte(`{"status": "success", "message": "Subscription scheduler triggered"}`))
 }
 
 func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {

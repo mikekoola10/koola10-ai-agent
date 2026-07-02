@@ -8,6 +8,7 @@ import (
 type BountyAgent struct {
 	specialty string
 	status    AgentStatus
+	prompt    string
 }
 
 func (a *BountyAgent) Run(task string) (interface{}, error) {
@@ -36,6 +37,8 @@ func (a *BountyAgent) Run(task string) (interface{}, error) {
 
 func (a *BountyAgent) Status() AgentStatus { return a.status }
 func (a *BountyAgent) Specialty() string    { return a.specialty }
+func (a *BountyAgent) SetPrompt(p string)   { a.prompt = p }
+func (a *BountyAgent) GetPrompt() string    { return a.prompt }
 
 func BountyFactory() []SpecialistAgent {
 	specialties := []string{
