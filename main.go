@@ -239,18 +239,21 @@ type VaultSummary struct {
 }
 
 type Subscription struct {
-	ID        string    `json:"id"`
-	Service   string    `json:"service"`
-	Amount    float64   `json:"amount"`
-	CardID    string    `json:"card_id"`
-	Status    string    `json:"status"`
-	Frequency string    `json:"frequency"`
-	LastPaid  time.Time `json:"last_paid"`
+	ID        string                  `json:"id"`
+	Service   string                  `json:"service"`
+	Amount    float64                 `json:"amount"`
+	CardID    string                  `json:"card_id"`
+	CardInfo  *financial.CardResponse `json:"card_info,omitempty"`
+	Status    string                  `json:"status"`
+	Frequency string                  `json:"frequency"`
+	LastPaid  time.Time               `json:"last_paid"`
+	DueDay    int                     `json:"due_day"`
 }
 
 type SubscriptionManager struct {
 	Subscriptions []Subscription `json:"subscriptions"`
 	storagePath   string
+	AgentCard     *financial.AgentCardClient
 	mu            sync.RWMutex
 }
 
@@ -403,6 +406,10 @@ func main() {
 	nodeID = os.Getenv("NODE_ID")
 	if nodeID == "" { h, _ := os.Hostname(); nodeID = h }
 
+	// Ensure /data exists
+	if err := os.MkdirAll("/data", 0755); err != nil {
+		log.Printf("Warning: failed to create /data: %v", err)
+	}
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 	os.MkdirAll(appsDir, 0755)
 
@@ -410,10 +417,12 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
 	if data, err := os.ReadFile("/data/audit_offset.txt"); err == nil {
 		fmt.Sscanf(string(data), "%d", &lastProcessedAuditOffset)
 	}
-	subManager = NewSubscriptionManager(subsPath)
+
+	subManager = NewSubscriptionManager(subsPath, financial.NewAgentCardClient())
 	go startMaintenanceLoop()
 
 	// Automated invoice payment check (every 24h)
@@ -422,6 +431,17 @@ func main() {
 		for {
 			fundManager.PayFlyInvoice()
 			<-ticker.C
+		}
+	}()
+
+	// Automated subscription check (every hour)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		// Initial run
+		subManager.Run(false)
+		for {
+			<-ticker.C
+			subManager.Run(false)
 		}
 	}()
 
@@ -523,9 +543,12 @@ func main() {
 
 	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
 	r.Get("/logs", corsMiddleware(authMiddleware(handleLogs)))
+
 	r.Post("/admin/subscriptions/run", authMiddleware(handleAdminSubscriptionsRun))
 	r.Post("/admin/agentcards/create", authMiddleware(handleAdminAgentCardsCreate))
 	r.Get("/admin/subscriptions", authMiddleware(handleAdminSubscriptionsList))
+	r.Post("/admin/subscriptions/register", authMiddleware(handleAdminSubscriptionsRegister))
+
 	r.Post("/admin/stellar/send", authMiddleware(handleAdminStellarSend))
 	r.Get("/admin/stellar/balance", authMiddleware(handleAdminStellarBalance))
 
@@ -957,7 +980,7 @@ func startSwarmListeners() {
 	}()
 }
 
-// --- Persistence & Helpers (Graph/Semantic/Economic/Compliance - All from previous phases) ---
+// --- Persistence & Helpers ---
 
 func (g *MemoryGraph) Save() {
 	g.mu.RLock(); defer g.mu.RUnlock()
@@ -1097,7 +1120,105 @@ func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float
 	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
 }
 
-// --- Financial Handlers ---
+// --- Subscription Manager Logic ---
+
+func NewSubscriptionManager(path string, ac *financial.AgentCardClient) *SubscriptionManager {
+	sm := &SubscriptionManager{
+		storagePath:   path,
+		AgentCard:     ac,
+		Subscriptions: []Subscription{},
+	}
+	sm.Load()
+	return sm
+}
+
+func (sm *SubscriptionManager) Load() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	data, err := os.ReadFile(sm.storagePath)
+	if err == nil {
+		json.Unmarshal(data, sm)
+	}
+	if sm.Subscriptions == nil {
+		sm.Subscriptions = []Subscription{}
+	}
+}
+
+func (sm *SubscriptionManager) Save() {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	data, _ := json.MarshalIndent(sm, "", "  ")
+	os.WriteFile(sm.storagePath, data, 0644)
+}
+
+func (sm *SubscriptionManager) Register(sub Subscription) error {
+	sm.mu.Lock()
+	found := false
+	for i, s := range sm.Subscriptions {
+		if s.Service == sub.Service {
+			// Preserve card info if not provided in update
+			if sub.CardID == "" {
+				sub.CardID = s.CardID
+			}
+			if sub.CardInfo == nil {
+				sub.CardInfo = s.CardInfo
+			}
+			sm.Subscriptions[i] = sub
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		if sub.ID == "" {
+			sub.ID = generateID()
+		}
+		if sub.CardID == "" {
+			card, err := sm.AgentCard.CreateCard(sub.Service, sub.Amount)
+			if err != nil {
+				sm.mu.Unlock()
+				return err
+			}
+			sub.CardID = card.ID
+			sub.CardInfo = card
+		}
+		sm.Subscriptions = append(sm.Subscriptions, sub)
+	}
+
+	sm.mu.Unlock()
+	sm.Save()
+	return nil
+}
+
+func (sm *SubscriptionManager) Run(force bool) {
+	sm.mu.Lock()
+	now := time.Now()
+	changed := false
+	for i, sub := range sm.Subscriptions {
+		// Check if due today (or force run for verification) or if it's been more than 30 days
+		isDue := now.Day() == sub.DueDay || force || os.Getenv("FORCE_SUBSCRIPTION_RUN") == "true"
+		overdue := sub.LastPaid.IsZero() || now.Sub(sub.LastPaid) > 30*24*time.Hour
+
+		if isDue || overdue {
+			// Check if already paid this month (unless forced)
+			if !force && !sub.LastPaid.IsZero() && sub.LastPaid.Month() == now.Month() && sub.LastPaid.Year() == now.Year() {
+				continue
+			}
+
+			log.Printf("[SubscriptionManager] Processing payment for %s ($%.2f)", sub.Service, sub.Amount)
+			fundManager.PaySubscription(sub.Service, sub.Amount)
+			sm.Subscriptions[i].LastPaid = now
+			sm.Subscriptions[i].Status = "active"
+			changed = true
+		}
+	}
+	sm.mu.Unlock()
+	if changed {
+		sm.Save()
+	}
+}
+
+// --- Handlers ---
 
 func handleFinancialStatus(w http.ResponseWriter, r *http.Request) {
 	status := fundManager.GetStatus()
@@ -1129,7 +1250,6 @@ func handleFinancialHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(history)
 }
 
-// TradingAgent integration point
 func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Profit float64 `json:"profit"`
@@ -1586,24 +1706,32 @@ func handleTriggerContent(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status": "Content repurposing triggered"}`))
 }
 
-func handleSchedulerRun(w http.ResponseWriter, r *http.Request) {
-	subs := []struct {
-		Name   string
-		Amount float64
-	}{
-		{"YouTube", 15.99},
-		{"Zeus", 29.99},
-		{"Amazon Prime", 14.99},
-		{"Hulu", 17.99},
-		{"Starz", 9.99},
-	}
+func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
+	subManager.mu.RLock()
+	defer subManager.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(subManager.Subscriptions)
+}
 
-	for _, s := range subs {
-		fundManager.PaySubscription(s.Name, s.Amount)
+func handleAdminSubscriptionsRegister(w http.ResponseWriter, r *http.Request) {
+	var sub Subscription
+	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+		http.Error(w, "bad request", 400)
+		return
 	}
+	if err := subManager.Register(sub); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(`{"status": "success", "message": "Subscription registered"}`))
+}
+
+func handleSchedulerRun(w http.ResponseWriter, r *http.Request) {
+	subManager.Run(true)
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status": "success", "message": "All subscriptions processed"}`))
+	w.Write([]byte(`{"status": "success", "message": "Subscription scheduler triggered"}`))
 }
 
 func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
@@ -1832,7 +1960,7 @@ func handleAdminStellarBalance(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAdminSubscriptionsRun(w http.ResponseWriter, r *http.Request) {
-	subManager.RunTick(fundManager)
+	subManager.Run(true)
 	w.Write([]byte(`{"status":"triggered"}`))
 }
 
@@ -1846,20 +1974,14 @@ func handleAdminAgentCardsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := financial.NewAgentCardClient()
-	card, err := client.CreateCard(int(req.Amount * 100))
+	card, err := client.CreateCard(req.Service, req.Amount)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	sub := Subscription{Service: req.Service, Amount: req.Amount, CardID: card.ID, Status: "active", Frequency: "monthly"}
-	subManager.AddSubscription(sub)
+	sub := Subscription{Service: req.Service, Amount: req.Amount, CardID: card.ID, CardInfo: card, Status: "active", Frequency: "monthly", DueDay: time.Now().Day()}
+	subManager.Register(sub)
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "created", "card": card, "sub": sub})
-}
-
-func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
-	subManager.mu.RLock()
-	defer subManager.mu.RUnlock()
-	json.NewEncoder(w).Encode(subManager.Subscriptions)
 }
 
 func handleLogs(w http.ResponseWriter, r *http.Request) {
@@ -1884,60 +2006,6 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
-}
-
-func NewSubscriptionManager(path string) *SubscriptionManager {
-	sm := &SubscriptionManager{
-		storagePath:   path,
-		Subscriptions: []Subscription{},
-	}
-	sm.Load()
-	return sm
-}
-
-func (sm *SubscriptionManager) Load() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	data, err := os.ReadFile(sm.storagePath)
-	if err == nil {
-		json.Unmarshal(data, sm)
-	}
-}
-
-func (sm *SubscriptionManager) Save() {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	data, _ := json.MarshalIndent(sm, "", "  ")
-	os.WriteFile(sm.storagePath, data, 0644)
-}
-
-func (sm *SubscriptionManager) AddSubscription(sub Subscription) {
-	sm.mu.Lock()
-	if sub.ID == "" {
-		sub.ID = generateID()
-	}
-	sm.Subscriptions = append(sm.Subscriptions, sub)
-	sm.mu.Unlock()
-	sm.Save()
-}
-
-func (sm *SubscriptionManager) RunTick(fm *financial.FundManager) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	now := time.Now()
-	changed := false
-	for i, sub := range sm.Subscriptions {
-		if sub.LastPaid.IsZero() || now.Sub(sub.LastPaid) > 30*24*time.Hour {
-			log.Printf("[Scheduler] Paying subscription for %s: $%.2f", sub.Service, sub.Amount)
-			fm.PaySubscription(sub.Service, sub.Amount)
-			sm.Subscriptions[i].LastPaid = now
-			changed = true
-		}
-	}
-	if changed {
-		sm.Save()
-	}
 }
 
 func startMaintenanceLoop() {

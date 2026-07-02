@@ -27,8 +27,8 @@ type SwarmManager struct {
 	Mu     sync.RWMutex
 
 	// Callbacks for logging to economic ledger and compliance audit
-	AuditLogger func(action string, details map[string]interface{})
-	LedgerLogger func(vertical, category string, amount float64, description string)
+	AuditLogger   func(action string, details map[string]interface{})
+	LedgerLogger  func(vertical, category string, amount float64, description string)
 	RevenueLogger func(amount float64, source string)
 
 	// Factory for creating agents for a vertical
