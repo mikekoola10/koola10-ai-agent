@@ -1,6 +1,7 @@
 package agents
 
 type FinancialAgent struct {
+	manager *SwarmManager
 	specialty string
 	status    AgentStatus
 	prompt    string
@@ -32,3 +33,5 @@ func FinancialFactory() []SpecialistAgent {
 	}
 	return agents
 }
+
+func (a *FinancialAgent) SetManager(m *SwarmManager) { a.manager = m }

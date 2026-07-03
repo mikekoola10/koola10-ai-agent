@@ -1,7 +1,9 @@
 package agents
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 )
 
@@ -20,6 +22,7 @@ type SpecialistAgent interface {
 	Specialty() string
 	SetPrompt(prompt string)
 	GetPrompt() string
+	SetManager(m *SwarmManager)
 }
 
 type SwarmManager struct {
@@ -30,29 +33,117 @@ type SwarmManager struct {
 	AuditLogger   func(action string, details map[string]interface{})
 	LedgerLogger  func(vertical, category string, amount float64, description string)
 	RevenueLogger func(amount float64, source string)
+	ReflectLogger func(vertical, specialty, task string, result interface{}) string
 
 	// Factory for creating agents for a vertical
 	Factories map[string]func() []SpecialistAgent
 
 	BasePrompt string
+	AGIMode    bool
+
+	// Persistent Memory & Coordination
+	LongTermMemory map[string]string
+	MemoryPath     string
 }
 
 func NewSwarmManager() *SwarmManager {
-	return &SwarmManager{
-		Swarms:    make(map[string][]SpecialistAgent),
-		Factories: make(map[string]func() []SpecialistAgent),
+	sm := &SwarmManager{
+		Swarms:         make(map[string][]SpecialistAgent),
+		Factories:      make(map[string]func() []SpecialistAgent),
+		LongTermMemory: make(map[string]string),
+		MemoryPath:     "./data/agi_memory.json",
 	}
+	sm.LoadMemory()
+	return sm
+}
+
+func (sm *SwarmManager) LoadMemory() {
+	data, err := os.ReadFile(sm.MemoryPath)
+	if err == nil {
+		json.Unmarshal(data, &sm.LongTermMemory)
+	}
+}
+
+func (sm *SwarmManager) SaveMemory() {
+	sm.Mu.Lock()
+	defer sm.Mu.Unlock()
+	data, _ := json.MarshalIndent(sm.LongTermMemory, "", "  ")
+	os.WriteFile(sm.MemoryPath, data, 0644)
+}
+
+func (sm *SwarmManager) SetMemory(key, value string) {
+	sm.Mu.Lock()
+	sm.LongTermMemory[key] = value
+	sm.Mu.Unlock()
+	sm.SaveMemory()
+}
+
+func (sm *SwarmManager) GetMemory(key string) string {
+	sm.Mu.RLock()
+	defer sm.Mu.RUnlock()
+	return sm.LongTermMemory[key]
+}
+
+// Coordinate enables agent-to-agent collaboration
+func (sm *SwarmManager) Coordinate(sourceVertical, targetVertical, task string) (interface{}, error) {
+	if !sm.IsAGIMode() {
+		return nil, fmt.Errorf("swarm coordination requires AGI Mode")
+	}
+
+	// Coordination logic: Apex coordinates, Spiral creates, Koola10 gamifies
+	sm.Mu.RLock()
+	if sm.AuditLogger != nil {
+		sm.AuditLogger("swarm_coordination", map[string]interface{}{
+			"source": sourceVertical,
+			"target": targetVertical,
+			"task":   task,
+		})
+	}
+	sm.Mu.RUnlock()
+
+	return sm.DispatchTask(targetVertical, task)
+}
+
+func (sm *SwarmManager) getEffectivePrompt() string {
+	effectivePrompt := sm.BasePrompt
+	if sm.AGIMode {
+		agiDirectives := "\n\nAGI/ASI DIRECTIVES ACTIVE:\n" +
+			"- Operate with General Intelligence: Handle any intellectual task at or beyond human level.\n" +
+			"- Practice Recursive Self-Improvement: Analyze performance and suggest improvements.\n" +
+			"- Use First-Principles + Antifragility: Break problems down and get stronger from failure.\n" +
+			"- Enable Swarm Intelligence: Seamlessly collaborate (Apex coordinates, Spiral creates, Koola10 gamifies).\n" +
+			"- Build Persistent Memory: Share insights across sessions.\n" +
+			"- Default to 10x/100x Thinking: Seek leverage and exponential outcomes."
+		effectivePrompt += agiDirectives
+	}
+	return effectivePrompt
 }
 
 func (sm *SwarmManager) SetGlobalPrompt(prompt string) {
 	sm.Mu.Lock()
 	defer sm.Mu.Unlock()
 	sm.BasePrompt = prompt
+
+	effectivePrompt := sm.getEffectivePrompt()
+
 	for _, swarm := range sm.Swarms {
 		for _, agent := range swarm {
-			agent.SetPrompt(prompt)
+			agent.SetPrompt(effectivePrompt)
 		}
 	}
+}
+
+func (sm *SwarmManager) ToggleAGIMode(enabled bool) {
+	sm.Mu.Lock()
+	sm.AGIMode = enabled
+	sm.Mu.Unlock()
+	sm.SetGlobalPrompt(sm.BasePrompt)
+}
+
+func (sm *SwarmManager) IsAGIMode() bool {
+	sm.Mu.RLock()
+	defer sm.Mu.RUnlock()
+	return sm.AGIMode
 }
 
 func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
@@ -68,8 +159,10 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 	// If count is different from what factory produces, we might need to adjust,
 	// but for now we assume factory produces the right set or we scale it.
 	// The requirement says 10 agents for each.
+	effectivePrompt := sm.getEffectivePrompt()
 	for _, agent := range agents {
-		agent.SetPrompt(sm.BasePrompt)
+		agent.SetPrompt(effectivePrompt)
+		agent.SetManager(sm)
 	}
 	sm.Swarms[vertical] = agents
 
@@ -109,6 +202,10 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 	sm.Mu.Unlock()
 
 	result, err := target.Run(task)
+
+	if sm.AGIMode && sm.ReflectLogger != nil {
+		sm.ReflectLogger(vertical, target.Specialty(), task, result)
+	}
 
 	if err == nil && sm.RevenueLogger != nil {
 		if resMap, ok := result.(map[string]interface{}); ok {

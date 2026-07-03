@@ -30,7 +30,8 @@
                 <span id="status-text">SYSTEM_NOMINAL</span>
             </div>
             <div style="color: #0ff; font-size: 10px; margin-top: 5px; font-weight: bold;">
-                FOUNDER_MODE: <span id="founder-mode">ACTIVE</span>
+                FOUNDER_MODE: <span id="founder-mode">ACTIVE</span> |
+                AGI_MODE: <span id="agi-mode-status">OFF</span>
             </div>
         </div>
     </header>
@@ -56,14 +57,32 @@
             </div>
             <div style="display: flex; flex-direction: column; gap: 10px;">
                 <button onclick="triggerMonitor()">RUN_DAILY_MONITOR</button>
+                <button id="agi-btn" onclick="toggleAGIMode()">ENABLE_AGI_MODE</button>
                 <button id="kill-btn" class="red" onclick="toggleKillSwitch()">ACTIVATE_KILL_SWITCH</button>
             </div>
         </div>
     </div>
 
+    <div class="grid" style="margin-top: 15px;">
+        <div class="card">
+            <h2>RECURSIVE_REFLECTION_LOG</h2>
+            <div id="reflection-log" style="font-size: 11px; max-height: 200px; overflow-y: auto;">
+                Awaiting AGI initialization...
+            </div>
+        </div>
+        <div class="card">
+            <h2>SWARM_COORDINATION_LOG</h2>
+            <div id="coordination-log" style="font-size: 11px; max-height: 200px; overflow-y: auto;">
+                Scanning swarm signals...
+            </div>
+            <h2 style="margin-top: 15px;">PERSISTENT_MEMORY_INSIGHTS</h2>
+            <div id="memory-insights" style="font-size: 10px; color: #0ff;">Awaiting memory dump...</div>
+        </div>
+    </div>
+
     <div class="card" style="margin-top: 15px;">
         <h2>SYSTEM_LOGS</h2>
-        <pre id="logs">Initializing telemetry...</pre>
+        <pre id="logs" style="max-height: 200px; overflow-y: auto;">Initializing telemetry...</pre>
     </div>
 
     <script>
@@ -89,10 +108,46 @@
                     `).join('');
                 }
 
+                // Memory Insights
+                const memoryResp = await fetch('/swarm/memory').then(r => r.json());
+                const memDiv = document.getElementById('memory-insights');
+                const memKeys = Object.keys(memoryResp);
+                if (memKeys.length > 0) {
+                    memDiv.innerHTML = memKeys.map(k => `<div><b style="color: #f0f;">${k.toUpperCase()}:</b> ${memoryResp[k]}</div>`).join('');
+                }
+
                 // Approvals
                 const audit = await fetch('/compliance/audit').then(r => r.json());
                 const pending = audit.filter(e => e.action === 'approval_request_created');
                 document.getElementById('approvals-count').innerText = pending.length;
+
+                // Reflections
+                const reflections = await fetch('/swarm/reflections').then(r => r.json());
+                const refDiv = document.getElementById('reflection-log');
+                if (reflections.length > 0) {
+                    refDiv.innerHTML = reflections.slice(-10).reverse().map(ref => `
+                        <div style="margin-bottom: 12px; border-left: 2px solid #f0f; padding-left: 8px; background: rgba(255,0,255,0.05);">
+                            <div style="display: flex; justify-content: space-between; font-size: 10px; color: #f0f;">
+                                <span style="font-weight: bold;">AGI_RECURSIVE_REFLECTION: ${ref.vertical}/${ref.specialty}</span>
+                                <span>${new Date(ref.timestamp).toLocaleTimeString()}</span>
+                            </div>
+                            <div style="color: #ccc; margin-top: 4px;">Task: <span style="color: #0ff;">${ref.task}</span></div>
+                            <div style="color: #fff; margin-top: 4px; border-top: 1px solid #333; padding-top: 4px;">${ref.reflection}</div>
+                        </div>
+                    `).join('');
+                }
+
+                // Coordination (Audit events)
+                const coordDiv = document.getElementById('coordination-log');
+                const coordEvents = audit.filter(e => e.action === 'swarm_coordination' || e.action === 'task_executed');
+                if (coordEvents.length > 0) {
+                    coordDiv.innerHTML = coordEvents.slice(-10).reverse().map(e => `
+                        <div style="margin-bottom: 5px; border-left: 2px solid #0f0; padding-left: 5px;">
+                            <span style="color: #0f0;">[${e.timestamp.split('T')[1].split('Z')[0]}]</span>
+                            ${e.action === 'swarm_coordination' ? `SYNC: ${e.details.source} → ${e.details.target}` : `EXEC: ${e.details.vertical}/${e.details.specialty}`}
+                        </div>
+                    `).join('');
+                }
 
                 // Log a tick
                 const logs = document.getElementById('logs');
@@ -113,6 +168,27 @@
             await fetch('/grants/monitor');
             btn.innerText = 'MONITOR_COMPLETE';
             setTimeout(() => { btn.disabled = false; btn.innerText = 'RUN_DAILY_MONITOR'; }, 2000);
+        }
+
+        async function toggleAGIMode() {
+            const btn = document.getElementById('agi-btn');
+            const status = document.getElementById('agi-mode-status');
+            const enabling = btn.innerText.includes('ENABLE');
+
+            try {
+                const resp = await fetch('/admin/agi-mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: enabling })
+                });
+                if (resp.ok) {
+                    btn.innerText = enabling ? 'DISABLE_AGI_MODE' : 'ENABLE_AGI_MODE';
+                    status.innerText = enabling ? 'ACTIVE' : 'OFF';
+                    status.style.color = enabling ? '#f0f' : '#0ff';
+                }
+            } catch (err) {
+                console.error("Failed to toggle AGI Mode", err);
+            }
         }
 
         async function toggleKillSwitch() {
