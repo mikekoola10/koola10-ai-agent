@@ -45,8 +45,8 @@
         </div>
 
         <div class="card">
-            <h2>SWARM_NETWORK</h2>
-            <div id="nodes-list">Scanning for nodes...</div>
+            <h2>FINANCIAL_SWARM</h2>
+            <div id="subs-list">Scanning cards...</div>
         </div>
 
         <div class="card">
@@ -85,6 +85,21 @@
                     nodesDiv.innerHTML = nodes.map(n => `
                         <div class="node">
                             [${n.region}] ${n.node_id} - ${n.status}
+                        </div>
+                    `).join('');
+                }
+
+                // Financial Swarm
+                const subs = await fetch('/admin/subscriptions').then(r => r.json());
+                const subsDiv = document.getElementById('subs-list');
+                if (subs.length === 0) {
+                    subsDiv.innerText = "No active subscriptions.";
+                } else {
+                    subsDiv.innerHTML = subs.map(s => `
+                        <div class="node">
+                            <span style="color: ${s.status === 'active' ? '#0f0' : '#f00'}">●</span>
+                            <b>${s.service}</b>: $${s.amount} (${s.card_id})<br/>
+                            <small>RENEWAL: ${s.next_renewal ? new Date(s.next_renewal).toLocaleDateString() : 'PENDING'}</small>
                         </div>
                     `).join('');
                 }
