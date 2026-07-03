@@ -63,13 +63,20 @@
             font-weight: bold;
             margin: 10px 0;
         }
-        .status-indicator {
-            display: inline-block;
-            width: 12px; height: 12px;
-            border-radius: 50%;
-            margin-right: 8px;
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #222;
+            border: 1px solid var(--neon-blue);
+            margin-top: 10px;
+            position: relative;
         }
-        .active { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); }
+        .progress-fill {
+            height: 100%;
+            background: var(--neon-blue);
+            width: 0%;
+            transition: width 0.5s;
+        }
         .agi-mode { color: var(--neon-pink); font-weight: bold; }
 
         button {
@@ -88,7 +95,7 @@
             color: #000;
             box-shadow: 0 0 20px var(--neon-green);
         }
-        .reflection-log {
+        .log-container {
             height: 200px;
             overflow-y: auto;
             background: #000;
@@ -96,18 +103,38 @@
             font-size: 0.8rem;
             border: 1px solid #222;
         }
-        .reflection-entry {
+        .log-entry {
             margin-bottom: 10px;
             border-bottom: 1px solid #111;
             padding-bottom: 5px;
         }
         .suggestion { color: var(--neon-blue); }
+        .ticker {
+            background: #111;
+            padding: 5px;
+            border: 1px solid var(--neon-pink);
+            color: var(--neon-pink);
+            font-size: 0.9rem;
+            margin-top: 10px;
+            white-space: nowrap;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        .ticker span {
+            display: inline-block;
+            padding-left: 100%;
+            animation: ticker 30s linear infinite;
+        }
+        @keyframes ticker {
+            0%   { transform: translate(0, 0); }
+            100% { transform: translate(-100%, 0); }
+        }
     </style>
 </head>
 <body>
     <header>
         <div>
-            <h1 style="margin:0;">APEX_SPIRAL_KOOLA10_AGENCY v3.0</h1>
+            <h1 style="margin:0;">APEX_SPIRAL_KOOLA10_AGENCY v3.1</h1>
             <div class="agi-mode">AGI_MODE: <span id="agi-status">ACTIVE</span></div>
         </div>
         <div style="text-align:right;">
@@ -118,97 +145,114 @@
 
     <div class="grid">
         <div class="card">
-            <h2>FINANCIAL_OVERVIEW</h2>
-            <div class="metrics">REVENUE: <span id="revenue">-bash.00</span></div>
-            <div class="metrics">BALANCE: <span id="balance">-bash.00</span></div>
-            <div>BURN_RATE: <span id="burn-rate">-bash.05/task</span></div>
-            <button onclick="triggerRevenue('affiliate')">TRIGGER_AFFILIATE_REVENUE</button>
-            <button onclick="triggerRevenue('bounty')">TRIGGER_BOUNTY_REVENUE</button>
+            <h2>EMPIRE_PROGRESS</h2>
+            <div class="metrics">REVENUE: <span id="total-revenue">-bash.00</span> / M</div>
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <div style="margin-top:10px;">
+                PROGRESS: <span id="progress-pct">0%</span><br>
+                AGENTS: <span id="total-agents">0</span><br>
+                REFLECTIONS: <span id="reflections-count">0</span>
+            </div>
         </div>
 
         <div class="card">
-            <h2>SWARM_INTELLIGENCE</h2>
-            <div>TOTAL_AGENTS: <span id="total-agents">0</span></div>
-            <div id="swarm-metrics" style="margin-top:10px;">
-                <!-- Dynamically populated -->
+            <h2>SWARM_COMMAND</h2>
+            <button onclick="triggerProductSwarm()">GENERATE_PRODUCT_LINE</button>
+            <button onclick="triggerRevenue('affiliate')">TRIGGER_AFFILIATE_REVENUE</button>
+            <button onclick="triggerRevenue('bounty')">TRIGGER_BOUNTY_REVENUE</button>
+            <div id="swarm-mini-status" style="margin-top:10px; font-size: 0.7rem;"></div>
+        </div>
+
+        <div class="card">
+            <h2>JARVIS_STRATEGY_ROOM</h2>
+            <div id="strategy-logs" class="log-container">
+                Analyzing market opportunities...
             </div>
-            <button onclick="refreshSwarm()">REFRESH_SWARM_METRICS</button>
+            <div class="ticker">
+                <span id="ticker-text">JARVIS: Optimizing swarm for quantum parallel revenue generation... Standby for next move...</span>
+            </div>
         </div>
 
         <div class="card">
             <h2>RECURSIVE_REFLECTIONS</h2>
-            <div id="reflections" class="reflection-log">
+            <div id="reflections" class="log-container">
                 Waiting for AGI reflections...
             </div>
-            <button onclick="updateReflections()">PULL_REFLECTIONS</button>
-        </div>
-
-        <div class="card">
-            <h2>FOUNDER_OS_COMMANDS</h2>
-            <div style="display:flex; gap:10px;">
-                <button onclick="toggleAGI()">TOGGLE_AGI_MODE</button>
-                <button onclick="deployNewSwarm()">DEPLOY_NEW_SWARM</button>
-            </div>
-            <button style="border-color:var(--neon-pink); color:var(--neon-pink);" onclick="emergencyKill()">EMERGENCY_KILL_SWITCH</button>
         </div>
     </div>
 
     <script>
-        async function updateFinancials() {
-            const res = await fetch('/economic/ledger/summary').then(r => r.json());
-            document.getElementById('revenue').innerText = `$${res.total_revenue.toFixed(2)}`;
-            document.getElementById('balance').innerText = `$${res.balance.toFixed(2)}`;
-        }
+        const apiKey = 'test_key'; // In prod, this would be handled differently
 
-        async function updateSwarm() {
-            const res = await fetch('/swarm/metrics').then(r => r.json());
-            const container = document.getElementById('swarm-metrics');
-            let total = 0;
-            container.innerHTML = Object.entries(res).map(([k, v]) => {
-                total += v.total;
-                return `<div>[${k.toUpperCase()}] IDLE: ${v.idle} | WORK: ${v.working}</div>`;
-            }).join('');
-            document.getElementById('total-agents').innerText = total;
+        async function updateStats() {
+            try {
+                const res = await fetch('/admin/stats', {
+                    headers: {'X-Admin-API-Key': 'test_key'} // Placeholder
+                }).then(r => r.json());
+
+                document.getElementById('total-revenue').innerText = `$${res.total_revenue.toFixed(2)}`;
+                document.getElementById('progress-pct').innerText = `${res.progress_pct.toFixed(4)}%`;
+                document.getElementById('progress-fill').style.width = `${res.progress_pct}%`;
+                document.getElementById('total-agents').innerText = res.total_agents;
+                document.getElementById('reflections-count').innerText = res.agi_reflections;
+            } catch (e) {}
         }
 
         async function updateReflections() {
-            const res = await fetch('/swarm/reflections').then(r => r.json());
-            const container = document.getElementById('reflections');
-            if (!res || res.length === 0) return;
-            container.innerHTML = res.reverse().map(r => `
-                <div class="reflection-entry">
-                    <div style="color:var(--neon-pink)">[${r.timestamp}] ${r.vertical.toUpperCase()} ANALYSIS</div>
-                    <div>${r.analysis}</div>
-                    <div class="suggestion">SUGGESTIONS: ${r.suggestions.join(' | ')}</div>
-                </div>
-            `).join('');
+            try {
+                const res = await fetch('/swarm/reflections').then(r => r.json());
+                const container = document.getElementById('reflections');
+                const strategyContainer = document.getElementById('strategy-logs');
+
+                if (!res || res.length === 0) return;
+
+                const reversed = [...res].reverse();
+
+                container.innerHTML = reversed.map(r => `
+                    <div class="log-entry">
+                        <div style="color:var(--neon-pink)">[${r.timestamp}] ${r.vertical.toUpperCase()}</div>
+                        <div>${r.analysis}</div>
+                    </div>
+                `).join('');
+
+                const strategies = res.filter(r => r.vertical === 'apex');
+                if (strategies.length > 0) {
+                    strategyContainer.innerHTML = strategies.reverse().map(s => `
+                        <div class="log-entry">
+                            <div style="color:var(--neon-blue)">EMPIRE_MOVE: ${s.task}</div>
+                            <div class="suggestion">${s.suggestions.join(' | ')}</div>
+                        </div>
+                    `).join('');
+                    document.getElementById('ticker-text').innerText = `JARVIS: ${strategies[0].suggestions[0]}`;
+                }
+            } catch (e) {}
+        }
+
+        async function triggerProductSwarm() {
+            await fetch('/admin/generate-product-line', {
+                method: 'POST',
+                headers: {'X-Admin-API-Key': 'test_key'}
+            });
+            alert('Cross-division product swarm activated!');
         }
 
         async function triggerRevenue(v) {
             await fetch(`/admin/trigger_${v}`, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'}
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Admin-API-Key': 'test_key'
+                }
             });
             alert(`${v} revenue swarm triggered!`);
         }
 
-        async function toggleAGI() {
-            const current = document.getElementById('agi-status').innerText === 'ACTIVE';
-            await fetch('/admin/agi-mode', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({enabled: !current})
-            });
-            document.getElementById('agi-status').innerText = !current ? 'ACTIVE' : 'INACTIVE';
-            document.getElementById('agi-status').style.color = !current ? 'var(--neon-pink)' : '#666';
-        }
-
         // Initialize
-        setInterval(updateFinancials, 5000);
-        setInterval(updateSwarm, 5000);
+        setInterval(updateStats, 5000);
         setInterval(updateReflections, 10000);
-        updateFinancials();
-        updateSwarm();
+        updateStats();
         updateReflections();
 
         // Clock

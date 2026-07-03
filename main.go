@@ -437,6 +437,8 @@ func main() {
 
 	subManager = NewSubscriptionManager(subsPath, financial.NewAgentCardClient())
 	go startMaintenanceLoop()
+	go startProactiveJarvisLoop()
+
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -498,6 +500,10 @@ func main() {
 	// Initial deployment of revenue swarms
 	globalSwarmManager.DeploySwarms("affiliate", 10)
 	globalSwarmManager.DeploySwarms("bounty", 10)
+	globalSwarmManager.DeploySwarms("apex", 10)
+	globalSwarmManager.DeploySwarms("spiral", 10)
+	globalSwarmManager.DeploySwarms("koola10", 10)
+
 	globalSwarmManager.DeploySwarms("content", 10)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
@@ -586,6 +592,10 @@ func main() {
 	r.Post("/admin/agi-mode", authMiddleware(handleAdminAGIMode))
 	r.Post("/monetize/shopify/sync", corsMiddleware(handleShopifySync))
 	r.Post("/monetize/marketplace/sale", corsMiddleware(handleMarketplaceSale))
+	r.Post("/admin/generate-product-line", authMiddleware(handleGenerateProductLine))
+	r.Get("/admin/stats", authMiddleware(handleAdminStats))
+
+
 
 
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
@@ -2189,4 +2199,72 @@ func handleMarketplaceSale(w http.ResponseWriter, r *http.Request) {
 		"product": req.ProductID,
 		"earned": req.Price,
 	})
+}
+
+func handleGenerateProductLine(w http.ResponseWriter, r *http.Request) {
+	// 1. Apex Strategy
+	strategyRes, _ := globalSwarmManager.DispatchTask("apex", "Define a new cyberpunk product line strategy.")
+
+	// 2. Spiral Visuals (Parallel)
+	visuals, _ := globalSwarmManager.QuantumParallelDispatch("spiral", "Generate visual descriptions and HF prompts for cyberpunk products.", 3)
+
+	// 3. Koola10 Marketing (Parallel)
+	marketing, _ := globalSwarmManager.QuantumParallelDispatch("koola10", "Create viral marketing copy for the cyberpunk product line.", 3)
+
+	productLine := map[string]interface{}{
+		"timestamp": time.Now().Format(time.RFC3339),
+		"strategy":  strategyRes,
+		"visuals":   visuals,
+		"marketing": marketing,
+	}
+
+	data, _ := json.MarshalIndent(productLine, "", "  ")
+	os.WriteFile("/data/generated_products.json", data, 0644)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(productLine)
+}
+
+func handleAdminStats(w http.ResponseWriter, r *http.Request) {
+	reflectMu.RLock()
+	reflectionsCount := len(reflectLogs)
+	reflectMu.RUnlock()
+
+	totalAgents := 0
+	metrics := globalSwarmManager.GetAllSwarmMetrics()
+	for _, m := range metrics {
+		if vm, ok := m.(map[string]interface{}); ok {
+			if total, ok := vm["total"].(int); ok {
+				totalAgents += total
+			}
+		}
+	}
+
+	stats := map[string]interface{}{
+		"total_revenue":   globalLedger.TotalRevenue,
+		"total_balance":   globalLedger.Balance,
+		"total_agents":    totalAgents,
+		"agi_reflections": reflectionsCount,
+		"revenue_target":  1000000.0,
+		"progress_pct":    (globalLedger.TotalRevenue / 1000000.0) * 100.0,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func startProactiveJarvisLoop() {
+	ticker := time.NewTicker(30 * time.Minute)
+	log.Println("[Apex Jarvis] Proactive strategy loop started.")
+	for {
+		<-ticker.C
+		if agiMode {
+			task := "Generate a new proactive empire-building strategy move."
+			res, err := globalSwarmManager.DispatchTask("apex", task)
+			if err == nil {
+				log.Printf("[Apex Jarvis] Proactive strategy generated: %v", res)
+				go PerformRecursiveReflection("apex", task, fmt.Sprintf("%v", res))
+			}
+		}
+	}
 }
