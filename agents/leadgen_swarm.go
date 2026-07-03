@@ -7,6 +7,7 @@ import (
 )
 
 type LeadGenAgent struct {
+	manager *SwarmManager
 	specialty string
 	status    AgentStatus
 	prompt    string
@@ -44,3 +45,5 @@ func LeadGenFactory() []SpecialistAgent {
 	}
 	return agents
 }
+
+func (a *LeadGenAgent) SetManager(m *SwarmManager) { a.manager = m }

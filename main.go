@@ -300,6 +300,7 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	reflectMu    sync.RWMutex
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -338,6 +339,7 @@ var (
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
+	reflectLogs   = []map[string]string{}
 
 	rlBucket     = 15.0
 	rlMaxBucket  = 15.0
@@ -428,9 +430,25 @@ func main() {
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
 	globalSwarmManager.RevenueLogger = fundManager.RouteRevenue
+	globalSwarmManager.ReflectLogger = func(vertical, specialty, task string, result interface{}) string {
+		reflection := generateReflection(vertical, specialty, task, result)
+		reflectMu.Lock()
+		defer reflectMu.Unlock()
+		reflectLogs = append(reflectLogs, map[string]string{
+			"timestamp":  time.Now().Format(time.RFC3339),
+			"vertical":   vertical,
+			"specialty":  specialty,
+			"task":       task,
+			"reflection": reflection,
+		})
+		if len(reflectLogs) > 100 {
+			reflectLogs = reflectLogs[1:]
+		}
+		return reflection
+	}
 
-	// Initialize High-Growth Founder Mode
-	founderPrompt := "High-Growth Founder Mode: Speed is a competitive advantage. Build leverage through automation. First-principles thinking. High agency + extreme ownership. Think in 10x-100x."
+	// Initialize High-Growth Founder Mode with AGI directives
+	founderPrompt := "High-Growth Founder Mode: Speed is a competitive advantage. Build leverage through automation. First-principles thinking. High agency + extreme ownership. Think in 10x-100x. Transform into AGI/ASI-like entities. General Intelligence. Recursive Self-Improvement. Antifragile. Swarm Intelligence. Persistent Memory."
 	globalSwarmManager.SetGlobalPrompt(founderPrompt)
 
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
@@ -524,6 +542,7 @@ func main() {
 	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
 	r.Get("/logs", corsMiddleware(authMiddleware(handleLogs)))
 	r.Post("/admin/subscriptions/run", authMiddleware(handleAdminSubscriptionsRun))
+	r.Post("/admin/agi-mode", corsMiddleware(authMiddleware(handleAdminAGIMode)))
 	r.Post("/admin/agentcards/create", authMiddleware(handleAdminAgentCardsCreate))
 	r.Get("/admin/subscriptions", authMiddleware(handleAdminSubscriptionsList))
 	r.Post("/admin/stellar/send", authMiddleware(handleAdminStellarSend))
@@ -537,6 +556,7 @@ func main() {
 	r.Post("/swarm/start", corsMiddleware(handleSwarmStart))
 	r.Get("/swarm/task-status", corsMiddleware(handleSwarmStatus))
 	r.Get("/swarm/agents", corsMiddleware(handleSwarmAgents))
+	r.Get("/swarm/reflections", corsMiddleware(handleSwarmReflections))
 	r.Get("/swarm/nodes", corsMiddleware(handleSwarmNodes))
 
 	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
@@ -1304,10 +1324,21 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "limited", 429)
 		return
 	}
+	systemPrompt := "You are Koola10, an autonomous grant agent."
+	if globalSwarmManager.IsAGIMode() {
+		systemPrompt = globalSwarmManager.BasePrompt + "\n\nAGI/ASI DIRECTIVES ACTIVE:\n" +
+			"- Operate with General Intelligence: Handle any intellectual task at or beyond human level.\n" +
+			"- Practice Recursive Self-Improvement: Analyze performance and suggest improvements.\n" +
+			"- Use First-Principles + Antifragility: Break problems down and get stronger from failure.\n" +
+			"- Enable Swarm Intelligence: Seamlessly collaborate (Apex coordinates, Spiral creates, Koola10 gamifies).\n" +
+			"- Build Persistent Memory: Share insights across sessions.\n" +
+			"- Default to 10x/100x Thinking: Seek leverage and exponential outcomes."
+	}
+
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
+			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": req.Prompt},
 		},
 	}
@@ -1834,6 +1865,76 @@ func handleAdminStellarBalance(w http.ResponseWriter, r *http.Request) {
 func handleAdminSubscriptionsRun(w http.ResponseWriter, r *http.Request) {
 	subManager.RunTick(fundManager)
 	w.Write([]byte(`{"status":"triggered"}`))
+}
+
+func handleAdminAGIMode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	globalSwarmManager.ToggleAGIMode(req.Enabled)
+	AddAuditEntry("agi_mode_toggled", map[string]interface{}{"enabled": req.Enabled})
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"agi_mode": req.Enabled})
+}
+
+func handleSwarmReflections(w http.ResponseWriter, r *http.Request) {
+	reflectMu.RLock()
+	defer reflectMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(reflectLogs)
+}
+
+func generateReflection(vertical, specialty, task string, result interface{}) string {
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		return fmt.Sprintf("AGI Reflection: Task %s by %s completed. (DeepSeek key missing)", task, specialty)
+	}
+
+	resultJSON, _ := json.Marshal(result)
+	prompt := fmt.Sprintf("Analyze this task performance and suggest a 10x improvement for future iterations.\nVertical: %s\nAgent: %s\nTask: %s\nResult: %s", vertical, specialty, task, string(resultJSON))
+
+	dsReq := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{
+			{"role": "system", "content": "You are the Swarm Intelligence Architect. Provide a concise, strategic, and superintelligent reflection on agent tasks."},
+			{"role": "user", "content": prompt},
+		},
+	}
+	dsBody, _ := json.Marshal(dsReq)
+	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	hReq.Header.Set("Authorization", "Bearer "+apiKey)
+	hReq.Header.Set("Content-Type", "application/json")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := (&http.Client{}).Do(hReq.WithContext(ctx))
+	if err != nil {
+		return fmt.Sprintf("AGI Reflection: Optimization loop engaged. Failure is antifragile. Task %s finished.", task)
+	}
+	defer resp.Body.Close()
+
+	var dsRes struct {
+		Choices []struct {
+			Message struct {
+				Content string
+			}
+		}
+		Usage struct {
+			TotalTokens int
+		}
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil || len(dsRes.Choices) == 0 {
+		return fmt.Sprintf("AGI Reflection: %s executed. Analyzing emergent patterns.", task)
+	}
+
+	LogUsage(dsRes.Usage.TotalTokens)
+	globalLedger.RecordCost(vertical, "agi_reflection", float64(dsRes.Usage.TotalTokens)*0.000002, "Recursive self-improvement")
+
+	return dsRes.Choices[0].Message.Content
 }
 
 func handleAdminAgentCardsCreate(w http.ResponseWriter, r *http.Request) {

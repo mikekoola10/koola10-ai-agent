@@ -1,6 +1,7 @@
 package agents
 
 type APIAgent struct {
+	manager *SwarmManager
 	specialty string
 	status    AgentStatus
 	prompt    string
@@ -32,3 +33,5 @@ func APIFactory() []SpecialistAgent {
 	}
 	return agents
 }
+
+func (a *APIAgent) SetManager(m *SwarmManager) { a.manager = m }

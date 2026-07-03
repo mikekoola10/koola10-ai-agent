@@ -1,6 +1,7 @@
 package agents
 
 type ComplianceAgent struct {
+	manager *SwarmManager
 	specialty string
 	status    AgentStatus
 	prompt    string
@@ -32,3 +33,5 @@ func ComplianceFactory() []SpecialistAgent {
 	}
 	return agents
 }
+
+func (a *ComplianceAgent) SetManager(m *SwarmManager) { a.manager = m }

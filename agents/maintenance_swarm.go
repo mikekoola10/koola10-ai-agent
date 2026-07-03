@@ -6,6 +6,7 @@ import (
 )
 
 type MaintenanceAgent struct {
+	manager *SwarmManager
 	specialty string
 	status    AgentStatus
 	prompt    string
@@ -31,3 +32,5 @@ func MaintenanceFactory() []SpecialistAgent {
 	}
 	return agents
 }
+
+func (a *MaintenanceAgent) SetManager(m *SwarmManager) { a.manager = m }
