@@ -244,6 +244,14 @@ func (fm *FundManager) GetStatus() FundStatus {
 	}
 }
 
+func (fm *FundManager) RLock() {
+	fm.mu.RLock()
+}
+
+func (fm *FundManager) RUnlock() {
+	fm.mu.RUnlock()
+}
+
 func (fm *FundManager) GetHistory(days int) []Transaction {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()

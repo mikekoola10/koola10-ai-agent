@@ -33,8 +33,8 @@ func (a *AffiliateAgent) Run(task string) (interface{}, error) {
 
 func (a *AffiliateAgent) Status() AgentStatus { return a.status }
 func (a *AffiliateAgent) Specialty() string    { return a.specialty }
-func (a *AffiliateAgent) SetPrompt(p string)   { a.prompt = p }
-func (a *AffiliateAgent) GetPrompt() string    { return a.prompt }
+func (a *AffiliateAgent) SetPrompt(prompt string) { a.prompt = prompt }
+func (a *AffiliateAgent) GetPrompt() string    { return "affiliate" }
 
 func AffiliateFactory() []SpecialistAgent {
 	specialties := []string{
