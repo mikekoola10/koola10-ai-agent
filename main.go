@@ -1857,6 +1857,7 @@ func handleAdminSubscriptionsRegister(w http.ResponseWriter, r *http.Request) {
 func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
 	subManager.mu.RLock()
 	defer subManager.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(subManager.Subscriptions)
 }
 

@@ -22,11 +22,9 @@ type CardResponse struct {
 	Status      string `json:"status"`
 	AmountCents int    `json:"amountCents"`
 
-	// Legacy fields for SubscriptionManager compatibility
-	PAN      string `json:"pan,omitempty"`
-	CVV      string `json:"cvv,omitempty"`
-	ExpMonthStr string `json:"exp_month_str,omitempty"`
-	ExpYearStr  string `json:"exp_year_str,omitempty"`
+	// Compatibility for Subscription struct
+	PAN string `json:"pan,omitempty"`
+	CVV string `json:"cvv,omitempty"`
 }
 
 type CardDetails struct {
