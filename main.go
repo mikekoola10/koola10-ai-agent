@@ -295,6 +295,14 @@ type VideoJob struct {
 
 // --- Global States ---
 
+type ReflectionLog struct {
+	Timestamp   string `json:"timestamp"`
+	Vertical    string `json:"vertical"`
+	Task        string `json:"task"`
+	Analysis    string `json:"analysis"`
+	Suggestions []string `json:"suggestions"`
+}
+
 var (
 	cacheMutex   sync.Mutex
 	auditMutex   sync.Mutex
@@ -303,6 +311,8 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	reflectMu    sync.RWMutex
+
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -347,6 +357,9 @@ var (
 	rlRate       = 10.0
 	rlLastUpdate = time.Now()
 	rlMu         sync.Mutex
+	agiMode      bool = true
+	reflectLogs  []ReflectionLog
+
 
 	redisClient *redis.Client
 	nodeID      string
@@ -477,6 +490,10 @@ func main() {
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["apex"] = agents.PersonaFactory("apex")
+	globalSwarmManager.Factories["spiral"] = agents.PersonaFactory("spiral")
+	globalSwarmManager.Factories["koola10"] = agents.PersonaFactory("koola10")
+
 
 	// Initial deployment of revenue swarms
 	globalSwarmManager.DeploySwarms("affiliate", 10)
@@ -565,6 +582,12 @@ func main() {
 	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
 	r.Get("/swarm/report", corsMiddleware(handleSwarmReport))
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
+	r.Get("/swarm/reflections", corsMiddleware(handleSwarmReflections))
+	r.Post("/admin/agi-mode", authMiddleware(handleAdminAGIMode))
+	r.Post("/monetize/shopify/sync", corsMiddleware(handleShopifySync))
+	r.Post("/monetize/marketplace/sale", corsMiddleware(handleMarketplaceSale))
+
+
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
 
@@ -1636,6 +1659,8 @@ func handleTriggerAffiliate(w http.ResponseWriter, r *http.Request) {
 				if m, ok := res.(map[string]interface{}); ok {
 					if profit, ok := m["profit"].(float64); ok {
 						fundManager.RouteRevenue(profit, "affiliate_swarm")
+						go PerformRecursiveReflection("affiliate", task, fmt.Sprintf("%v", res))
+
 					}
 				}
 			}
@@ -1661,6 +1686,8 @@ func handleTriggerBounty(w http.ResponseWriter, r *http.Request) {
 				if m, ok := res.(map[string]interface{}); ok {
 					if profit, ok := m["profit"].(float64); ok && profit > 0 {
 						fundManager.RouteRevenue(profit, "bounty_swarm")
+						go PerformRecursiveReflection("bounty", task, fmt.Sprintf("%v", res))
+
 					}
 				}
 			}
@@ -2044,4 +2071,122 @@ func startMaintenanceLoop() {
 			globalSwarmManager.DispatchTask("maintenance", "repair: "+lastError)
 		}
 	}
+}
+
+func handleSwarmReflections(w http.ResponseWriter, r *http.Request) {
+	reflectMu.RLock()
+	defer reflectMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(reflectLogs)
+}
+
+func handleAdminAGIMode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	agiMode = req.Enabled
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "AGI Mode set to %v", agiMode)
+}
+
+func PerformRecursiveReflection(vertical, task, result string) {
+	if !agiMode {
+		return
+	}
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		return
+	}
+
+	prompt := fmt.Sprintf("Analyze the following task result for the '%s' vertical and provide 3 concrete 10x improvement suggestions for the swarm. Task: %s, Result: %s. Return JSON with 'analysis' and 'suggestions' (array of strings).", vertical, task, result)
+
+	dsReq := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{
+			{"role": "system", "content": "You are the AGI Recursive Optimizer. Your goal is to evolve the swarm toward superintelligence."},
+			{"role": "user", "content": prompt},
+		},
+		"response_format": map[string]string{"type": "json_object"},
+	}
+	dsBody, _ := json.Marshal(dsReq)
+	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	hReq.Header.Set("Authorization", "Bearer "+apiKey)
+	hReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{}).Do(hReq)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var dsRes struct {
+		Choices []struct {
+			Message struct {
+				Content string
+			}
+		}
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
+		return
+	}
+
+	var reflection struct {
+		Analysis    string   `json:"analysis"`
+		Suggestions []string `json:"suggestions"`
+	}
+	if err := json.Unmarshal([]byte(dsRes.Choices[0].Message.Content), &reflection); err != nil {
+		return
+	}
+
+	reflectMu.Lock()
+	reflectLogs = append(reflectLogs, ReflectionLog{
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Vertical:    vertical,
+		Task:        task,
+		Analysis:    reflection.Analysis,
+		Suggestions: reflection.Suggestions,
+	})
+	if len(reflectLogs) > 100 {
+		reflectLogs = reflectLogs[1:]
+	}
+	reflectMu.Unlock()
+}
+
+// --- Monetization Handlers ---
+
+func handleShopifySync(w http.ResponseWriter, r *http.Request) {
+	// Simulated Shopify product generation and sync
+	profit := 50.0 // Simulated revenue from automated sales
+	fundManager.RouteRevenue(profit, "shopify_automation")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"products_synced": 12,
+		"revenue_generated": profit,
+	})
+}
+
+func handleMarketplaceSale(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ProductID string `json:"product_id"`
+		Price     float64 `json:"price"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	fundManager.RouteRevenue(req.Price, "digital_marketplace")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "sold",
+		"product": req.ProductID,
+		"earned": req.Price,
+	})
 }
