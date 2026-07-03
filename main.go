@@ -411,6 +411,7 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+	loadReflectionsFromFile()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 	if data, err := os.ReadFile("/data/audit_offset.txt"); err == nil {
 		fmt.Sscanf(string(data), "%d", &lastProcessedAuditOffset)
@@ -444,11 +445,13 @@ func main() {
 		if len(reflectLogs) > 100 {
 			reflectLogs = reflectLogs[1:]
 		}
+		saveReflectionsToFile()
 		return reflection
 	}
 
 	// Initialize High-Growth Founder Mode with AGI directives
 	founderPrompt := "High-Growth Founder Mode: Speed is a competitive advantage. Build leverage through automation. First-principles thinking. High agency + extreme ownership. Think in 10x-100x. Transform into AGI/ASI-like entities. General Intelligence. Recursive Self-Improvement. Antifragile. Swarm Intelligence. Persistent Memory."
+	globalSwarmManager.ToggleAGIMode(true) // Phase 2: AGI Mode is now default
 	globalSwarmManager.SetGlobalPrompt(founderPrompt)
 
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
@@ -557,6 +560,7 @@ func main() {
 	r.Get("/swarm/task-status", corsMiddleware(handleSwarmStatus))
 	r.Get("/swarm/agents", corsMiddleware(handleSwarmAgents))
 	r.Get("/swarm/reflections", corsMiddleware(handleSwarmReflections))
+	r.Get("/swarm/memory", corsMiddleware(handleSwarmMemory))
 	r.Get("/swarm/nodes", corsMiddleware(handleSwarmNodes))
 
 	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
@@ -1881,11 +1885,34 @@ func handleAdminAGIMode(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"agi_mode": req.Enabled})
 }
 
+func handleSwarmMemory(w http.ResponseWriter, r *http.Request) {
+	globalSwarmManager.Mu.RLock()
+	defer globalSwarmManager.Mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(globalSwarmManager.LongTermMemory)
+}
+
 func handleSwarmReflections(w http.ResponseWriter, r *http.Request) {
 	reflectMu.RLock()
 	defer reflectMu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(reflectLogs)
+}
+
+func saveReflectionsToFile() {
+	reflectMu.RLock()
+	defer reflectMu.RUnlock()
+	data, _ := json.MarshalIndent(reflectLogs, "", "  ")
+	os.WriteFile("./data/agi_reflections.json", data, 0644)
+}
+
+func loadReflectionsFromFile() {
+	reflectMu.Lock()
+	defer reflectMu.Unlock()
+	data, err := os.ReadFile("./data/agi_reflections.json")
+	if err == nil {
+		json.Unmarshal(data, &reflectLogs)
+	}
 }
 
 func generateReflection(vertical, specialty, task string, result interface{}) string {
@@ -1895,12 +1922,12 @@ func generateReflection(vertical, specialty, task string, result interface{}) st
 	}
 
 	resultJSON, _ := json.Marshal(result)
-	prompt := fmt.Sprintf("Analyze this task performance and suggest a 10x improvement for future iterations.\nVertical: %s\nAgent: %s\nTask: %s\nResult: %s", vertical, specialty, task, string(resultJSON))
+	prompt := fmt.Sprintf("Analyze this task performance. Provide a deep reasoning of its impact and generate at least 3 concrete 10x improvement suggestions. Mark the most critical optimization as 'SAFE_TO_APPLY' for automatic system evolution. Focus on how to improve the agent's capabilities and cross-domain knowledge transfer.\nVertical: %s\nAgent: %s\nTask: %s\nResult: %s", vertical, specialty, task, string(resultJSON))
 
 	dsReq := map[string]interface{}{
-		"model": "deepseek-chat",
+		"model": "deepseek-chat", // Sticking to deepseek-chat for reliability if reasoner isn't standard yet
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are the Swarm Intelligence Architect. Provide a concise, strategic, and superintelligent reflection on agent tasks."},
+			{"role": "system", "content": "You are the Superintelligent Swarm Architect. Provide an AGI-level recursive self-improvement analysis. Be strategic, critical, and growth-oriented."},
 			{"role": "user", "content": prompt},
 		},
 	}

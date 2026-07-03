@@ -71,9 +71,18 @@
             </div>
         </div>
         <div class="card">
-            <h2>SYSTEM_LOGS</h2>
-            <pre id="logs" style="max-height: 200px; overflow-y: auto;">Initializing telemetry...</pre>
+            <h2>SWARM_COORDINATION_LOG</h2>
+            <div id="coordination-log" style="font-size: 11px; max-height: 200px; overflow-y: auto;">
+                Scanning swarm signals...
+            </div>
+            <h2 style="margin-top: 15px;">PERSISTENT_MEMORY_INSIGHTS</h2>
+            <div id="memory-insights" style="font-size: 10px; color: #0ff;">Awaiting memory dump...</div>
         </div>
+    </div>
+
+    <div class="card" style="margin-top: 15px;">
+        <h2>SYSTEM_LOGS</h2>
+        <pre id="logs" style="max-height: 200px; overflow-y: auto;">Initializing telemetry...</pre>
     </div>
 
     <script>
@@ -99,6 +108,14 @@
                     `).join('');
                 }
 
+                // Memory Insights
+                const memoryResp = await fetch('/swarm/memory').then(r => r.json());
+                const memDiv = document.getElementById('memory-insights');
+                const memKeys = Object.keys(memoryResp);
+                if (memKeys.length > 0) {
+                    memDiv.innerHTML = memKeys.map(k => `<div><b style="color: #f0f;">${k.toUpperCase()}:</b> ${memoryResp[k]}</div>`).join('');
+                }
+
                 // Approvals
                 const audit = await fetch('/compliance/audit').then(r => r.json());
                 const pending = audit.filter(e => e.action === 'approval_request_created');
@@ -116,6 +133,18 @@
                             </div>
                             <div style="color: #ccc; margin-top: 4px;">Task: <span style="color: #0ff;">${ref.task}</span></div>
                             <div style="color: #fff; margin-top: 4px; border-top: 1px solid #333; padding-top: 4px;">${ref.reflection}</div>
+                        </div>
+                    `).join('');
+                }
+
+                // Coordination (Audit events)
+                const coordDiv = document.getElementById('coordination-log');
+                const coordEvents = audit.filter(e => e.action === 'swarm_coordination' || e.action === 'task_executed');
+                if (coordEvents.length > 0) {
+                    coordDiv.innerHTML = coordEvents.slice(-10).reverse().map(e => `
+                        <div style="margin-bottom: 5px; border-left: 2px solid #0f0; padding-left: 5px;">
+                            <span style="color: #0f0;">[${e.timestamp.split('T')[1].split('Z')[0]}]</span>
+                            ${e.action === 'swarm_coordination' ? `SYNC: ${e.details.source} → ${e.details.target}` : `EXEC: ${e.details.vertical}/${e.details.specialty}`}
                         </div>
                     `).join('');
                 }

@@ -1,7 +1,9 @@
 package agents
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 )
 
@@ -38,13 +40,68 @@ type SwarmManager struct {
 
 	BasePrompt string
 	AGIMode    bool
+
+	// Persistent Memory & Coordination
+	LongTermMemory map[string]string
+	MemoryPath     string
 }
 
 func NewSwarmManager() *SwarmManager {
-	return &SwarmManager{
-		Swarms:    make(map[string][]SpecialistAgent),
-		Factories: make(map[string]func() []SpecialistAgent),
+	sm := &SwarmManager{
+		Swarms:         make(map[string][]SpecialistAgent),
+		Factories:      make(map[string]func() []SpecialistAgent),
+		LongTermMemory: make(map[string]string),
+		MemoryPath:     "./data/agi_memory.json",
 	}
+	sm.LoadMemory()
+	return sm
+}
+
+func (sm *SwarmManager) LoadMemory() {
+	data, err := os.ReadFile(sm.MemoryPath)
+	if err == nil {
+		json.Unmarshal(data, &sm.LongTermMemory)
+	}
+}
+
+func (sm *SwarmManager) SaveMemory() {
+	sm.Mu.Lock()
+	defer sm.Mu.Unlock()
+	data, _ := json.MarshalIndent(sm.LongTermMemory, "", "  ")
+	os.WriteFile(sm.MemoryPath, data, 0644)
+}
+
+func (sm *SwarmManager) SetMemory(key, value string) {
+	sm.Mu.Lock()
+	sm.LongTermMemory[key] = value
+	sm.Mu.Unlock()
+	sm.SaveMemory()
+}
+
+func (sm *SwarmManager) GetMemory(key string) string {
+	sm.Mu.RLock()
+	defer sm.Mu.RUnlock()
+	return sm.LongTermMemory[key]
+}
+
+// Coordinate enables agent-to-agent collaboration
+func (sm *SwarmManager) Coordinate(sourceVertical, targetVertical, task string) (interface{}, error) {
+	if !sm.IsAGIMode() {
+		return nil, fmt.Errorf("swarm coordination requires AGI Mode")
+	}
+
+	// Coordination logic: Apex coordinates, Spiral creates, Koola10 gamifies
+	sm.Mu.RLock()
+	if sm.AuditLogger != nil {
+		sm.AuditLogger("swarm_coordination", map[string]interface{}{
+			"source": sourceVertical,
+			"target": targetVertical,
+			"task":   task,
+		})
+	}
+	sm.Mu.RUnlock()
+
+	return sm.DispatchTask(targetVertical, task)
 }
 
 func (sm *SwarmManager) getEffectivePrompt() string {
