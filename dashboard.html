@@ -3,19 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digital Mancave V3.0 - ASK Agency</title>
+    <title>A.S.K. Agency - Digital Mancave V3.1</title>
     <style>
         :root {
-            --neon-green: #0f0;
-            --neon-blue: #0ff;
-            --neon-pink: #f0f;
-            --dark-bg: #0a0a0a;
-            --leather: #1a1a1a;
+            --neon-cyan: #67e8f9;
+            --neon-purple: #a855f7;
+            --rhel-red: #ee0000;
+            --dark-bg: #050505;
+            --card-bg: #111111;
         }
         body {
             background: var(--dark-bg);
-            color: var(--neon-green);
-            font-family: 'Courier New', monospace;
+            color: var(--neon-cyan);
+            font-family: 'Inter', 'Courier New', monospace;
             margin: 0;
             padding: 20px;
             overflow-x: hidden;
@@ -24,8 +24,8 @@
             content: "";
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
-                        linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%),
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
             background-size: 100% 4px, 3px 100%;
             pointer-events: none;
             z-index: 1000;
@@ -34,105 +34,145 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 2px solid var(--neon-green);
-            padding-bottom: 10px;
-            margin-bottom: 20px;
-            text-shadow: 0 0 10px var(--neon-green);
+            border-bottom: 2px solid var(--rhel-red);
+            padding-bottom: 15px;
+            margin-bottom: 30px;
+            text-shadow: 0 0 15px rgba(238, 0, 0, 0.5);
+        }
+        .tagline {
+            font-size: 0.9rem;
+            color: var(--neon-purple);
+            letter-spacing: 2px;
+            text-transform: uppercase;
         }
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+            gap: 25px;
         }
         .card {
-            background: var(--leather);
-            border: 1px solid #333;
-            padding: 20px;
+            background: var(--card-bg);
+            border: 1px solid #222;
+            padding: 25px;
             position: relative;
-            box-shadow: inset 0 0 15px #000;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: transform 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: var(--rhel-red);
         }
         .card h2 {
             margin-top: 0;
-            color: var(--neon-blue);
-            font-size: 1.2rem;
-            border-bottom: 1px solid #444;
-            padding-bottom: 5px;
+            color: var(--neon-purple);
+            font-size: 1.1rem;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
         }
         .metrics {
-            font-size: 1.5rem;
+            font-size: 1.8rem;
+            font-weight: 800;
+            margin: 15px 0;
+            background: linear-gradient(to right, var(--neon-cyan), var(--neon-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .enterprise-status {
+            color: var(--rhel-red);
             font-weight: bold;
-            margin: 10px 0;
+            font-size: 0.8rem;
+            border: 1px solid var(--rhel-red);
+            padding: 2px 8px;
+            border-radius: 4px;
         }
-        .status-indicator {
-            display: inline-block;
-            width: 12px; height: 12px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-        .active { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); }
-        .agi-mode { color: var(--neon-pink); font-weight: bold; }
-
         button {
             background: transparent;
-            color: var(--neon-green);
-            border: 1px solid var(--neon-green);
-            padding: 10px;
+            color: var(--neon-cyan);
+            border: 1px solid var(--neon-cyan);
+            padding: 12px;
             cursor: pointer;
             width: 100%;
             margin-top: 10px;
             text-transform: uppercase;
+            font-weight: bold;
             transition: all 0.3s;
         }
         button:hover {
-            background: var(--neon-green);
+            background: var(--neon-cyan);
             color: #000;
-            box-shadow: 0 0 20px var(--neon-green);
+            box-shadow: 0 0 25px var(--neon-cyan);
+        }
+        .btn-rhel {
+            border-color: var(--rhel-red);
+            color: var(--rhel-red);
+        }
+        .btn-rhel:hover {
+            background: var(--rhel-red);
+            color: #fff;
+            box-shadow: 0 0 25px var(--rhel-red);
         }
         .reflection-log {
-            height: 200px;
+            height: 250px;
             overflow-y: auto;
             background: #000;
-            padding: 10px;
-            font-size: 0.8rem;
+            padding: 15px;
+            font-size: 0.85rem;
             border: 1px solid #222;
         }
         .reflection-entry {
-            margin-bottom: 10px;
+            margin-bottom: 15px;
             border-bottom: 1px solid #111;
-            padding-bottom: 5px;
+            padding-bottom: 10px;
         }
-        .suggestion { color: var(--neon-blue); }
+        .foresight {
+            font-style: italic;
+            color: #888;
+            border-left: 2px solid var(--neon-purple);
+            padding-left: 10px;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
     <header>
         <div>
-            <h1 style="margin:0;">APEX_SPIRAL_KOOLA10_AGENCY v3.0</h1>
-            <div class="agi-mode">AGI_MODE: <span id="agi-status">ACTIVE</span></div>
+            <h1 style="margin:0; font-size: 2rem;">A.S.K._AGENCY <span style="font-size:0.8rem; color:var(--rhel-red);">v3.1_ENTERPRISE</span></h1>
+            <div class="tagline">AI THAT BUILDS EMPIRES</div>
         </div>
         <div style="text-align:right;">
-            <div>FOUNDER_MODE: <span style="color:var(--neon-pink)">ACTIVE</span></div>
+            <div id="rhel-badge" class="enterprise-status" style="display:none; margin-bottom: 5px;">RED_HAT_ENTERPRISE_MODE: ACTIVE</div>
+            <div>AGI_MODE: <span id="agi-status" style="color:var(--neon-purple)">ACTIVE</span></div>
             <div id="clock">00:00:00</div>
         </div>
     </header>
 
     <div class="grid">
         <div class="card">
-            <h2>FINANCIAL_OVERVIEW</h2>
-            <div class="metrics">REVENUE: <span id="revenue">-bash.00</span></div>
-            <div class="metrics">BALANCE: <span id="balance">-bash.00</span></div>
-            <div>BURN_RATE: <span id="burn-rate">-bash.05/task</span></div>
-            <button onclick="triggerRevenue('affiliate')">TRIGGER_AFFILIATE_REVENUE</button>
-            <button onclick="triggerRevenue('bounty')">TRIGGER_BOUNTY_REVENUE</button>
+            <h2>BUSINESS_COMMAND_CENTER</h2>
+            <div class="metrics">EMPIRE_REVENUE: <span id="empire-revenue">-bash.00</span></div>
+            <div>ACTIVE_PROJECTS: <span id="active-projects">0</span></div>
+            <div class="foresight" id="strategic-foresight">Analyzing global markets for autonomous expansion...</div>
+            <button onclick="triggerRevenue('affiliate')">EXPAND_AFFILIATE_NETWORK</button>
+            <button onclick="triggerRevenue('bounty')">HUNT_NEW_BOUNTIES</button>
+        </div>
+
+        <div class="card">
+            <h2>ENTERPRISE_INFRASTRUCTURE</h2>
+            <div>SCALING_STATUS: <span id="scaling-status" style="color:var(--rhel-red)">STABLE</span></div>
+            <div style="margin: 10px 0;">RESOURCE_OPTIMIZATION: <span id="resource-opt" style="color:#888">N/A</span></div>
+            <button class="btn-rhel" onclick="toggleRHEL()">TOGGLE_RHEL_MODE</button>
+            <button onclick="deployNewSwarm()">SCALE_SWARM_CAPACITY</button>
         </div>
 
         <div class="card">
             <h2>SWARM_INTELLIGENCE</h2>
             <div>TOTAL_AGENTS: <span id="total-agents">0</span></div>
-            <div id="swarm-metrics" style="margin-top:10px;">
+            <div id="swarm-metrics" style="margin-top:10px; font-size: 0.8rem;">
                 <!-- Dynamically populated -->
             </div>
-            <button onclick="refreshSwarm()">REFRESH_SWARM_METRICS</button>
+            <button onclick="refreshSwarm()">RECALIBRATE_SWARM</button>
         </div>
 
         <div class="card">
@@ -140,24 +180,18 @@
             <div id="reflections" class="reflection-log">
                 Waiting for AGI reflections...
             </div>
-            <button onclick="updateReflections()">PULL_REFLECTIONS</button>
-        </div>
-
-        <div class="card">
-            <h2>FOUNDER_OS_COMMANDS</h2>
-            <div style="display:flex; gap:10px;">
-                <button onclick="toggleAGI()">TOGGLE_AGI_MODE</button>
-                <button onclick="deployNewSwarm()">DEPLOY_NEW_SWARM</button>
-            </div>
-            <button style="border-color:var(--neon-pink); color:var(--neon-pink);" onclick="emergencyKill()">EMERGENCY_KILL_SWITCH</button>
+            <button onclick="updateReflections()">PULL_STRATEGIC_LOGS</button>
         </div>
     </div>
 
     <script>
-        async function updateFinancials() {
-            const res = await fetch('/economic/ledger/summary').then(r => r.json());
-            document.getElementById('revenue').innerText = `$${res.total_revenue.toFixed(2)}`;
-            document.getElementById('balance').innerText = `$${res.balance.toFixed(2)}`;
+        async function updateBusinessMetrics() {
+            const res = await fetch('/admin/business-metrics').then(r => r.json());
+            document.getElementById('empire-revenue').innerText = `$${res.empire_revenue.toFixed(2)}`;
+            document.getElementById('active-projects').innerText = res.active_projects;
+            document.getElementById('strategic-foresight').innerText = res.strategic_foresight;
+            document.getElementById('scaling-status').innerText = res.scaling_status;
+            document.getElementById('resource-opt').innerText = res.resource_optimization;
         }
 
         async function updateSwarm() {
@@ -166,7 +200,7 @@
             let total = 0;
             container.innerHTML = Object.entries(res).map(([k, v]) => {
                 total += v.total;
-                return `<div>[${k.toUpperCase()}] IDLE: ${v.idle} | WORK: ${v.working}</div>`;
+                return `<div>[${k.toUpperCase()}] ACTIVE: ${v.working} | STANDBY: ${v.idle}</div>`;
             }).join('');
             document.getElementById('total-agents').innerText = total;
         }
@@ -177,11 +211,27 @@
             if (!res || res.length === 0) return;
             container.innerHTML = res.reverse().map(r => `
                 <div class="reflection-entry">
-                    <div style="color:var(--neon-pink)">[${r.timestamp}] ${r.vertical.toUpperCase()} ANALYSIS</div>
+                    <div style="color:var(--neon-purple)">[${r.timestamp}] ${r.vertical.toUpperCase()} ANALYSIS</div>
                     <div>${r.analysis}</div>
-                    <div class="suggestion">SUGGESTIONS: ${r.suggestions.join(' | ')}</div>
+                    <div style="color:var(--neon-cyan); font-size: 0.75rem; margin-top:5px;">SUGGESTIONS: ${r.suggestions.join(' | ')}</div>
                 </div>
             `).join('');
+        }
+
+        async function syncRHEL() {
+            const res = await fetch('/admin/rhel-mode').then(r => r.json());
+            document.getElementById('rhel-badge').style.display = res.enabled ? 'block' : 'none';
+        }
+
+        async function toggleRHEL() {
+            const badge = document.getElementById('rhel-badge');
+            const current = badge.style.display === 'block';
+            await fetch('/admin/rhel-mode', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled: !current})
+            });
+            syncRHEL();
         }
 
         async function triggerRevenue(v) {
@@ -189,27 +239,17 @@
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'}
             });
-            alert(`${v} revenue swarm triggered!`);
-        }
-
-        async function toggleAGI() {
-            const current = document.getElementById('agi-status').innerText === 'ACTIVE';
-            await fetch('/admin/agi-mode', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({enabled: !current})
-            });
-            document.getElementById('agi-status').innerText = !current ? 'ACTIVE' : 'INACTIVE';
-            document.getElementById('agi-status').style.color = !current ? 'var(--neon-pink)' : '#666';
+            alert(`Swarm ${v} expansion sequence initiated.`);
         }
 
         // Initialize
-        setInterval(updateFinancials, 5000);
+        setInterval(updateBusinessMetrics, 5000);
         setInterval(updateSwarm, 5000);
         setInterval(updateReflections, 10000);
-        updateFinancials();
+        updateBusinessMetrics();
         updateSwarm();
         updateReflections();
+        syncRHEL();
 
         // Clock
         setInterval(() => {

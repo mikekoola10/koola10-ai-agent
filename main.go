@@ -1,6 +1,9 @@
 package main
 
 import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"bufio"
 	"bytes"
 	"context"
@@ -358,6 +361,11 @@ var (
 	rlLastUpdate = time.Now()
 	rlMu         sync.Mutex
 	agiMode      bool = true
+	rhelMode     bool = false
+	swarmThroughput = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "swarm_tasks_completed_total",
+		Help: "The total number of processed tasks by the swarm",
+	})
 	reflectLogs  []ReflectionLog
 
 
@@ -461,9 +469,10 @@ func main() {
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
 	globalSwarmManager.RevenueLogger = fundManager.RouteRevenue
+	agents.SwarmTaskCounter = func() { swarmThroughput.Inc() }
 
 	// Initialize High-Growth Founder Mode
-	founderPrompt := "High-Growth Founder Mode: Speed is a competitive advantage. Build leverage through automation. First-principles thinking. High agency + extreme ownership. Think in 10x-100x."
+	founderPrompt := "A.S.K. Agency - AI That Builds Empires: Delivering enterprise-grade AGI results with a creative edge. High-Growth Founder Mode active."
 	globalSwarmManager.SetGlobalPrompt(founderPrompt)
 
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
@@ -598,6 +607,10 @@ func main() {
 	r.Post("/admin/scheduler/run", corsMiddleware(authMiddleware(handleSchedulerRun)))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
+	r.Post("/admin/rhel-mode", authMiddleware(handleAdminRHELMode))
+	r.Get("/admin/rhel-mode", corsMiddleware(handleGetRHELMode))
+	r.Handle("/metrics", promhttp.Handler())
+	r.Get("/admin/business-metrics", corsMiddleware(handleBusinessMetrics))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
@@ -645,6 +658,10 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
@@ -706,6 +723,10 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
@@ -1329,6 +1350,10 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 	prompt := fmt.Sprintf("Draft narrative for %s from %s. Mission: %s", grant.Title, req.OrgName, req.OrgMission)
 	dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
 	dsBody, _ := json.Marshal(dsReq); hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey); hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq); if err != nil { http.Error(w, "api failed", 500); return }; defer resp.Body.Close()
 	var dsRes struct { Choices []struct { Message struct { Content string } }; Usage struct { TotalTokens int } }
@@ -1389,6 +1414,10 @@ func handleMonitor(w http.ResponseWriter, r *http.Request) {
 				dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
 				dsBody, _ := json.Marshal(dsReq)
 				hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 				hReq.Header.Set("Authorization", "Bearer "+apiKey)
 				hReq.Header.Set("Content-Type", "application/json")
 				resp, err := (&http.Client{}).Do(hReq)
@@ -1456,6 +1485,10 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
@@ -2114,6 +2147,10 @@ func PerformRecursiveReflection(vertical, task, result string) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 
@@ -2188,5 +2225,35 @@ func handleMarketplaceSale(w http.ResponseWriter, r *http.Request) {
 		"status": "sold",
 		"product": req.ProductID,
 		"earned": req.Price,
+	})
+}
+
+func handleAdminRHELMode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	rhelMode = req.Enabled
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Red Hat Enterprise Mode set to %v", rhelMode)
+}
+
+func handleGetRHELMode(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"enabled": rhelMode})
+}
+
+func handleBusinessMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	// Mocking some business metrics for the command center
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"empire_revenue": globalLedger.TotalRevenue,
+		"active_projects": 12,
+		"strategic_foresight": "Expanding swarm intelligence to specialized RHEL-optimized clusters.",
+		"scaling_status": "HIGH_AVAILABILITY_ACTIVE",
+		"resource_optimization": "Memory utilization optimized via UBI-minimal base layers.",
 	})
 }
