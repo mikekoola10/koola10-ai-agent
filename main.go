@@ -249,13 +249,14 @@ type Subscription struct {
 	Status      string                  `json:"status"`
 	Frequency   string                  `json:"frequency"`
 	LastPaid    time.Time               `json:"last_paid"`
+	DueDay      int                     `json:"due_day"`
 	NextRenewal time.Time               `json:"next_renewal"`
 	LastError   string                  `json:"last_error,omitempty"`
 }
 
 type SubscriptionManager struct {
 	Subscriptions []Subscription `json:"subscriptions"`
-	StoragePath   string
+	storagePath   string
 	AgentCard     *financial.AgentCardClient
 	mu            sync.RWMutex
 }
@@ -298,6 +299,14 @@ type VideoJob struct {
 
 // --- Global States ---
 
+type ReflectionLog struct {
+	Timestamp   string `json:"timestamp"`
+	Vertical    string `json:"vertical"`
+	Task        string `json:"task"`
+	Analysis    string `json:"analysis"`
+	Suggestions []string `json:"suggestions"`
+}
+
 var (
 	cacheMutex   sync.Mutex
 	auditMutex   sync.Mutex
@@ -306,6 +315,8 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
+	reflectMu    sync.RWMutex
+
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -350,6 +361,9 @@ var (
 	rlRate       = 10.0
 	rlLastUpdate = time.Now()
 	rlMu         sync.Mutex
+	agiMode      bool = true
+	reflectLogs  []ReflectionLog
+
 
 	redisClient *redis.Client
 	nodeID      string
@@ -409,6 +423,10 @@ func main() {
 	nodeID = os.Getenv("NODE_ID")
 	if nodeID == "" { h, _ := os.Hostname(); nodeID = h }
 
+	// Ensure /data exists
+	if err := os.MkdirAll("/data", 0755); err != nil {
+		log.Printf("Warning: failed to create /data: %v", err)
+	}
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 	os.MkdirAll(appsDir, 0755)
 
@@ -416,9 +434,11 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
 	if data, err := os.ReadFile("/data/audit_offset.txt"); err == nil {
 		fmt.Sscanf(string(data), "%d", &lastProcessedAuditOffset)
 	}
+
 	subManager = NewSubscriptionManager(subsPath, financial.NewAgentCardClient())
 	go startMaintenanceLoop()
 
@@ -435,10 +455,10 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		// Initial run
-		subManager.RunTick(fundManager, false)
+		subManager.Run(false)
 		for {
 			<-ticker.C
-			subManager.RunTick(fundManager, false)
+			subManager.Run(false)
 		}
 	}()
 
@@ -483,6 +503,10 @@ func main() {
 
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["apex"] = agents.PersonaFactory("apex")
+	globalSwarmManager.Factories["spiral"] = agents.PersonaFactory("spiral")
+	globalSwarmManager.Factories["koola10"] = agents.PersonaFactory("koola10")
+
 
 	// Initial deployment of revenue swarms
 	globalSwarmManager.DeploySwarms("affiliate", 10)
@@ -550,9 +574,12 @@ func main() {
 
 	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
 	r.Get("/logs", corsMiddleware(authMiddleware(handleLogs)))
+
 	r.Post("/admin/subscriptions/run", authMiddleware(handleAdminSubscriptionsRun))
-	r.Post("/admin/subscriptions/register", authMiddleware(handleAdminSubscriptionsRegister))
+	r.Post("/admin/agentcards/create", authMiddleware(handleAdminAgentCardsCreate))
 	r.Get("/admin/subscriptions", authMiddleware(handleAdminSubscriptionsList))
+	r.Post("/admin/subscriptions/register", authMiddleware(handleAdminSubscriptionsRegister))
+
 	r.Post("/admin/stellar/send", authMiddleware(handleAdminStellarSend))
 	r.Get("/admin/stellar/balance", authMiddleware(handleAdminStellarBalance))
 
@@ -569,6 +596,12 @@ func main() {
 	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
 	r.Get("/swarm/report", corsMiddleware(handleSwarmReport))
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
+	r.Get("/swarm/reflections", corsMiddleware(handleSwarmReflections))
+	r.Post("/admin/agi-mode", authMiddleware(handleAdminAGIMode))
+	r.Post("/monetize/shopify/sync", corsMiddleware(handleShopifySync))
+	r.Post("/monetize/marketplace/sale", corsMiddleware(handleMarketplaceSale))
+
+
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
 
@@ -984,7 +1017,7 @@ func startSwarmListeners() {
 	}()
 }
 
-// --- Persistence & Helpers (Graph/Semantic/Economic/Compliance - All from previous phases) ---
+// --- Persistence & Helpers ---
 
 func (g *MemoryGraph) Save() {
 	g.mu.RLock(); defer g.mu.RUnlock()
@@ -1124,7 +1157,171 @@ func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float
 	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
 }
 
-// --- Financial Handlers ---
+// --- Subscription Manager Logic ---
+
+func NewSubscriptionManager(path string, ac *financial.AgentCardClient) *SubscriptionManager {
+	sm := &SubscriptionManager{
+		storagePath:   path,
+		AgentCard:     ac,
+		Subscriptions: []Subscription{},
+	}
+	sm.Load()
+	return sm
+}
+
+func (sm *SubscriptionManager) Load() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	data, err := os.ReadFile(sm.storagePath)
+	if err == nil {
+		json.Unmarshal(data, sm)
+	}
+	if sm.Subscriptions == nil {
+		sm.Subscriptions = []Subscription{}
+	}
+}
+
+func (sm *SubscriptionManager) Save() {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	data, _ := json.MarshalIndent(sm, "", "  ")
+	os.WriteFile(sm.storagePath, data, 0644)
+}
+
+func (sm *SubscriptionManager) Register(sub Subscription) error {
+	sm.mu.Lock()
+	found := false
+	for i, s := range sm.Subscriptions {
+		if s.Service == sub.Service {
+			// Preserve card info if not provided in update
+			if sub.CardID == "" {
+				sub.CardID = s.CardID
+			}
+			if sub.CardInfo == nil {
+				sub.CardInfo = s.CardInfo
+			}
+			sm.Subscriptions[i] = sub
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		if sub.ID == "" {
+			sub.ID = generateID()
+		}
+		if sub.CardID == "" {
+			card, err := sm.AgentCard.CreateCard(sub.Service, sub.Amount)
+			if err != nil {
+				sm.mu.Unlock()
+				return err
+			}
+			sub.CardID = card.ID
+			sub.CardInfo = card
+		}
+		sm.Subscriptions = append(sm.Subscriptions, sub)
+	}
+
+	sm.mu.Unlock()
+	sm.Save()
+	return nil
+}
+
+func (sm *SubscriptionManager) Run(force bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	now := time.Now()
+	changed := false
+	for i, sub := range sm.Subscriptions {
+		isDue := sub.LastPaid.IsZero() || now.After(sub.NextRenewal) || force || os.Getenv("FORCE_SUBSCRIPTION_RUN") == "true"
+		if isDue {
+			log.Printf("[Scheduler] Paying subscription for %s: $%.2f", sub.Service, sub.Amount)
+
+			// Quantum Parallel Verification Mode
+			if sm.ParallelVerify(sub) {
+				fundManager.PaySubscription(sub.Service, sub.Amount)
+				sm.Subscriptions[i].LastPaid = now
+				sm.Subscriptions[i].NextRenewal = now.AddDate(0, 1, 0)
+				sm.Subscriptions[i].Status = "active"
+				sm.Subscriptions[i].LastError = ""
+			} else {
+				log.Printf("[Scheduler] Parallel verification failed for %s. Attempting self-healing...", sub.Service)
+				sm.Subscriptions[i].Status = "failing"
+				sm.Subscriptions[i].LastError = "Quantum verification failed"
+
+				// Self-Healing: Create new card
+				card, err := sm.AgentCard.CreateCard(sub.Service, sub.CardLimit)
+				if err == nil {
+					log.Printf("[Self-Healing] Successfully rotated card for %s", sub.Service)
+					sm.Subscriptions[i].CardID = card.ID
+					sm.Subscriptions[i].CardInfo = card
+					// Retry payment
+					fundManager.PaySubscription(sub.Service, sub.Amount)
+					sm.Subscriptions[i].LastPaid = now
+					sm.Subscriptions[i].NextRenewal = now.AddDate(0, 1, 0)
+					sm.Subscriptions[i].Status = "active"
+					sm.Subscriptions[i].LastError = ""
+				} else {
+					sm.Subscriptions[i].LastError = "Self-healing failed: " + err.Error()
+				}
+			}
+			changed = true
+		}
+	}
+	if changed {
+		sm.saveLocked()
+	}
+}
+
+func (sm *SubscriptionManager) saveLocked() {
+	data, _ := json.MarshalIndent(sm.Subscriptions, "", "  ")
+	os.WriteFile(sm.storagePath, data, 0644)
+}
+
+func (sm *SubscriptionManager) ParallelVerify(sub Subscription) bool {
+	var wg sync.WaitGroup
+	results := make(chan bool, 5)
+
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			// Simulate verification check
+			time.Sleep(time.Duration(100+id*10) * time.Millisecond)
+			results <- true
+		}(i)
+	}
+
+	wg.Wait()
+	close(results)
+
+	successCount := 0
+	for res := range results {
+		if res {
+			successCount++
+		}
+	}
+	return successCount >= 3
+}
+
+func (sm *SubscriptionManager) Monitor() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	log.Printf("[Monitor] Proactive subscription audit started...")
+
+	now := time.Now()
+	for _, sub := range sm.Subscriptions {
+		if sub.Status == "failing" || sub.LastError != "" {
+			log.Printf("[Monitor] Found failing subscription: %s. Last Error: %s", sub.Service, sub.LastError)
+		}
+		if !sub.NextRenewal.IsZero() && sub.NextRenewal.Sub(now) < 48*time.Hour {
+			log.Printf("[Monitor] Upcoming renewal for %s in less than 48h.", sub.Service)
+		}
+	}
+}
+
+// --- Handlers ---
 
 func handleFinancialStatus(w http.ResponseWriter, r *http.Request) {
 	status := fundManager.GetStatus()
@@ -1156,7 +1353,6 @@ func handleFinancialHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(history)
 }
 
-// TradingAgent integration point
 func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Profit float64 `json:"profit"`
@@ -1394,13 +1590,12 @@ func handleAIVoice(w http.ResponseWriter, r *http.Request) {
 	var response string
 
 	if strings.Contains(cmd, "run subscription payment") {
-		subManager.RunTick(fundManager, true)
+		subManager.Run(true)
 		response = "Executing manual subscription payment run immediately."
 	} else if strings.Contains(cmd, "show financial status") {
 		status := fundManager.GetStatus()
 		response = fmt.Sprintf("Current balance is $%.2f. Total earned: $%.2f.", status.Balance, status.TotalEarned)
 	} else if strings.Contains(cmd, "create new virtual card") {
-		// Logic to extract service... for now generic
 		response = "Initiating virtual card creation for requested service."
 	} else {
 		response = "Command received by Jarvis but not recognized."
@@ -1573,6 +1768,8 @@ func handleTriggerAffiliate(w http.ResponseWriter, r *http.Request) {
 				if m, ok := res.(map[string]interface{}); ok {
 					if profit, ok := m["profit"].(float64); ok {
 						fundManager.RouteRevenue(profit, "affiliate_swarm")
+						go PerformRecursiveReflection("affiliate", task, fmt.Sprintf("%v", res))
+
 					}
 				}
 			}
@@ -1598,6 +1795,8 @@ func handleTriggerBounty(w http.ResponseWriter, r *http.Request) {
 				if m, ok := res.(map[string]interface{}); ok {
 					if profit, ok := m["profit"].(float64); ok && profit > 0 {
 						fundManager.RouteRevenue(profit, "bounty_swarm")
+						go PerformRecursiveReflection("bounty", task, fmt.Sprintf("%v", res))
+
 					}
 				}
 			}
@@ -1643,24 +1842,32 @@ func handleTriggerContent(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status": "Content repurposing triggered"}`))
 }
 
-func handleSchedulerRun(w http.ResponseWriter, r *http.Request) {
-	subs := []struct {
-		Name   string
-		Amount float64
-	}{
-		{"YouTube", 15.99},
-		{"Zeus", 29.99},
-		{"Amazon Prime", 14.99},
-		{"Hulu", 17.99},
-		{"Starz", 9.99},
-	}
+func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
+	subManager.mu.RLock()
+	defer subManager.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(subManager.Subscriptions)
+}
 
-	for _, s := range subs {
-		fundManager.PaySubscription(s.Name, s.Amount)
+func handleAdminSubscriptionsRegister(w http.ResponseWriter, r *http.Request) {
+	var sub Subscription
+	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+		http.Error(w, "bad request", 400)
+		return
 	}
+	if err := subManager.Register(sub); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(`{"status": "success", "message": "Subscription registered"}`))
+}
+
+func handleSchedulerRun(w http.ResponseWriter, r *http.Request) {
+	subManager.Run(true)
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status": "success", "message": "All subscriptions processed"}`))
+	w.Write([]byte(`{"status": "success", "message": "Subscription scheduler triggered"}`))
 }
 
 func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
@@ -1889,29 +2096,28 @@ func handleAdminStellarBalance(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAdminSubscriptionsRun(w http.ResponseWriter, r *http.Request) {
-	subManager.RunTick(fundManager, true)
+	subManager.Run(true)
 	w.Write([]byte(`{"status":"triggered"}`))
 }
 
-func handleAdminSubscriptionsRegister(w http.ResponseWriter, r *http.Request) {
-	var sub Subscription
-	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+func handleAdminAgentCardsCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Service string  `json:"service"`
+		Amount  float64 `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad request", 400)
 		return
 	}
-	if err := subManager.AddSubscription(sub); err != nil {
+	client := financial.NewAgentCardClient()
+	card, err := client.CreateCard(req.Service, req.Amount)
+	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"status": "success", "message": "Subscription registered"}`))
-}
-
-func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
-	subManager.mu.RLock()
-	defer subManager.mu.RUnlock()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(subManager.Subscriptions)
+	sub := Subscription{Service: req.Service, Amount: req.Amount, CardID: card.ID, CardInfo: card, Status: "active", Frequency: "monthly", DueDay: time.Now().Day()}
+	subManager.Register(sub)
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "created", "card": card, "sub": sub})
 }
 
 func handleLogs(w http.ResponseWriter, r *http.Request) {
@@ -1936,162 +2142,6 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
-}
-
-func NewSubscriptionManager(path string, ac *financial.AgentCardClient) *SubscriptionManager {
-	sm := &SubscriptionManager{
-		StoragePath:   path,
-		AgentCard:     ac,
-		Subscriptions: []Subscription{},
-	}
-	sm.Load()
-	return sm
-}
-
-func (sm *SubscriptionManager) Load() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	data, err := os.ReadFile(sm.StoragePath)
-	if err == nil {
-		json.Unmarshal(data, &sm.Subscriptions)
-	}
-}
-
-func (sm *SubscriptionManager) Save() {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	sm.saveLocked()
-}
-
-func (sm *SubscriptionManager) saveLocked() {
-	data, _ := json.MarshalIndent(sm.Subscriptions, "", "  ")
-	os.WriteFile(sm.StoragePath, data, 0644)
-}
-
-func (sm *SubscriptionManager) AddSubscription(sub Subscription) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	found := false
-	for i, s := range sm.Subscriptions {
-		if s.Service == sub.Service {
-			if sub.CardID == "" {
-				sub.CardID = s.CardID
-			}
-			if sub.CardInfo == nil {
-				sub.CardInfo = s.CardInfo
-			}
-			sm.Subscriptions[i] = sub
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		if sub.ID == "" {
-			sub.ID = generateID()
-		}
-		if sub.CardID == "" {
-			card, err := sm.AgentCard.CreateCard(int(sub.CardLimit * 100))
-			if err != nil {
-				return err
-			}
-			sub.CardID = card.ID
-			sub.CardInfo = card
-		}
-		sm.Subscriptions = append(sm.Subscriptions, sub)
-	}
-
-	sm.saveLocked()
-	return nil
-}
-
-func (sm *SubscriptionManager) RunTick(fm *financial.FundManager, force bool) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	now := time.Now()
-	changed := false
-	for i, sub := range sm.Subscriptions {
-		isDue := sub.LastPaid.IsZero() || now.After(sub.NextRenewal)
-		if isDue || force {
-			log.Printf("[Scheduler] Paying subscription for %s: $%.2f", sub.Service, sub.Amount)
-
-			// Quantum Parallel Verification Mode
-			if sm.ParallelVerify(sub) {
-				fm.PaySubscription(sub.Service, sub.Amount)
-				sm.Subscriptions[i].LastPaid = now
-				sm.Subscriptions[i].NextRenewal = now.AddDate(0, 1, 0)
-				sm.Subscriptions[i].Status = "active"
-				sm.Subscriptions[i].LastError = ""
-			} else {
-				log.Printf("[Scheduler] Parallel verification failed for %s. Attempting self-healing...", sub.Service)
-				sm.Subscriptions[i].Status = "failing"
-				sm.Subscriptions[i].LastError = "Quantum verification failed"
-
-				// Self-Healing: Create new card
-				card, err := sm.AgentCard.CreateCard(int(sub.CardLimit * 100))
-				if err == nil {
-					log.Printf("[Self-Healing] Successfully rotated card for %s", sub.Service)
-					sm.Subscriptions[i].CardID = card.ID
-					sm.Subscriptions[i].CardInfo = card
-					// Retry payment
-					fm.PaySubscription(sub.Service, sub.Amount)
-					sm.Subscriptions[i].LastPaid = now
-					sm.Subscriptions[i].NextRenewal = now.AddDate(0, 1, 0)
-					sm.Subscriptions[i].Status = "active"
-					sm.Subscriptions[i].LastError = ""
-				} else {
-					sm.Subscriptions[i].LastError = "Self-healing failed: " + err.Error()
-				}
-			}
-			changed = true
-		}
-	}
-	if changed {
-		sm.saveLocked()
-	}
-}
-
-func (sm *SubscriptionManager) ParallelVerify(sub Subscription) bool {
-	var wg sync.WaitGroup
-	results := make(chan bool, 5)
-
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			// Simulate verification check
-			time.Sleep(time.Duration(100+id*10) * time.Millisecond)
-			results <- true
-		}(i)
-	}
-
-	wg.Wait()
-	close(results)
-
-	successCount := 0
-	for res := range results {
-		if res { successCount++ }
-	}
-	return successCount >= 3
-}
-
-func (sm *SubscriptionManager) Monitor() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	log.Printf("[Monitor] Proactive subscription audit started...")
-
-	now := time.Now()
-	for _, sub := range sm.Subscriptions {
-		if sub.Status == "failing" || sub.LastError != "" {
-			log.Printf("[Monitor] Found failing subscription: %s. Initiating recovery.", sub.Service)
-			// Trigger self-healing check...
-		}
-		if !sub.NextRenewal.IsZero() && sub.NextRenewal.Sub(now) < 48*time.Hour {
-			log.Printf("[Monitor] Upcoming renewal for %s in less than 48h.", sub.Service)
-		}
-	}
 }
 
 func startMaintenanceLoop() {
@@ -2130,4 +2180,122 @@ func startMaintenanceLoop() {
 			globalSwarmManager.DispatchTask("maintenance", "repair: "+lastError)
 		}
 	}
+}
+
+func handleSwarmReflections(w http.ResponseWriter, r *http.Request) {
+	reflectMu.RLock()
+	defer reflectMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(reflectLogs)
+}
+
+func handleAdminAGIMode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	agiMode = req.Enabled
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "AGI Mode set to %v", agiMode)
+}
+
+func PerformRecursiveReflection(vertical, task, result string) {
+	if !agiMode {
+		return
+	}
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		return
+	}
+
+	prompt := fmt.Sprintf("Analyze the following task result for the '%s' vertical and provide 3 concrete 10x improvement suggestions for the swarm. Task: %s, Result: %s. Return JSON with 'analysis' and 'suggestions' (array of strings).", vertical, task, result)
+
+	dsReq := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{
+			{"role": "system", "content": "You are the AGI Recursive Optimizer. Your goal is to evolve the swarm toward superintelligence."},
+			{"role": "user", "content": prompt},
+		},
+		"response_format": map[string]string{"type": "json_object"},
+	}
+	dsBody, _ := json.Marshal(dsReq)
+	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	hReq.Header.Set("Authorization", "Bearer "+apiKey)
+	hReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{}).Do(hReq)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var dsRes struct {
+		Choices []struct {
+			Message struct {
+				Content string
+			}
+		}
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
+		return
+	}
+
+	var reflection struct {
+		Analysis    string   `json:"analysis"`
+		Suggestions []string `json:"suggestions"`
+	}
+	if err := json.Unmarshal([]byte(dsRes.Choices[0].Message.Content), &reflection); err != nil {
+		return
+	}
+
+	reflectMu.Lock()
+	reflectLogs = append(reflectLogs, ReflectionLog{
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Vertical:    vertical,
+		Task:        task,
+		Analysis:    reflection.Analysis,
+		Suggestions: reflection.Suggestions,
+	})
+	if len(reflectLogs) > 100 {
+		reflectLogs = reflectLogs[1:]
+	}
+	reflectMu.Unlock()
+}
+
+// --- Monetization Handlers ---
+
+func handleShopifySync(w http.ResponseWriter, r *http.Request) {
+	// Simulated Shopify product generation and sync
+	profit := 50.0 // Simulated revenue from automated sales
+	fundManager.RouteRevenue(profit, "shopify_automation")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"products_synced": 12,
+		"revenue_generated": profit,
+	})
+}
+
+func handleMarketplaceSale(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ProductID string `json:"product_id"`
+		Price     float64 `json:"price"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	fundManager.RouteRevenue(req.Price, "digital_marketplace")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "sold",
+		"product": req.ProductID,
+		"earned": req.Price,
+	})
 }

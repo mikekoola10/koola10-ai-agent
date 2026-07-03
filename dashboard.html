@@ -3,148 +3,246 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Admin</title>
+    <title>Digital Mancave V3.0 - ASK Agency</title>
     <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; line-height: 1.4; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
-        .card { border: 1px solid #333; padding: 15px; background: #111; }
-        .status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
-        .online { background: #0f0; box-shadow: 0 0 5px #0f0; }
-        .offline { background: #f00; }
-        h1, h2 { color: #fff; margin-top: 0; }
-        button { background: #333; color: #fff; border: 1px solid #555; padding: 8px 12px; cursor: pointer; font-family: monospace; }
-        button:hover { background: #444; }
-        button:disabled { opacity: 0.5; }
-        .red { color: #f00; border-color: #f00; }
-        .red:hover { background: #300; }
-        pre { font-size: 12px; overflow-x: auto; color: #aaa; }
-        .node { border-bottom: 1px solid #222; padding: 5px 0; }
+        :root {
+            --neon-green: #0f0;
+            --neon-blue: #0ff;
+            --neon-pink: #f0f;
+            --dark-bg: #0a0a0a;
+            --leather: #1a1a1a;
+        }
+        body {
+            background: var(--dark-bg);
+            color: var(--neon-green);
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            z-index: 1000;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--neon-green);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px var(--neon-green);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: var(--leather);
+            border: 1px solid #333;
+            padding: 20px;
+            position: relative;
+            box-shadow: inset 0 0 15px #000;
+        }
+        .card h2 {
+            margin-top: 0;
+            color: var(--neon-blue);
+            font-size: 1.2rem;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+        }
+        .metrics {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px; height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .active { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); }
+        .agi-mode { color: var(--neon-pink); font-weight: bold; }
+
+        button {
+            background: transparent;
+            color: var(--neon-green);
+            border: 1px solid var(--neon-green);
+            padding: 10px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+            text-transform: uppercase;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background: var(--neon-green);
+            color: #000;
+            box-shadow: 0 0 20px var(--neon-green);
+        }
+        .reflection-log {
+            height: 200px;
+            overflow-y: auto;
+            background: #000;
+            padding: 10px;
+            font-size: 0.8rem;
+            border: 1px solid #222;
+        }
+        .reflection-entry {
+            margin-bottom: 10px;
+            border-bottom: 1px solid #111;
+            padding-bottom: 5px;
+        }
+        .suggestion { color: var(--neon-blue); }
     </style>
 </head>
 <body>
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>AGENT_ADMIN_PANEL v1.0</h1>
-        <div style="text-align: right;">
-            <div>
-                <span id="status-dot" class="status online"></span>
-                <span id="status-text">SYSTEM_NOMINAL</span>
-            </div>
-            <div style="color: #0ff; font-size: 10px; margin-top: 5px; font-weight: bold;">
-                FOUNDER_MODE: <span id="founder-mode">ACTIVE</span>
-            </div>
+    <header>
+        <div>
+            <h1 style="margin:0;">APEX_SPIRAL_KOOLA10_AGENCY v3.0</h1>
+            <div class="agi-mode">AGI_MODE: <span id="agi-status">ACTIVE</span></div>
+        </div>
+        <div style="text-align:right;">
+            <div>FOUNDER_MODE: <span style="color:var(--neon-pink)">ACTIVE</span></div>
+            <div id="clock">00:00:00</div>
         </div>
     </header>
 
     <div class="grid">
         <div class="card">
-            <h2>FINANCIAL_LEDGER</h2>
-            <div>BALANCE: <span id="balance">$0.00</span></div>
-            <div>COSTS:   <span id="costs">$0.00</span></div>
-            <div>REVENUE: <span id="revenue">$0.00</span></div>
-            <div style="margin-top:10px;">ROI_RATIO: <span id="roi">0.00</span>x</div>
+            <h2>FINANCIAL_OVERVIEW</h2>
+            <div class="metrics">REVENUE: <span id="revenue">-bash.00</span></div>
+            <div class="metrics">BALANCE: <span id="balance">-bash.00</span></div>
+            <div>BURN_RATE: <span id="burn-rate">-bash.05/task</span></div>
+            <button onclick="triggerRevenue('affiliate')">TRIGGER_AFFILIATE_REVENUE</button>
+            <button onclick="triggerRevenue('bounty')">TRIGGER_BOUNTY_REVENUE</button>
+        </div>
+
+        <div class="card">
+            <h2>SWARM_INTELLIGENCE</h2>
+            <div>TOTAL_AGENTS: <span id="total-agents">0</span></div>
+            <div id="swarm-metrics" style="margin-top:10px;">
+                <!-- Dynamically populated -->
+            </div>
+            <button onclick="refreshSwarm()">REFRESH_SWARM_METRICS</button>
         </div>
 
         <div class="card">
             <h2>FINANCIAL_SWARM</h2>
-            <div id="subs-list">Scanning cards...</div>
+            <div id="subs-list" class="reflection-log">
+                Scanning cards...
+            </div>
+            <button onclick="updateFinancialSwarm()">REFRESH_CARDS</button>
         </div>
 
         <div class="card">
-            <h2>CONTROL_CENTER</h2>
-            <div style="margin-bottom: 10px;">
-                PENDING_APPROVALS: <span id="approvals-count">0</span>
+            <h2>RECURSIVE_REFLECTIONS</h2>
+            <div id="reflections" class="reflection-log">
+                Waiting for AGI reflections...
             </div>
-            <div style="display: flex; flex-direction: column; gap: 10px;">
-                <button onclick="triggerMonitor()">RUN_DAILY_MONITOR</button>
-                <button id="kill-btn" class="red" onclick="toggleKillSwitch()">ACTIVATE_KILL_SWITCH</button>
+            <button onclick="updateReflections()">PULL_REFLECTIONS</button>
+        </div>
+
+        <div class="card">
+            <h2>FOUNDER_OS_COMMANDS</h2>
+            <div style="display:flex; gap:10px;">
+                <button onclick="toggleAGI()">TOGGLE_AGI_MODE</button>
+                <button onclick="deployNewSwarm()">DEPLOY_NEW_SWARM</button>
             </div>
+            <button style="border-color:var(--neon-pink); color:var(--neon-pink);" onclick="emergencyKill()">EMERGENCY_KILL_SWITCH</button>
         </div>
     </div>
 
-    <div class="card" style="margin-top: 15px;">
-        <h2>SYSTEM_LOGS</h2>
-        <pre id="logs">Initializing telemetry...</pre>
-    </div>
-
     <script>
-        async function update() {
-            try {
-                // Ledger
-                const ledger = await fetch('/economic/ledger/summary').then(r => r.json());
-                document.getElementById('balance').innerText = `$${ledger.balance.toFixed(2)}`;
-                document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
-                document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
-                document.getElementById('roi').innerText = ledger.roi.toFixed(2);
-
-                // Nodes
-                const nodes = await fetch('/swarm/nodes').then(r => r.json());
-                const nodesDiv = document.getElementById('nodes-list');
-                if (nodes.length === 0) {
-                    nodesDiv.innerText = "No active nodes.";
-                } else {
-                    nodesDiv.innerHTML = nodes.map(n => `
-                        <div class="node">
-                            [${n.region}] ${n.node_id} - ${n.status}
-                        </div>
-                    `).join('');
-                }
-
-                // Financial Swarm
-                const subs = await fetch('/admin/subscriptions').then(r => r.json());
-                const subsDiv = document.getElementById('subs-list');
-                if (subs.length === 0) {
-                    subsDiv.innerText = "No active subscriptions.";
-                } else {
-                    subsDiv.innerHTML = subs.map(s => `
-                        <div class="node">
-                            <span style="color: ${s.status === 'active' ? '#0f0' : '#f00'}">●</span>
-                            <b>${s.service}</b>: $${s.amount} (${s.card_id})<br/>
-                            <small>RENEWAL: ${s.next_renewal ? new Date(s.next_renewal).toLocaleDateString() : 'PENDING'}</small>
-                        </div>
-                    `).join('');
-                }
-
-                // Approvals
-                const audit = await fetch('/compliance/audit').then(r => r.json());
-                const pending = audit.filter(e => e.action === 'approval_request_created');
-                document.getElementById('approvals-count').innerText = pending.length;
-
-                // Log a tick
-                const logs = document.getElementById('logs');
-                const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-                logs.innerText = `[${timestamp}] Telemetry update successful\n` + logs.innerText.split('\n').slice(0, 10).join('\n');
-
-            } catch (e) {
-                console.error(e);
-                document.getElementById('status-dot').className = 'status offline';
-                document.getElementById('status-text').innerText = 'CONNECTION_LOST';
-            }
+        async function updateFinancials() {
+            const res = await fetch('/economic/ledger/summary').then(r => r.json());
+            document.getElementById('revenue').innerText = `$${res.total_revenue.toFixed(2)}`;
+            document.getElementById('balance').innerText = `$${res.balance.toFixed(2)}`;
         }
 
-        async function triggerMonitor() {
-            const btn = event.target;
-            btn.disabled = true;
-            btn.innerText = 'EXECUTING...';
-            await fetch('/grants/monitor');
-            btn.innerText = 'MONITOR_COMPLETE';
-            setTimeout(() => { btn.disabled = false; btn.innerText = 'RUN_DAILY_MONITOR'; }, 2000);
+        async function updateSwarm() {
+            const res = await fetch('/swarm/metrics').then(r => r.json());
+            const container = document.getElementById('swarm-metrics');
+            let total = 0;
+            container.innerHTML = Object.entries(res).map(([k, v]) => {
+                total += v.total;
+                return `<div>[${k.toUpperCase()}] IDLE: ${v.idle} | WORK: ${v.working}</div>`;
+            }).join('');
+            document.getElementById('total-agents').innerText = total;
         }
 
-        async function toggleKillSwitch() {
-            const btn = document.getElementById('kill-btn');
-            if (btn.innerText.includes('ACTIVATE')) {
-                await fetch('/compliance/kill-switch', {method: 'POST'});
-                btn.innerText = 'RESET_KILL_SWITCH';
-                btn.className = '';
+        async function updateReflections() {
+            const res = await fetch('/swarm/reflections').then(r => r.json());
+            const container = document.getElementById('reflections');
+            if (!res || res.length === 0) return;
+            container.innerHTML = res.reverse().map(r => `
+                <div class="reflection-entry">
+                    <div style="color:var(--neon-pink)">[${r.timestamp}] ${r.vertical.toUpperCase()} ANALYSIS</div>
+                    <div>${r.analysis}</div>
+                    <div class="suggestion">SUGGESTIONS: ${r.suggestions.join(' | ')}</div>
+                </div>
+            `).join('');
+        }
+
+        async function triggerRevenue(v) {
+            await fetch(`/admin/trigger_${v}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            });
+            alert(`${v} revenue swarm triggered!`);
+        }
+
+        async function toggleAGI() {
+            const current = document.getElementById('agi-status').innerText === 'ACTIVE';
+            await fetch('/admin/agi-mode', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled: !current})
+            });
+            document.getElementById('agi-status').innerText = !current ? 'ACTIVE' : 'INACTIVE';
+            document.getElementById('agi-status').style.color = !current ? 'var(--neon-pink)' : '#666';
+        }
+
+        async function updateFinancialSwarm() {
+            const subs = await fetch('/admin/subscriptions').then(r => r.json());
+            const subsDiv = document.getElementById('subs-list');
+            if (!subs || subs.length === 0) {
+                subsDiv.innerText = "No active subscriptions.";
             } else {
-                await fetch('/compliance/kill-switch/reset', {method: 'POST'});
-                btn.innerText = 'ACTIVATE_KILL_SWITCH';
-                btn.className = 'red';
+                subsDiv.innerHTML = subs.map(s => `
+                    <div class="reflection-entry">
+                        <div style="color: ${s.status === 'active' ? 'var(--neon-green)' : 'var(--neon-pink)'}">
+                            [${s.status.toUpperCase()}] ${s.service.toUpperCase()}
+                        </div>
+                        <div>AMOUNT: $${s.amount.toFixed(2)} | CARD: ${s.card_id}</div>
+                        <div class="suggestion">RENEWAL: ${s.next_renewal ? new Date(s.next_renewal).toLocaleDateString() : 'PENDING'}</div>
+                    </div>
+                `).join('');
             }
         }
 
-        setInterval(update, 5000);
-        update();
+        // Initialize
+        setInterval(updateFinancials, 5000);
+        setInterval(updateSwarm, 5000);
+        setInterval(updateReflections, 10000);
+        setInterval(updateFinancialSwarm, 10000);
+        updateFinancials();
+        updateSwarm();
+        updateReflections();
+        updateFinancialSwarm();
+
+        // Clock
+        setInterval(() => {
+            document.getElementById('clock').innerText = new Date().toLocaleTimeString();
+        }, 1000);
     </script>
 </body>
 </html>

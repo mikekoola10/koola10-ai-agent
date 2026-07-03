@@ -1,5 +1,9 @@
-koola10
-agent.log
+# Go
+server
+/data
 *.log
-/data/
-browser-agent/data/
+
+# Node
+node_modules
+.next
+package-lock.json

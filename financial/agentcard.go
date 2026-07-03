@@ -10,21 +10,19 @@ import (
 )
 
 type AgentCardClient struct {
-	JWT     string
 	BaseURL string
+	JWT     string
 }
 
 type CardResponse struct {
 	ID          string `json:"id"`
-	Last4       string `json:"last4"`
-	ExpMonth    int    `json:"exp_month"`
-	ExpYear     int    `json:"exp_year"`
-	Status      string `json:"status"`
-	AmountCents int    `json:"amountCents"`
-
-	// Compatibility for Subscription struct
-	PAN string `json:"pan,omitempty"`
-	CVV string `json:"cvv,omitempty"`
+	PAN         string `json:"pan,omitempty"`
+	CVV         string `json:"cvv,omitempty"`
+	ExpMonth    interface{} `json:"exp_month"` // Can be string or int
+	ExpYear     interface{} `json:"exp_year"`  // Can be string or int
+	Last4       string `json:"last4,omitempty"`
+	Status      string `json:"status,omitempty"`
+	AmountCents int    `json:"amountCents,omitempty"`
 }
 
 type CardDetails struct {
@@ -38,31 +36,37 @@ func NewAgentCardClient() *AgentCardClient {
 		baseURL = "https://api.agentcard.sh/api/v1"
 	}
 	return &AgentCardClient{
-		JWT:     os.Getenv("AGENTCARD_JWT"),
 		BaseURL: baseURL,
+		JWT:     os.Getenv("AGENTCARD_JWT"),
 	}
 }
 
-func (c *AgentCardClient) CreateCard(amountCents int) (*CardResponse, error) {
-	if c.JWT == "" || c.JWT == "YOUR_AGENTCARD_JWT" || os.Getenv("AGENTCARD_MOCK") == "true" {
+func (ac *AgentCardClient) CreateCard(memo string, amountLimit float64) (*CardResponse, error) {
+	if ac.JWT == "" || ac.JWT == "YOUR_AGENTCARD_JWT" || os.Getenv("AGENTCARD_MOCK") == "true" {
+		// Mock for development if JWT is missing, placeholder, or mock requested
 		return &CardResponse{
-			ID:          "mock_card",
-			Last4:       "4444",
-			PAN:         "4111222233334444",
-			CVV:         "123",
-			ExpMonth:    12,
-			ExpYear:     2028,
-			Status:      "active",
-			AmountCents: amountCents,
+			ID:       "mock_" + memo,
+			PAN:      "4111222233334444",
+			CVV:      "123",
+			ExpMonth: "12",
+			ExpYear:  "2028",
 		}, nil
 	}
 
+	url := fmt.Sprintf("%s/cards", ac.BaseURL)
 	payload := map[string]interface{}{
-		"amountCents": amountCents,
+		"memo":         memo,
+		"amount_limit": amountLimit,
+		"amountCents":  int(amountLimit * 100), // Compatibility for both API versions
 	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", c.BaseURL+"/cards", bytes.NewBuffer(body))
-	req.Header.Set("Authorization", "Bearer "+c.JWT)
+
+	jsonPayload, _ := json.Marshal(payload)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+ac.JWT)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -71,28 +75,22 @@ func (c *AgentCardClient) CreateCard(amountCents int) (*CardResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("agentcard api error (%d): %s", resp.StatusCode, string(respBody))
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
 	}
 
 	var card CardResponse
 	if err := json.NewDecoder(resp.Body).Decode(&card); err != nil {
 		return nil, err
 	}
+
 	return &card, nil
 }
 
-func (c *AgentCardClient) GetCardDetails(cardID string) (*CardDetails, error) {
-	if c.JWT == "" || c.JWT == "YOUR_AGENTCARD_JWT" || os.Getenv("AGENTCARD_MOCK") == "true" {
-		return &CardDetails{
-			PAN: "4111222233334444",
-			CVV: "123",
-		}, nil
-	}
-
-	req, _ := http.NewRequest("GET", c.BaseURL+"/cards/"+cardID+"/details", nil)
-	req.Header.Set("Authorization", "Bearer "+c.JWT)
+func (ac *AgentCardClient) GetCardDetails(cardID string) (*CardDetails, error) {
+	req, _ := http.NewRequest("GET", ac.BaseURL+"/cards/"+cardID+"/details", nil)
+	req.Header.Set("Authorization", "Bearer "+ac.JWT)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -111,13 +109,9 @@ func (c *AgentCardClient) GetCardDetails(cardID string) (*CardDetails, error) {
 	return &details, nil
 }
 
-func (c *AgentCardClient) ListCards() ([]CardResponse, error) {
-	if c.JWT == "" || c.JWT == "YOUR_AGENTCARD_JWT" || os.Getenv("AGENTCARD_MOCK") == "true" {
-		return []CardResponse{}, nil
-	}
-
-	req, _ := http.NewRequest("GET", c.BaseURL+"/cards", nil)
-	req.Header.Set("Authorization", "Bearer "+c.JWT)
+func (ac *AgentCardClient) ListCards() ([]CardResponse, error) {
+	req, _ := http.NewRequest("GET", ac.BaseURL+"/cards", nil)
+	req.Header.Set("Authorization", "Bearer "+ac.JWT)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
