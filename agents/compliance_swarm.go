@@ -35,3 +35,6 @@ func ComplianceFactory() []SpecialistAgent {
 }
 
 func (a *ComplianceAgent) SetManager(m *SwarmManager) { a.manager = m }
+
+func (a *ComplianceAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *ComplianceAgent) RequestClarification(ctx string) string { return "" }

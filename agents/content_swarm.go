@@ -18,6 +18,14 @@ func (a *ContentAgent) Run(task string) (interface{}, error) {
 
 	res := "Content Result (" + a.specialty + "): " + a.prompt + " | Task: " + task
 
+	// Phase 3: Proactivity & Self-Awareness
+	if a.manager != nil && a.manager.IsAGIMode() {
+		// Proactively check for related optimizations
+		if a.ConfidenceLevel() > 0.9 {
+			res += "\n[Proactive Insight]: High confidence detected. Proposing cross-platform synchronization for this content."
+		}
+	}
+
 	// AGI Mode: Enhanced capabilities with Memory & Coordination
 	if a.manager != nil && a.manager.IsAGIMode() {
 		// 1. Check Persistent Memory for cross-domain context
@@ -70,3 +78,6 @@ func ContentFactory() []SpecialistAgent {
 }
 
 func (a *ContentAgent) SetManager(m *SwarmManager) { a.manager = m }
+
+func (a *ContentAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *ContentAgent) RequestClarification(ctx string) string { return "" }

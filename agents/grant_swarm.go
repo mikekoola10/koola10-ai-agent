@@ -33,3 +33,6 @@ func GrantSwarmFactory() []SpecialistAgent {
 }
 
 func (a *GrantSwarmAgent) SetManager(m *SwarmManager) { a.manager = m }
+
+func (a *GrantSwarmAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *GrantSwarmAgent) RequestClarification(ctx string) string { return "" }

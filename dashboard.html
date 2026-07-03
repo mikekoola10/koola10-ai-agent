@@ -71,12 +71,23 @@
             </div>
         </div>
         <div class="card">
-            <h2>SWARM_COORDINATION_LOG</h2>
-            <div id="coordination-log" style="font-size: 11px; max-height: 200px; overflow-y: auto;">
-                Scanning swarm signals...
+            <h2>PROACTIVE_OPPORTUNITY_FEED</h2>
+            <div id="opportunity-feed" style="font-size: 11px; max-height: 200px; overflow-y: auto; color: #f0f;">
+                Monitoring market signals...
             </div>
-            <h2 style="margin-top: 15px;">PERSISTENT_MEMORY_INSIGHTS</h2>
-            <div id="memory-insights" style="font-size: 10px; color: #0ff;">Awaiting memory dump...</div>
+        </div>
+    </div>
+
+    <div class="grid" style="margin-top: 15px;">
+        <div class="card">
+            <h2>SWARM_TASK_FORCE_CENTER</h2>
+            <div id="task-force-center" style="font-size: 11px; max-height: 200px; overflow-y: auto;">
+                Awaiting mission parameters...
+            </div>
+        </div>
+        <div class="card">
+            <h2>PERSISTENT_MEMORY_HIGHLIGHTS</h2>
+            <div id="memory-insights" style="font-size: 10px; color: #0ff; max-height: 200px; overflow-y: auto;">Awaiting memory dump...</div>
         </div>
     </div>
 
@@ -137,14 +148,27 @@
                     `).join('');
                 }
 
-                // Coordination (Audit events)
-                const coordDiv = document.getElementById('coordination-log');
-                const coordEvents = audit.filter(e => e.action === 'swarm_coordination' || e.action === 'task_executed');
-                if (coordEvents.length > 0) {
-                    coordDiv.innerHTML = coordEvents.slice(-10).reverse().map(e => `
-                        <div style="margin-bottom: 5px; border-left: 2px solid #0f0; padding-left: 5px;">
-                            <span style="color: #0f0;">[${e.timestamp.split('T')[1].split('Z')[0]}]</span>
-                            ${e.action === 'swarm_coordination' ? `SYNC: ${e.details.source} → ${e.details.target}` : `EXEC: ${e.details.vertical}/${e.details.specialty}`}
+                // Opportunities
+                const oppResp = await fetch('/swarm/opportunities').then(r => r.json());
+                const oppDiv = document.getElementById('opportunity-feed');
+                if (oppResp.length > 0) {
+                    oppDiv.innerHTML = oppResp.slice(-10).reverse().map(o => `
+                        <div style="margin-bottom: 10px; border-left: 2px solid #f0f; padding-left: 5px;">
+                            <div style="font-weight: bold; color: #f0f;">[STRATEGIC_FORESIGHT]</div>
+                            <div>${o.content}</div>
+                        </div>
+                    `).join('');
+                }
+
+                // Task Forces
+                const tfResp = await fetch('/swarm/task-forces').then(r => r.json());
+                const tfDiv = document.getElementById('task-force-center');
+                const tfKeys = Object.keys(tfResp);
+                if (tfKeys.length > 0) {
+                    tfDiv.innerHTML = tfKeys.map(k => `
+                        <div style="margin-bottom: 8px; border: 1px solid #333; padding: 5px; background: rgba(0,255,0,0.05);">
+                            <b style="color: #0f0;">FORCE_${k.toUpperCase()}:</b> ${tfResp[k].goal}
+                            <div style="font-size: 9px; color: #888;">Verticals: ${tfResp[k].verticals.join(', ')} | Status: ${tfResp[k].status}</div>
                         </div>
                     `).join('');
                 }

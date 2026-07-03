@@ -35,3 +35,6 @@ func APIFactory() []SpecialistAgent {
 }
 
 func (a *APIAgent) SetManager(m *SwarmManager) { a.manager = m }
+
+func (a *APIAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *APIAgent) RequestClarification(ctx string) string { return "" }

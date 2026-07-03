@@ -47,3 +47,6 @@ func LeadGenFactory() []SpecialistAgent {
 }
 
 func (a *LeadGenAgent) SetManager(m *SwarmManager) { a.manager = m }
+
+func (a *LeadGenAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *LeadGenAgent) RequestClarification(ctx string) string { return "" }

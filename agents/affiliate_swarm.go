@@ -69,3 +69,6 @@ func AffiliateFactory() []SpecialistAgent {
 func (a *AffiliateAgent) SetManager(m *SwarmManager) {
 	a.manager = m
 }
+
+func (a *AffiliateAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *AffiliateAgent) RequestClarification(ctx string) string { return "" }

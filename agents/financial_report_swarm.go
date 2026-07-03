@@ -35,3 +35,6 @@ func FinancialFactory() []SpecialistAgent {
 }
 
 func (a *FinancialAgent) SetManager(m *SwarmManager) { a.manager = m }
+
+func (a *FinancialAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *FinancialAgent) RequestClarification(ctx string) string { return "" }

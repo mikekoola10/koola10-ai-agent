@@ -23,27 +23,36 @@ type SpecialistAgent interface {
 	SetPrompt(prompt string)
 	GetPrompt() string
 	SetManager(m *SwarmManager)
+	ConfidenceLevel() float64
+	RequestClarification(context string) string
+}
+
+type TaskForce struct {
+	ID        string   `json:"id"`
+	Goal      string   `json:"goal"`
+	Verticals []string `json:"verticals"`
+	Status    string   `json:"status"`
+	Insights  []string `json:"insights"`
 }
 
 type SwarmManager struct {
 	Swarms map[string][]SpecialistAgent
 	Mu     sync.RWMutex
 
-	// Callbacks for logging to economic ledger and compliance audit
 	AuditLogger   func(action string, details map[string]interface{})
 	LedgerLogger  func(vertical, category string, amount float64, description string)
 	RevenueLogger func(amount float64, source string)
 	ReflectLogger func(vertical, specialty, task string, result interface{}) string
 
-	// Factory for creating agents for a vertical
 	Factories map[string]func() []SpecialistAgent
 
 	BasePrompt string
 	AGIMode    bool
 
-	// Persistent Memory & Coordination
 	LongTermMemory map[string]string
 	MemoryPath     string
+
+	TaskForces map[string]*TaskForce
 }
 
 func NewSwarmManager() *SwarmManager {
@@ -52,6 +61,8 @@ func NewSwarmManager() *SwarmManager {
 		Factories:      make(map[string]func() []SpecialistAgent),
 		LongTermMemory: make(map[string]string),
 		MemoryPath:     "./data/agi_memory.json",
+		TaskForces:     make(map[string]*TaskForce),
+		AGIMode:        true,
 	}
 	sm.LoadMemory()
 	return sm
@@ -84,13 +95,32 @@ func (sm *SwarmManager) GetMemory(key string) string {
 	return sm.LongTermMemory[key]
 }
 
-// Coordinate enables agent-to-agent collaboration
+func (sm *SwarmManager) FormTaskForce(id, goal string, verticals []string) *TaskForce {
+	sm.Mu.Lock()
+	defer sm.Mu.Unlock()
+	tf := &TaskForce{
+		ID:        id,
+		Goal:      goal,
+		Verticals: verticals,
+		Status:    "active",
+		Insights:  []string{},
+	}
+	sm.TaskForces[id] = tf
+	if sm.AuditLogger != nil {
+		sm.AuditLogger("task_force_formed", map[string]interface{}{
+			"id":        id,
+			"goal":      goal,
+			"verticals": verticals,
+		})
+	}
+	return tf
+}
+
 func (sm *SwarmManager) Coordinate(sourceVertical, targetVertical, task string) (interface{}, error) {
 	if !sm.IsAGIMode() {
 		return nil, fmt.Errorf("swarm coordination requires AGI Mode")
 	}
 
-	// Coordination logic: Apex coordinates, Spiral creates, Koola10 gamifies
 	sm.Mu.RLock()
 	if sm.AuditLogger != nil {
 		sm.AuditLogger("swarm_coordination", map[string]interface{}{
@@ -156,9 +186,6 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 	}
 
 	agents := factory()
-	// If count is different from what factory produces, we might need to adjust,
-	// but for now we assume factory produces the right set or we scale it.
-	// The requirement says 10 agents for each.
 	effectivePrompt := sm.getEffectivePrompt()
 	for _, agent := range agents {
 		agent.SetPrompt(effectivePrompt)
@@ -185,7 +212,6 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 		return nil, fmt.Errorf("no swarm deployed for vertical: %s", vertical)
 	}
 
-	// Simple dispatch logic: find the first available agent
 	var target SpecialistAgent
 	for _, a := range agents {
 		status := a.Status()
@@ -225,7 +251,6 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 	}
 
 	if sm.LedgerLogger != nil {
-		// Log a nominal cost for agent execution
 		sm.LedgerLogger(vertical, "swarm_execution", 0.05, fmt.Sprintf("Executed task in %s: %s", vertical, target.Specialty()))
 	}
 

@@ -45,3 +45,6 @@ func TradingFactory() []SpecialistAgent {
 }
 
 func (a *TradingAgent) SetManager(m *SwarmManager) { a.manager = m }
+
+func (a *TradingAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *TradingAgent) RequestClarification(ctx string) string { return "" }

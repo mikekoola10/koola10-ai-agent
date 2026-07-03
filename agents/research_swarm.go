@@ -37,3 +37,6 @@ func ResearchFactory() []SpecialistAgent {
 }
 
 func (a *ResearchAgent) SetManager(m *SwarmManager) { a.manager = m }
+
+func (a *ResearchAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *ResearchAgent) RequestClarification(ctx string) string { return "" }

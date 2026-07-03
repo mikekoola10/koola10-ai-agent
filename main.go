@@ -301,6 +301,7 @@ var (
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
 	reflectMu    sync.RWMutex
+	opportunityMu sync.RWMutex
 
 	cachePath      = "/data/grants_cache.json"
 	appsDir        = "/data/applications"
@@ -340,6 +341,7 @@ var (
 	videoJobStore = make(map[string]*VideoJob)
 	subStore      = make(map[string]string) // subID -> status
 	reflectLogs   = []map[string]string{}
+	proactiveFeed = []map[string]string{}
 
 	rlBucket     = 15.0
 	rlMaxBucket  = 15.0
@@ -418,6 +420,7 @@ func main() {
 	}
 	subManager = NewSubscriptionManager(subsPath)
 	go startMaintenanceLoop()
+	go startStrategicForesightLoop()
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -545,6 +548,7 @@ func main() {
 	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
 	r.Get("/logs", corsMiddleware(authMiddleware(handleLogs)))
 	r.Post("/admin/subscriptions/run", authMiddleware(handleAdminSubscriptionsRun))
+	r.Get("/admin/agi-mode", corsMiddleware(authMiddleware(handleGetAGIMode)))
 	r.Post("/admin/agi-mode", corsMiddleware(authMiddleware(handleAdminAGIMode)))
 	r.Post("/admin/agentcards/create", authMiddleware(handleAdminAgentCardsCreate))
 	r.Get("/admin/subscriptions", authMiddleware(handleAdminSubscriptionsList))
@@ -561,6 +565,8 @@ func main() {
 	r.Get("/swarm/agents", corsMiddleware(handleSwarmAgents))
 	r.Get("/swarm/reflections", corsMiddleware(handleSwarmReflections))
 	r.Get("/swarm/memory", corsMiddleware(handleSwarmMemory))
+	r.Get("/swarm/opportunities", corsMiddleware(handleSwarmOpportunities))
+	r.Get("/swarm/task-forces", corsMiddleware(handleSwarmTaskForces))
 	r.Get("/swarm/nodes", corsMiddleware(handleSwarmNodes))
 
 	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
@@ -1839,7 +1845,28 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return
+	}
+
 	w.Write([]byte("event: connected\ndata: {}\n\n"))
+	flusher.Flush()
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			w.Write([]byte(": keepalive\n\n"))
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -1888,8 +1915,33 @@ func handleAdminAGIMode(w http.ResponseWriter, r *http.Request) {
 func handleSwarmMemory(w http.ResponseWriter, r *http.Request) {
 	globalSwarmManager.Mu.RLock()
 	defer globalSwarmManager.Mu.RUnlock()
+
+	// Implementation of insight extraction/summarization
+	summary := make(map[string]string)
+	for k, v := range globalSwarmManager.LongTermMemory {
+		if len(v) > 100 {
+			summary[k] = v[:97] + "..."
+		} else {
+			summary[k] = v
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(globalSwarmManager.LongTermMemory)
+	json.NewEncoder(w).Encode(summary)
+}
+
+func handleSwarmOpportunities(w http.ResponseWriter, r *http.Request) {
+	opportunityMu.RLock()
+	defer opportunityMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(proactiveFeed)
+}
+
+func handleSwarmTaskForces(w http.ResponseWriter, r *http.Request) {
+	globalSwarmManager.Mu.RLock()
+	defer globalSwarmManager.Mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(globalSwarmManager.TaskForces)
 }
 
 func handleSwarmReflections(w http.ResponseWriter, r *http.Request) {
@@ -1962,6 +2014,63 @@ func generateReflection(vertical, specialty, task string, result interface{}) st
 	globalLedger.RecordCost(vertical, "agi_reflection", float64(dsRes.Usage.TotalTokens)*0.000002, "Recursive self-improvement")
 
 	return dsRes.Choices[0].Message.Content
+}
+
+func startStrategicForesightLoop() {
+	log.Printf("Starting AGI Strategic Foresight loop...")
+	ticker := time.NewTicker(10 * time.Minute)
+	for range ticker.C {
+		if !globalSwarmManager.IsAGIMode() {
+			continue
+		}
+
+		apiKey := os.Getenv("DEEPSEEK_API_KEY")
+		if apiKey == "" {
+			continue
+		}
+
+		// Pull last memory insights for context
+		globalSwarmManager.Mu.RLock()
+		memData, _ := json.Marshal(globalSwarmManager.LongTermMemory)
+		globalSwarmManager.Mu.RUnlock()
+
+		prompt := fmt.Sprintf("Run a strategic foresight analysis for the swarm. Identify 3 bold 10x growth opportunities based on current knowledge: %s. Formulate each as a proactive suggestion.", string(memData))
+
+		dsReq := map[string]interface{}{
+			"model": "deepseek-chat",
+			"messages": []map[string]string{
+				{"role": "system", "content": "You are the Superintelligent Strategic Futurist. Generate bold, high-leverage insights for the High-Growth Founder."},
+				{"role": "user", "content": prompt},
+			},
+		}
+		dsBody, _ := json.Marshal(dsReq)
+		hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+		hReq.Header.Set("Authorization", "Bearer "+apiKey)
+		hReq.Header.Set("Content-Type", "application/json")
+
+		resp, err := (&http.Client{}).Do(hReq)
+		if err == nil {
+			var dsRes struct {
+				Choices []struct { Message struct { Content string } }
+				Usage struct { TotalTokens int }
+			}
+			if json.NewDecoder(resp.Body).Decode(&dsRes) == nil && len(dsRes.Choices) > 0 {
+				opportunity := dsRes.Choices[0].Message.Content
+				opportunityMu.Lock()
+				proactiveFeed = append(proactiveFeed, map[string]string{
+					"timestamp": time.Now().Format(time.RFC3339),
+					"type":      "strategic_foresight",
+					"content":   opportunity,
+				})
+				if len(proactiveFeed) > 50 { proactiveFeed = proactiveFeed[1:] }
+				opportunityMu.Unlock()
+
+				LogUsage(dsRes.Usage.TotalTokens)
+				globalLedger.RecordCost("swarm", "strategic_foresight", float64(dsRes.Usage.TotalTokens)*0.000002, "Scenario planning")
+			}
+			resp.Body.Close()
+		}
+	}
 }
 
 func handleAdminAgentCardsCreate(w http.ResponseWriter, r *http.Request) {
@@ -2104,4 +2213,9 @@ func startMaintenanceLoop() {
 			globalSwarmManager.DispatchTask("maintenance", "repair: "+lastError)
 		}
 	}
+}
+
+func handleGetAGIMode(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"enabled": globalSwarmManager.IsAGIMode()})
 }

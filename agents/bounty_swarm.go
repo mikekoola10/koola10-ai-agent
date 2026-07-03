@@ -66,3 +66,6 @@ func BountyFactory() []SpecialistAgent {
 func (a *BountyAgent) SetManager(m *SwarmManager) {
 	a.manager = m
 }
+
+func (a *BountyAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *BountyAgent) RequestClarification(ctx string) string { return "" }

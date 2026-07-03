@@ -60,3 +60,6 @@ func DeveloperFactory() []SpecialistAgent {
 }
 
 func (a *DeveloperAgent) SetManager(m *SwarmManager) { a.manager = m }
+
+func (a *DeveloperAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *DeveloperAgent) RequestClarification(ctx string) string { return "" }

@@ -34,3 +34,6 @@ func MaintenanceFactory() []SpecialistAgent {
 }
 
 func (a *MaintenanceAgent) SetManager(m *SwarmManager) { a.manager = m }
+
+func (a *MaintenanceAgent) ConfidenceLevel() float64 { return 0.95 }
+func (a *MaintenanceAgent) RequestClarification(ctx string) string { return "" }
