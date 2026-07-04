@@ -120,6 +120,8 @@ func (sm *SwarmManager) DeploySwarms(vertical string, count int) error {
 	return nil
 }
 
+var SwarmTaskCounter func()
+
 func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{}, error) {
 	sm.Mu.Lock()
 	agents, ok := sm.Swarms[vertical]
@@ -146,6 +148,7 @@ func (sm *SwarmManager) DispatchTask(vertical string, task string) (interface{},
 
 	result, err := target.Run(task)
 
+	if err == nil && SwarmTaskCounter != nil { SwarmTaskCounter() }
 	if err == nil && sm.RevenueLogger != nil {
 		if resMap, ok := result.(map[string]interface{}); ok {
 			if profit, ok := resMap["profit"].(float64); ok {

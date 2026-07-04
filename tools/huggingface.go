@@ -79,6 +79,9 @@ func runModel(payload map[string]interface{}) ToolResult {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
+	if os.Getenv("RHEL_MODE") == "true" {
+		req.Header.Set("X-RHEL-AI-Optimized", "true")
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
