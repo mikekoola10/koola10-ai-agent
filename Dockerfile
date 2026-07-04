@@ -1,12 +1,12 @@
-# Build stage using RHEL UBI Go Toolset
-FROM registry.access.redhat.com/ubi8/go-toolset:1.22 AS builder
+# Build stage using Go 1.23 Alpine
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o agent main.go
+RUN CGO_ENABLED=0 go build -o agent main.go
 
 # Run stage using RHEL UBI Minimal
 FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
