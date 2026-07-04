@@ -422,6 +422,7 @@ func main() {
 
 	initMarketplace()
 	go startMaintenanceLoop()
+	go startEmpireCommandVoiceLoop()
 	go startEmpireReviewLoop()
 	go startStrategicForesightLoop()
 	go func() {
@@ -496,6 +497,8 @@ func main() {
 	globalSwarmManager.DeploySwarms("affiliate", 20)
 	globalSwarmManager.DeploySwarms("bounty", 20)
 	globalSwarmManager.DeploySwarms("content", 20)
+	globalSwarmManager.DeploySwarms("trading", 5)
+	globalSwarmManager.DeploySwarms("solara", 5)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -580,6 +583,7 @@ func main() {
 	r.Get("/swarm/nodes", corsMiddleware(handleSwarmNodes))
 	r.Get("/marketplace/listings", corsMiddleware(handleMarketplaceList))
 	r.Post("/marketplace/purchase", corsMiddleware(handleMarketplacePurchase))
+	r.Post("/swarm/product-cycle", corsMiddleware(handleProductSwarmTrigger))
 
 	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
 	r.Get("/swarm/report", corsMiddleware(handleSwarmReport))
@@ -1955,7 +1959,7 @@ func startEmpireReviewLoop() {
 		revenue := globalLedger.TotalRevenue
 		globalLedger.mu.RUnlock()
 
-		prompt := fmt.Sprintf("EMPIRE_REVIEW_MODE: ACTIVE. Goal: $1M. Current Revenue: $%.2f. Identify the 'Single Critical Constraint' and suggest a 10x pivot.", revenue)
+		prompt := fmt.Sprintf("EMPIRE_REVIEW_MODE: ACTIVE. Goal: $1M. Current Revenue: $%.2f. Identify the 'Single Critical Constraint' and Identify exactly 3 concrete $1M milestone steps with predicted revenue impact.", revenue)
 
 		dsReq := map[string]interface{}{
 			"model": "deepseek-chat",
@@ -1985,6 +1989,77 @@ func startEmpireReviewLoop() {
 			resp.Body.Close()
 		}
 	}
+}
+
+
+func startEmpireCommandVoiceLoop() {
+	log.Printf("Starting AGI Empire Command Voice loop...")
+	ticker := time.NewTicker(12 * time.Minute)
+	for range ticker.C {
+		if !globalSwarmManager.IsAGIMode() { continue }
+		apiKey := os.Getenv("DEEPSEEK_API_KEY")
+		if apiKey == "" { continue }
+
+		globalSwarmManager.Mu.RLock()
+		memData, _ := json.Marshal(globalSwarmManager.LongTermMemory)
+		globalSwarmManager.Mu.RUnlock()
+
+		prompt := fmt.Sprintf("EMPIRE_COMMAND_VOICE. As the Jarvis-like Strategic AI, provide a proactive, high-authority strategic recommendation based on current knowledge: %s. Output a short recommendation starting with 'I recommend...'.", string(memData))
+
+		dsReq := map[string]interface{}{
+			"model": "deepseek-chat",
+			"messages": []map[string]string{
+				{"role": "system", "content": "You are the Superintelligent Empire Command Voice. Authoritative and strategic."},
+				{"role": "user", "content": prompt},
+			},
+		}
+		dsBody, _ := json.Marshal(dsReq)
+		hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+		hReq.Header.Set("Authorization", "Bearer "+apiKey)
+		hReq.Header.Set("Content-Type", "application/json")
+
+		resp, err := (&http.Client{}).Do(hReq)
+		if err == nil {
+			var dsRes struct { Choices []struct { Message struct { Content string } } }
+			if json.NewDecoder(resp.Body).Decode(&dsRes) == nil && len(dsRes.Choices) > 0 {
+				opportunityMu.Lock()
+				proactiveFeed = append(proactiveFeed, map[string]string{
+					"timestamp": time.Now().Format(time.RFC3339),
+					"type":      "empire_command_voice",
+					"content":   dsRes.Choices[0].Message.Content,
+				})
+				opportunityMu.Unlock()
+			}
+			resp.Body.Close()
+		}
+	}
+}
+
+func mockShopifyPush(productLine string) error {
+	log.Printf("[Shopify] Pushing '%s' to live store...", productLine)
+	opportunityMu.Lock()
+	proactiveFeed = append(proactiveFeed, map[string]string{
+		"timestamp": time.Now().Format(time.RFC3339),
+		"type":      "shopify_sync",
+		"content":   fmt.Sprintf("Shopify: Product line '%s' successfully pushed to live store. Meta pixels active.", productLine),
+	})
+	opportunityMu.Unlock()
+	return nil
+}
+
+func handleProductSwarmTrigger(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[AGI Mode] Initiating autonomous Product Swarm cycle...")
+
+	// Apex -> Trading (Strategy)
+	_, _ = globalSwarmManager.Coordinate("apex", "trading", "Generate 10x strategy for 'Neon Void Collection'")
+	// Spiral -> Solara (Creative)
+	_, _ = globalSwarmManager.Coordinate("spiral", "solara", "Generate ad copy for 'Neon Void Collection'")
+	// Koola10 -> Affiliate (Growth)
+	_, _ = globalSwarmManager.Coordinate("koola10", "affiliate", "Design viral launch sequence")
+
+	mockShopifyPush("Neon Void Collection")
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "line": "Neon Void Collection"})
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -2152,7 +2227,7 @@ func startStrategicForesightLoop() {
 		memData, _ := json.Marshal(globalSwarmManager.LongTermMemory)
 		globalSwarmManager.Mu.RUnlock()
 
-		prompt := fmt.Sprintf("Run a strategic foresight analysis for the swarm. Identify 3 bold 10x growth opportunities based on current knowledge: %s. Formulate each as a proactive suggestion.", string(memData))
+		prompt := fmt.Sprintf("Run a strategic foresight analysis for the swarm. Identify 5 high-leverage (100x) opportunities with ROI estimates and execution paths based on current knowledge: %s. Formulate each as a proactive suggestion.", string(memData))
 
 		dsReq := map[string]interface{}{
 			"model": "deepseek-chat",

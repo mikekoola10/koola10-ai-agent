@@ -23,7 +23,7 @@
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>DIGITAL_MANCAVE V4.0 // AGI_EMPIRE_OS</h1>
+        <h1>DIGITAL_MANCAVE V4.1 // EMPIRE_MATURITY</h1>
         <div style="text-align: right;">
             <div>
                 <span id="status-dot" class="status online"></span>
@@ -46,7 +46,16 @@
         </div>
 
 
+
         <div class="card">
+            <h2>EMPIRE_TRAJECTORY</h2>
+            <div style="font-size: 10px; color: #ffcc00; margin-bottom: 5px;">PROGRESS_TO_1M: <span id="progress-text">0.00%</span></div>
+            <div style="width: 100%; background: #222; height: 10px; border-radius: 5px; overflow: hidden; border: 1px solid #ffcc00;">
+                <div id="progress-bar" style="width: 0%; background: #ffcc00; height: 100%; transition: width 0.5s ease;"></div>
+            </div>
+            <div style="margin-top: 5px; font-size: 8px; color: #888;">TARGET: $1,000,000 / mo</div>
+        </div>
+<div class="card">
             <h2>SWARM_MARKETPLACE</h2>
             <div id="marketplace-list" style="font-size: 11px; max-height: 150px; overflow-y: auto;">
                 Loading marketplace...
@@ -67,13 +76,19 @@
 
                 <button id="agi-btn" onclick="toggleAGIMode()">ENABLE_AGI_MODE</button>
                 <button id="empire-btn" onclick="triggerEmpireReview()">RUN_EMPIRE_REVIEW</button>
+                <button id="product-btn" onclick="triggerProductSwarm()">LAUNCH_PRODUCT_SWARM</button>
                 <button id="kill-btn" class="red" onclick="toggleKillSwitch()">ACTIVATE_KILL_SWITCH</button>
             </div>
         </div>
     </div>
 
     <div class="grid" style="margin-top: 15px;">
-        <div class="card">
+
+        <div class="card" style="border-color: #0f0; background: rgba(0,255,0,0.02);">
+            <h2>EMPIRE_COMMAND_VOICE</h2>
+            <div id="command-voice" style="font-size: 13px; color: #0f0; font-style: italic;">"Awaiting directive..."</div>
+        </div>
+<div class="card">
             <h2>RECURSIVE_REFLECTION_LOG</h2>
             <div id="reflection-log" style="font-size: 11px; max-height: 200px; overflow-y: auto;">
                 Awaiting AGI initialization...
@@ -189,23 +204,35 @@
                 }
 
 
-                // Opportunities & Empire Reviews
+
+                // Opportunities & Empire Reviews & Voice
                 const oppResp = await fetch('/swarm/opportunities').then(r => r.json());
                 const oppDiv = document.getElementById('opportunity-feed');
                 if (oppResp.length > 0) {
-                    oppDiv.innerHTML = oppResp.slice(-15).reverse().map(o => {
-                        const isEmpire = o.type === 'empire_review';
-                        const borderColor = isEmpire ? '#ffcc00' : '#f0f';
-                        const bgColor = isEmpire ? 'rgba(255,204,0,0.1)' : 'rgba(255,0,255,0.05)';
-                        const label = isEmpire ? '[EMPIRE_STRATEGY]' : '[STRATEGIC_FORESIGHT]';
-                        return `
-                        <div style="margin-bottom: 12px; border-left: 3px solid ${borderColor}; padding: 8px; background: ${bgColor}; border-radius: 0 4px 4px 0;">
-                            <div style="font-weight: bold; color: ${borderColor}; font-size: 9px; margin-bottom: 4px;">${label}</div>
-                            <div style="color: #eee;">${o.content}</div>
-                            <div style="font-size: 8px; color: #666; margin-top: 4px;">${new Date(o.timestamp).toLocaleTimeString()}</div>
-                        </div>
-                    `}).join('');
+                    const sorted = oppResp.slice(-20).reverse();
+                    const latestVoice = sorted.find(o => o.type === 'empire_command_voice');
+                    if (latestVoice) document.getElementById('command-voice').innerText = `"${latestVoice.content}"`;
+
+                    oppDiv.innerHTML = sorted.map(o => {
+                        let color = '#f0f';
+                        let label = '[STRATEGY]';
+                        if (o.type === 'empire_review') { color = '#ffcc00'; label = '[EMPIRE_STEP]'; }
+                        if (o.type === 'empire_command_voice') { color = '#0f0'; label = '[JARVIS_VOICE]'; }
+                        if (o.type === 'shopify_sync') { color = '#0ff'; label = '[SHOPIFY_LIVE]'; }
+
+                        return `<div style="margin-bottom: 10px; border-left: 3px solid ${color}; padding-left: 8px;">
+                            <div style="font-weight: bold; color: ${color}; font-size: 9px;">${label}</div>
+                            <div>${o.content}</div>
+                        </div>`;
+                    }).join('');
                 }
+
+                // Progress Bar
+                const rev = parseFloat(document.getElementById('revenue').innerText.replace('$', '').replace(',', ''));
+                const prog = Math.min((rev / 1000000.0) * 100, 100);
+                document.getElementById('progress-text').innerText = `${prog.toFixed(2)}%`;
+                document.getElementById('progress-bar').style.width = `${prog}%`;
+
 
 
                 // Task Forces
@@ -352,6 +379,16 @@
                 alert(`SUCCESS: ${res.agent} deployed to ${res.deployed_to || 'swarm'}`);
                 update();
             } catch (e) { alert("Deployment failed: Insufficient funds or node error."); }
+        }
+
+
+        async function triggerProductSwarm() {
+            const btn = document.getElementById('product-btn');
+            btn.disabled = true; btn.innerText = 'SWARMING...';
+            await fetch('/swarm/product-cycle', { method: 'POST' });
+            btn.innerText = 'CYCLE_COMPLETE';
+            setTimeout(() => { btn.disabled = false; btn.innerText = 'LAUNCH_PRODUCT_SWARM'; }, 2000);
+            update();
         }
 
         async function triggerEmpireReview() {
