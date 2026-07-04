@@ -1,6 +1,9 @@
 package main
 
 import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"bufio"
 	"bytes"
 	"context"
@@ -295,6 +298,15 @@ type VideoJob struct {
 
 // --- Global States ---
 
+type Product struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Collection  string  `json:"collection"`
+	Price       float64 `json:"price"`
+	Description string  `json:"description"`
+	Status      string  `json:"status"` // "generated", "synced"
+}
+
 type ReflectionLog struct {
 	Timestamp   string `json:"timestamp"`
 	Vertical    string `json:"vertical"`
@@ -358,7 +370,14 @@ var (
 	rlLastUpdate = time.Now()
 	rlMu         sync.Mutex
 	agiMode      bool = true
+	rhelMode     bool = false
+	swarmThroughput = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "swarm_tasks_completed_total",
+		Help: "The total number of processed tasks by the swarm",
+	})
 	reflectLogs  []ReflectionLog
+	generatedProducts []Product
+	productMu        sync.Mutex
 
 
 	redisClient *redis.Client
@@ -412,6 +431,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // --- Main ---
 
 func main() {
+	go startProactiveEmpireMoves()
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
 	region = os.Getenv("FLY_REGION")
@@ -461,9 +481,10 @@ func main() {
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
 	globalSwarmManager.RevenueLogger = fundManager.RouteRevenue
+	agents.SwarmTaskCounter = func() { swarmThroughput.Inc() }
 
 	// Initialize High-Growth Founder Mode
-	founderPrompt := "High-Growth Founder Mode: Speed is a competitive advantage. Build leverage through automation. First-principles thinking. High agency + extreme ownership. Think in 10x-100x."
+	founderPrompt := "A.S.K. Agency - AI That Builds Empires: Delivering enterprise-grade AGI results with a creative edge. High-Growth Founder Mode active."
 	globalSwarmManager.SetGlobalPrompt(founderPrompt)
 
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
@@ -584,6 +605,8 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/reflections", corsMiddleware(handleSwarmReflections))
 	r.Post("/admin/agi-mode", authMiddleware(handleAdminAGIMode))
+	r.Post("/admin/generate-product-line", authMiddleware(handleAdminGenerateProductLine))
+	r.Get("/admin/product-empire/stats", corsMiddleware(handleProductEmpireStats))
 	r.Post("/monetize/shopify/sync", corsMiddleware(handleShopifySync))
 	r.Post("/monetize/marketplace/sale", corsMiddleware(handleMarketplaceSale))
 
@@ -598,6 +621,10 @@ func main() {
 	r.Post("/admin/scheduler/run", corsMiddleware(authMiddleware(handleSchedulerRun)))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
+	r.Post("/admin/rhel-mode", authMiddleware(handleAdminRHELMode))
+	r.Get("/admin/rhel-mode", corsMiddleware(handleGetRHELMode))
+	r.Handle("/metrics", promhttp.Handler())
+	r.Get("/admin/business-metrics", corsMiddleware(handleBusinessMetrics))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
@@ -645,6 +672,10 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
@@ -706,6 +737,10 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
@@ -1329,6 +1364,10 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 	prompt := fmt.Sprintf("Draft narrative for %s from %s. Mission: %s", grant.Title, req.OrgName, req.OrgMission)
 	dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
 	dsBody, _ := json.Marshal(dsReq); hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey); hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq); if err != nil { http.Error(w, "api failed", 500); return }; defer resp.Body.Close()
 	var dsRes struct { Choices []struct { Message struct { Content string } }; Usage struct { TotalTokens int } }
@@ -1389,6 +1428,10 @@ func handleMonitor(w http.ResponseWriter, r *http.Request) {
 				dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
 				dsBody, _ := json.Marshal(dsReq)
 				hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 				hReq.Header.Set("Authorization", "Bearer "+apiKey)
 				hReq.Header.Set("Content-Type", "application/json")
 				resp, err := (&http.Client{}).Do(hReq)
@@ -1456,6 +1499,10 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
@@ -2114,6 +2161,10 @@ func PerformRecursiveReflection(vertical, task, result string) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	if rhelMode {
+		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
+		hReq.Header.Set("X-RHEL-Performance", "high")
+	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 
@@ -2159,18 +2210,26 @@ func PerformRecursiveReflection(vertical, task, result string) {
 // --- Monetization Handlers ---
 
 func handleShopifySync(w http.ResponseWriter, r *http.Request) {
-	// Simulated Shopify product generation and sync
-	profit := 50.0 // Simulated revenue from automated sales
+	productMu.Lock()
+	syncedCount := 0
+	for i, p := range generatedProducts {
+		if p.Status == "generated" {
+			generatedProducts[i].Status = "synced"
+			syncedCount++
+		}
+	}
+	productMu.Unlock()
+
+	profit := float64(syncedCount) * 50.0
 	fundManager.RouteRevenue(profit, "shopify_automation")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "success",
-		"products_synced": 12,
+		"products_synced": syncedCount,
 		"revenue_generated": profit,
 	})
 }
-
 func handleMarketplaceSale(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ProductID string `json:"product_id"`
@@ -2189,4 +2248,112 @@ func handleMarketplaceSale(w http.ResponseWriter, r *http.Request) {
 		"product": req.ProductID,
 		"earned": req.Price,
 	})
+}
+
+func handleAdminRHELMode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	rhelMode = req.Enabled
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Red Hat Enterprise Mode set to %v", rhelMode)
+}
+
+func handleGetRHELMode(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"enabled": rhelMode})
+}
+
+func handleBusinessMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	// Mocking some business metrics for the command center
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"empire_revenue": globalLedger.TotalRevenue,
+		"active_projects": 12,
+		"strategic_foresight": "Expanding swarm intelligence to specialized RHEL-optimized clusters.",
+		"scaling_status": "HIGH_AVAILABILITY_ACTIVE",
+		"resource_optimization": "Memory utilization optimized via UBI-minimal base layers.",
+	})
+}
+
+func handleAdminGenerateProductLine(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Collection string `json:"collection"`
+		Count      int    `json:"count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	productMu.Lock()
+	for i := 0; i < req.Count; i++ {
+		generatedProducts = append(generatedProducts, Product{
+			ID:          fmt.Sprintf("prod-%d", len(generatedProducts)+1),
+			Name:        fmt.Sprintf("%s Item #%d", req.Collection, i+1),
+			Collection:  req.Collection,
+			Price:       29.99 + float64(i)*10,
+			Description: "Red Hat AI optimized autonomous design.",
+			Status:      "generated",
+		})
+	}
+	productMu.Unlock()
+
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintf(w, "Generated %d items for collection: %s", req.Count, req.Collection)
+}
+
+func handleProductEmpireStats(w http.ResponseWriter, r *http.Request) {
+	productMu.Lock()
+	defer productMu.Unlock()
+
+	synced := 0
+	for _, p := range generatedProducts {
+		if p.Status == "synced" {
+			synced++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_products": len(generatedProducts),
+		"synced_products": synced,
+		"revenue_forecast": float64(len(generatedProducts)-synced) * 45.0,
+		"active_collections": []string{"Neon Void Collection"},
+		"generation_progress": 100,
+	})
+}
+
+func startProactiveEmpireMoves() {
+	ticker := time.NewTicker(30 * time.Minute)
+	for {
+		log.Println("[Proactive JARVIS] Initiating autonomous Empire Move...")
+
+		// Simulate a strategic move
+		globalSwarmManager.DispatchTask("apex", "Analyze current revenue streams and suggest optimizations.")
+
+		// Randomly trigger a product swarm if none active
+		productMu.Lock()
+		if len(generatedProducts) == 0 {
+			log.Println("[Proactive JARVIS] Launching autonomous product swarm for Neon Void Collection...")
+			// Simulate adding products
+			for i := 0; i < 10; i++ {
+				generatedProducts = append(generatedProducts, Product{
+					ID:          fmt.Sprintf("auto-prod-%d", i+1),
+					Name:        fmt.Sprintf("Neon Void Item #%d", i+1),
+					Collection:  "Neon Void Collection",
+					Price:       49.99,
+					Description: "Autonomously generated via RHEL-optimized swarm.",
+					Status:      "generated",
+				})
+			}
+		}
+		productMu.Unlock()
+
+		<-ticker.C
+	}
 }

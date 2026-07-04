@@ -1,26 +1,24 @@
-# Build stage
-FROM golang:1.22-alpine AS builder
+# Build stage using RHEL UBI Go Toolset
+FROM registry.access.redhat.com/ubi8/go-toolset:1.22 AS builder
 
 WORKDIR /app
-COPY go.mod ./
-# RUN go mod download
+COPY go.mod go.sum ./
+RUN go mod download
 
 COPY . .
 RUN go build -o agent main.go
 
-# Run stage
-FROM alpine:latest
+# Run stage using RHEL UBI Minimal
+FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
 
-# Install necessary runtime dependencies
-RUN apk add --no-cache ca-certificates
+# Install necessary runtime dependencies if any
+# RUN microdnf install -y ... && microdnf clean all
 
 WORKDIR /app
 COPY --from=builder /app/agent .
 
-# Create data directory for MetaClaw persistence
-RUN mkdir -p /data/applications && chown -R 1000:1000 /data
-
-USER 1000:1000
+# Create data directory for persistence
+RUN mkdir -p /data/applications && chmod -R 777 /data
 
 EXPOSE 8080
 
