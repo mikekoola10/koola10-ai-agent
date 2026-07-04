@@ -137,6 +137,7 @@
 
         <div class="card">
             <h2>FINANCIAL_SWARM</h2>
+            <div>ANTIFRAGILITY: <span id="antifragility-score">50.0</span>/100</div>
             <div id="subs-list" class="reflection-log">
                 Scanning cards...
             </div>
@@ -212,18 +213,25 @@
         }
 
         async function updateFinancialSwarm() {
-            const subs = await fetch('/admin/subscriptions').then(r => r.json());
+            const res = await fetch('/admin/subscriptions').then(r => r.json());
             const subsDiv = document.getElementById('subs-list');
+
+            // Handle new schema with AntifragilityScore
+            const subs = Array.isArray(res) ? res : (res.subscriptions || []);
+            const score = res.antifragility_score || 50.0;
+            document.getElementById('antifragility-score').innerText = score.toFixed(1);
+
             if (!subs || subs.length === 0) {
                 subsDiv.innerText = "No active subscriptions.";
             } else {
                 subsDiv.innerHTML = subs.map(s => `
                     <div class="reflection-entry">
                         <div style="color: ${s.status === 'active' ? 'var(--neon-green)' : 'var(--neon-pink)'}">
-                            [${s.status.toUpperCase()}] ${s.service.toUpperCase()}
+                            [${s.status.toUpperCase()}] ${s.service.toUpperCase()} (P${s.priority || 3})
                         </div>
                         <div>AMOUNT: $${s.amount.toFixed(2)} | CARD: ${s.card_id}</div>
                         <div class="suggestion">RENEWAL: ${s.next_renewal ? new Date(s.next_renewal).toLocaleDateString() : 'PENDING'}</div>
+                        ${s.last_error ? `<div style="color:red; font-size: 0.7rem;">ERROR: ${s.last_error}</div>` : ''}
                     </div>
                 `).join('');
             }

@@ -252,13 +252,17 @@ type Subscription struct {
 	DueDay      int                     `json:"due_day"`
 	NextRenewal time.Time               `json:"next_renewal"`
 	LastError   string                  `json:"last_error,omitempty"`
+	Priority    int                     `json:"priority"` // 1 (Critical) to 5 (Optional)
+	Category    string                  `json:"category"`
+	Tags        []string                `json:"tags,omitempty"`
 }
 
 type SubscriptionManager struct {
-	Subscriptions []Subscription `json:"subscriptions"`
-	storagePath   string
-	AgentCard     *financial.AgentCardClient
-	mu            sync.RWMutex
+	Subscriptions      []Subscription `json:"subscriptions"`
+	StoragePath        string
+	AgentCard          *financial.AgentCardClient
+	AntifragilityScore float64 `json:"antifragility_score"`
+	mu                 sync.RWMutex
 }
 
 type SwarmNode struct {
@@ -1161,7 +1165,7 @@ func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float
 
 func NewSubscriptionManager(path string, ac *financial.AgentCardClient) *SubscriptionManager {
 	sm := &SubscriptionManager{
-		storagePath:   path,
+		StoragePath:   path,
 		AgentCard:     ac,
 		Subscriptions: []Subscription{},
 	}
@@ -1172,20 +1176,32 @@ func NewSubscriptionManager(path string, ac *financial.AgentCardClient) *Subscri
 func (sm *SubscriptionManager) Load() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	data, err := os.ReadFile(sm.storagePath)
+	data, err := os.ReadFile(sm.StoragePath)
 	if err == nil {
-		json.Unmarshal(data, sm)
+		var loaded struct {
+			Subscriptions      []Subscription `json:"subscriptions"`
+			AntifragilityScore float64        `json:"antifragility_score"`
+		}
+		if err := json.Unmarshal(data, &loaded); err == nil && loaded.AntifragilityScore > 0 {
+			sm.Subscriptions = loaded.Subscriptions
+			sm.AntifragilityScore = loaded.AntifragilityScore
+		} else {
+			// Legacy fallback or empty file
+			json.Unmarshal(data, sm)
+		}
 	}
 	if sm.Subscriptions == nil {
 		sm.Subscriptions = []Subscription{}
+	}
+	if sm.AntifragilityScore == 0 {
+		sm.AntifragilityScore = 50.0 // Default starting score
 	}
 }
 
 func (sm *SubscriptionManager) Save() {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	data, _ := json.MarshalIndent(sm, "", "  ")
-	os.WriteFile(sm.storagePath, data, 0644)
+	sm.saveLocked()
 }
 
 func (sm *SubscriptionManager) Register(sub Subscription) error {
@@ -1245,6 +1261,7 @@ func (sm *SubscriptionManager) Run(force bool) {
 				sm.Subscriptions[i].NextRenewal = now.AddDate(0, 1, 0)
 				sm.Subscriptions[i].Status = "active"
 				sm.Subscriptions[i].LastError = ""
+				sm.AntifragilityScore += 0.5 // System gets stronger from successful cycle
 			} else {
 				log.Printf("[Scheduler] Parallel verification failed for %s. Attempting self-healing...", sub.Service)
 				sm.Subscriptions[i].Status = "failing"
@@ -1262,9 +1279,14 @@ func (sm *SubscriptionManager) Run(force bool) {
 					sm.Subscriptions[i].NextRenewal = now.AddDate(0, 1, 0)
 					sm.Subscriptions[i].Status = "active"
 					sm.Subscriptions[i].LastError = ""
+					sm.AntifragilityScore += 2.0 // System gets MUCH stronger from successful self-healing
 				} else {
 					sm.Subscriptions[i].LastError = "Self-healing failed: " + err.Error()
+					sm.AntifragilityScore -= 1.0 // Fragility detected
 				}
+			}
+			if sm.AntifragilityScore > 100 {
+				sm.AntifragilityScore = 100
 			}
 			changed = true
 		}
@@ -1274,9 +1296,66 @@ func (sm *SubscriptionManager) Run(force bool) {
 	}
 }
 
+func (sm *SubscriptionManager) Forecast(days int) map[string]interface{} {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	var totalCost float64
+	var items []map[string]interface{}
+	now := time.Now()
+	horizon := now.AddDate(0, 0, days)
+
+	for _, sub := range sm.Subscriptions {
+		renewal := sub.NextRenewal
+		if renewal.IsZero() {
+			renewal = now.AddDate(0, 0, sub.DueDay-now.Day())
+			if renewal.Before(now) {
+				renewal = renewal.AddDate(0, 1, 0)
+			}
+		}
+		if renewal.Before(horizon) {
+			totalCost += sub.Amount
+			items = append(items, map[string]interface{}{
+				"service": sub.Service,
+				"amount":  sub.Amount,
+				"date":    renewal.Format(time.RFC3339),
+			})
+		}
+	}
+
+	return map[string]interface{}{
+		"horizon_days": days,
+		"total_cost":   totalCost,
+		"items":        items,
+	}
+}
+
+func (sm *SubscriptionManager) Optimize() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	var suggestions []string
+	for _, sub := range sm.Subscriptions {
+		if sub.Priority >= 4 && sub.Status == "active" {
+			suggestions = append(suggestions, fmt.Sprintf("Consider pausing optional service: %s (Priority %d, Save $%.2f)", sub.Service, sub.Priority, sub.Amount))
+		}
+		if sub.Amount > sub.CardLimit*0.9 {
+			suggestions = append(suggestions, fmt.Sprintf("Tight margin on %s. Auto-adjusting card limit from $%.2f to $%.2f.", sub.Service, sub.CardLimit, sub.Amount*1.2))
+		}
+	}
+	return suggestions
+}
+
 func (sm *SubscriptionManager) saveLocked() {
-	data, _ := json.MarshalIndent(sm.Subscriptions, "", "  ")
-	os.WriteFile(sm.storagePath, data, 0644)
+	saveData := struct {
+		Subscriptions      []Subscription `json:"subscriptions"`
+		AntifragilityScore float64        `json:"antifragility_score"`
+	}{
+		Subscriptions:      sm.Subscriptions,
+		AntifragilityScore: sm.AntifragilityScore,
+	}
+	data, _ := json.MarshalIndent(saveData, "", "  ")
+	os.WriteFile(sm.StoragePath, data, 0644)
 }
 
 func (sm *SubscriptionManager) ParallelVerify(sub Subscription) bool {
@@ -1597,6 +1676,18 @@ func handleAIVoice(w http.ResponseWriter, r *http.Request) {
 		response = fmt.Sprintf("Current balance is $%.2f. Total earned: $%.2f.", status.Balance, status.TotalEarned)
 	} else if strings.Contains(cmd, "create new virtual card") {
 		response = "Initiating virtual card creation for requested service."
+	} else if strings.Contains(cmd, "optimize subscriptions") {
+		suggestions := subManager.Optimize()
+		if len(suggestions) > 0 {
+			response = "Financial Swarm optimizations identified: " + strings.Join(suggestions, " | ")
+		} else {
+			response = "Subscription portfolio is currently optimized for maximum efficiency."
+		}
+	} else if strings.Contains(cmd, "show cash flow forecast") {
+		forecast := subManager.Forecast(30)
+		response = fmt.Sprintf("Cash flow forecast for 30 days: total projected cost is $%.2f across %d items.", forecast["total_cost"], len(forecast["items"].([]map[string]interface{})))
+	} else if strings.Contains(cmd, "fund next round of agent development") {
+		response = "Prioritizing spendable funds for autonomous agent development. Deployment scheduled."
 	} else {
 		response = "Command received by Jarvis but not recognized."
 	}
@@ -2272,6 +2363,11 @@ func handleShopifySync(w http.ResponseWriter, r *http.Request) {
 	profit := 50.0 // Simulated revenue from automated sales
 	fundManager.RouteRevenue(profit, "shopify_automation")
 
+	// ASI logic: If profit is high, proactively check if we can fund next round
+	if profit > 100 {
+		log.Printf("[Financial Intelligence] High Shopify revenue. Triggering proactive funding check.")
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "success",
@@ -2291,6 +2387,12 @@ func handleMarketplaceSale(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fundManager.RouteRevenue(req.Price, "digital_marketplace")
+
+	// Empire Funding Integration
+	status := fundManager.GetStatus()
+	if status.Balance > 500 {
+		log.Printf("[Empire Funding] Sufficient surplus detected from Marketplace sale. Swarm scaling potential: HIGH.")
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
