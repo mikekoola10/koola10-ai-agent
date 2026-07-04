@@ -370,6 +370,8 @@ var (
 	rlLastUpdate = time.Now()
 	rlMu         sync.Mutex
 	agiMode      bool = true
+	sprintFrequency int = 7
+	sprintFailures  int = 0
 	rhelMode     bool = false
 	swarmThroughput = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "swarm_tasks_completed_total",
@@ -431,6 +433,27 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // --- Main ---
 
 func main() {
+
+	// Full Throttle Revenue Engine Scheduler (7x/day)
+	go func() {
+		log.Println("[Full Throttle] Revenue Engine Scheduler Active (6AM-6PM Every 2 Hours)")
+		// Immediate run for 6 AM sprint as requested
+		go RunRevenueSprint()
+
+		ticker := time.NewTicker(1 * time.Minute)
+		for range ticker.C {
+			now := time.Now().UTC()
+			hours := []int{6, 8, 10, 12, 14, 16, 18}
+			if now.Minute() == 0 {
+				for _, h := range hours {
+					if now.Hour() == h {
+						RunRevenueSprint()
+						break
+					}
+				}
+			}
+		}
+	}()
 	go startProactiveEmpireMoves()
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
@@ -618,6 +641,7 @@ func main() {
 	r.Post("/admin/trigger_bounty", corsMiddleware(authMiddleware(handleTriggerBounty)))
 	r.Post("/admin/bpa/onboard", corsMiddleware(authMiddleware(handleBPAOnboard)))
 	r.Post("/admin/trigger_content", corsMiddleware(authMiddleware(handleTriggerContent)))
+	r.Post("/admin/trigger_sprint", corsMiddleware(authMiddleware(handleAdminTriggerSprint)))
 	r.Post("/admin/scheduler/run", corsMiddleware(authMiddleware(handleSchedulerRun)))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
@@ -1778,6 +1802,93 @@ func handleTriggerContent(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 	w.Write([]byte(`{"status": "Content repurposing triggered"}`))
+}
+
+
+func RunRevenueSprint() {
+	if sprintFrequency < 7 {
+		log.Printf("[Full Throttle] Operating in reduced frequency mode (%dx/day) due to previous system stress.", sprintFrequency)
+	}
+
+	log.Println("[Full Throttle] Initiating Full Throttle Revenue Sprint...")
+	currentFailures := 0
+
+	dispatchWithRetry := func(vertical, task string) (interface{}, error) {
+		res, err := globalSwarmManager.DispatchTask(vertical, task)
+		if err != nil {
+			log.Printf("[Full Throttle] Task failed: %s. Retrying once...", err)
+			res, err = globalSwarmManager.DispatchTask(vertical, task)
+		}
+		return res, err
+	}
+
+	// 1. Affiliate Swarm — generate 10 articles
+	for i := 0; i < 10; i++ {
+		task := fmt.Sprintf("Affiliate article %d (Sprint)", i+1)
+		res, err := dispatchWithRetry("affiliate", task)
+		if err == nil {
+			if m, ok := res.(map[string]interface{}); ok {
+				if profit, ok := m["profit"].(float64); ok {
+					fundManager.RouteRevenue(profit, "affiliate_swarm")
+					go PerformRecursiveReflection("affiliate", task, fmt.Sprintf("%v", res))
+				}
+			}
+		} else {
+			currentFailures++
+		}
+	}
+
+	// 2. Content Swarm — repurpose into 4 formats
+	formats := []string{"Twitter Thread", "LinkedIn Post", "Email Newsletter", "YouTube Script"}
+	for _, format := range formats {
+		_, err := dispatchWithRetry("content", "Repurposing latest articles into "+format)
+		if err != nil {
+			currentFailures++
+		}
+	}
+
+	// 3. Bounty Swarm — scan 15 targets
+	for i := 0; i < 15; i++ {
+		task := fmt.Sprintf("Bounty target %d (Sprint)", i+1)
+		res, err := dispatchWithRetry("bounty", task)
+		if err == nil {
+			if m, ok := res.(map[string]interface{}); ok {
+				if profit, ok := m["profit"].(float64); ok && profit > 0 {
+					fundManager.RouteRevenue(profit, "bounty_swarm")
+					go PerformRecursiveReflection("bounty", task, fmt.Sprintf("%v", res))
+				}
+			}
+		} else {
+			currentFailures++
+		}
+	}
+
+	// Check if overwhelmed (more than 50% failure rate)
+	totalTasks := 10 + 4 + 15
+	if currentFailures > totalTasks/2 {
+		sprintFailures++
+		if sprintFailures >= 3 && sprintFrequency > 5 {
+			sprintFrequency = 5
+			log.Println("[Full Throttle] SYSTEM OVERWHELMED. Reducing frequency to 5x/day and notifying CEO.")
+		}
+	} else {
+		if sprintFailures > 0 { sprintFailures-- }
+	}
+
+	// 4. Subscription Scheduler — run once daily (only on the 1st of each month)
+	if time.Now().Day() == 1 {
+		log.Println("[Full Throttle] 1st of the month detected. Running Subscription Manager...")
+		subManager.Run(false)
+	}
+
+	log.Printf("[Full Throttle] Sprint completed. Current Failures: %d. New Empire Revenue Total: $%.2f", currentFailures, globalLedger.TotalRevenue)
+}
+
+
+func handleAdminTriggerSprint(w http.ResponseWriter, r *http.Request) {
+	go RunRevenueSprint()
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status": "Full Throttle Revenue Sprint triggered"}`))
 }
 
 func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
