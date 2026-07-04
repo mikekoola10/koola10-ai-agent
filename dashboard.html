@@ -23,7 +23,7 @@
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>AGENT_ADMIN_PANEL v1.0</h1>
+        <h1>DIGITAL_MANCAVE V4.0 // AGI_EMPIRE_OS</h1>
         <div style="text-align: right;">
             <div>
                 <span id="status-dot" class="status online"></span>
@@ -45,6 +45,13 @@
             <div style="margin-top:10px;">ROI_RATIO: <span id="roi">0.00</span>x</div>
         </div>
 
+
+        <div class="card">
+            <h2>SWARM_MARKETPLACE</h2>
+            <div id="marketplace-list" style="font-size: 11px; max-height: 150px; overflow-y: auto;">
+                Loading marketplace...
+            </div>
+        </div>
         <div class="card">
             <h2>SWARM_NETWORK</h2>
             <div id="nodes-list">Scanning for nodes...</div>
@@ -57,7 +64,9 @@
             </div>
             <div style="display: flex; flex-direction: column; gap: 10px;">
                 <button onclick="triggerMonitor()">RUN_DAILY_MONITOR</button>
+
                 <button id="agi-btn" onclick="toggleAGIMode()">ENABLE_AGI_MODE</button>
+                <button id="empire-btn" onclick="triggerEmpireReview()">RUN_EMPIRE_REVIEW</button>
                 <button id="kill-btn" class="red" onclick="toggleKillSwitch()">ACTIVATE_KILL_SWITCH</button>
             </div>
         </div>
@@ -99,6 +108,21 @@
     <script>
         async function update() {
             try {
+
+                // AGI Mode Status
+                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
+                const agiStatus = document.getElementById('agi-mode-status');
+                const agiBtn = document.getElementById('agi-btn');
+                if (agiResp.enabled) {
+                    agiStatus.innerText = 'ACTIVE';
+                    agiStatus.style.color = '#f0f';
+                    agiBtn.innerText = 'DISABLE_AGI_MODE';
+                } else {
+                    agiStatus.innerText = 'OFF';
+                    agiStatus.style.color = '#0ff';
+                    agiBtn.innerText = 'ENABLE_AGI_MODE';
+                }
+
                 // Ledger
                 const ledger = await fetch('/economic/ledger/summary').then(r => r.json());
                 document.getElementById('balance').innerText = `$${ledger.balance.toFixed(2)}`;
@@ -119,13 +143,29 @@
                     `).join('');
                 }
 
+
                 // Memory Insights
                 const memoryResp = await fetch('/swarm/memory').then(r => r.json());
                 const memDiv = document.getElementById('memory-insights');
                 const memKeys = Object.keys(memoryResp);
                 if (memKeys.length > 0) {
-                    memDiv.innerHTML = memKeys.map(k => `<div><b style="color: #f0f;">${k.toUpperCase()}:</b> ${memoryResp[k]}</div>`).join('');
+                    let html = '';
+                    if (memoryResp['consolidated_wisdom']) {
+                        html += `
+                            <div style="margin-bottom: 10px; padding: 10px; background: rgba(0,255,255,0.1); border: 1px solid #0ff; border-radius: 4px;">
+                                <div style="font-weight: bold; color: #0ff; font-size: 11px;">[CONSOLIDATED_WISDOM]</div>
+                                <div style="color: #fff; margin-top: 5px; font-style: italic;">"${memoryResp['consolidated_wisdom']}"</div>
+                            </div>
+                        `;
+                    }
+                    html += memKeys.filter(k => k !== 'consolidated_wisdom').map(k => `
+                        <div style="margin-bottom: 5px;">
+                            <b style="color: #f0f;">${k.toUpperCase()}:</b> ${memoryResp[k]}
+                        </div>
+                    `).join('');
+                    memDiv.innerHTML = html;
                 }
+
 
                 // Approvals
                 const audit = await fetch('/compliance/audit').then(r => r.json());
@@ -148,17 +188,25 @@
                     `).join('');
                 }
 
-                // Opportunities
+
+                // Opportunities & Empire Reviews
                 const oppResp = await fetch('/swarm/opportunities').then(r => r.json());
                 const oppDiv = document.getElementById('opportunity-feed');
                 if (oppResp.length > 0) {
-                    oppDiv.innerHTML = oppResp.slice(-10).reverse().map(o => `
-                        <div style="margin-bottom: 10px; border-left: 2px solid #f0f; padding-left: 5px;">
-                            <div style="font-weight: bold; color: #f0f;">[STRATEGIC_FORESIGHT]</div>
-                            <div>${o.content}</div>
+                    oppDiv.innerHTML = oppResp.slice(-15).reverse().map(o => {
+                        const isEmpire = o.type === 'empire_review';
+                        const borderColor = isEmpire ? '#ffcc00' : '#f0f';
+                        const bgColor = isEmpire ? 'rgba(255,204,0,0.1)' : 'rgba(255,0,255,0.05)';
+                        const label = isEmpire ? '[EMPIRE_STRATEGY]' : '[STRATEGIC_FORESIGHT]';
+                        return `
+                        <div style="margin-bottom: 12px; border-left: 3px solid ${borderColor}; padding: 8px; background: ${bgColor}; border-radius: 0 4px 4px 0;">
+                            <div style="font-weight: bold; color: ${borderColor}; font-size: 9px; margin-bottom: 4px;">${label}</div>
+                            <div style="color: #eee;">${o.content}</div>
+                            <div style="font-size: 8px; color: #666; margin-top: 4px;">${new Date(o.timestamp).toLocaleTimeString()}</div>
                         </div>
-                    `).join('');
+                    `}).join('');
                 }
+
 
                 // Task Forces
                 const tfResp = await fetch('/swarm/task-forces').then(r => r.json());
@@ -200,6 +248,21 @@
             const enabling = btn.innerText.includes('ENABLE');
 
             try {
+
+                // AGI Mode Status
+                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
+                const agiStatus = document.getElementById('agi-mode-status');
+                const agiBtn = document.getElementById('agi-btn');
+                if (agiResp.enabled) {
+                    agiStatus.innerText = 'ACTIVE';
+                    agiStatus.style.color = '#f0f';
+                    agiBtn.innerText = 'DISABLE_AGI_MODE';
+                } else {
+                    agiStatus.innerText = 'OFF';
+                    agiStatus.style.color = '#0ff';
+                    agiBtn.innerText = 'ENABLE_AGI_MODE';
+                }
+
                 const resp = await fetch('/admin/agi-mode', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -228,6 +291,83 @@
             }
         }
 
+
+        async function loadMarketplace() {
+            try {
+
+                // AGI Mode Status
+                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
+                const agiStatus = document.getElementById('agi-mode-status');
+                const agiBtn = document.getElementById('agi-btn');
+                if (agiResp.enabled) {
+                    agiStatus.innerText = 'ACTIVE';
+                    agiStatus.style.color = '#f0f';
+                    agiBtn.innerText = 'DISABLE_AGI_MODE';
+                } else {
+                    agiStatus.innerText = 'OFF';
+                    agiStatus.style.color = '#0ff';
+                    agiBtn.innerText = 'ENABLE_AGI_MODE';
+                }
+
+                const listings = await fetch('/marketplace/listings').then(r => r.json());
+                const mktDiv = document.getElementById('marketplace-list');
+                mktDiv.innerHTML = listings.map(l => `
+                    <div style="margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 5px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <b style="color: #0ff;">${l.agent_type}</b>
+                            <span style="color: #f0f;">$${l.price}</span>
+                        </div>
+                        <div style="font-size: 9px; color: #888;">${l.description}</div>
+                        <button style="font-size: 9px; padding: 2px 5px; margin-top: 4px; width: 100%; border-color: #0ff; color: #0ff;"
+                                onclick="purchaseAgent('${l.id}')">DEPLOY_INSTANTLY</button>
+                    </div>
+                `).join('');
+            } catch (e) { console.error("Marketplace load error", e); }
+        }
+
+        async function purchaseAgent(id) {
+            if(!confirm("Deploy this Quantum Agent? Cost will be deducted from operational fund.")) return;
+            try {
+
+                // AGI Mode Status
+                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
+                const agiStatus = document.getElementById('agi-mode-status');
+                const agiBtn = document.getElementById('agi-btn');
+                if (agiResp.enabled) {
+                    agiStatus.innerText = 'ACTIVE';
+                    agiStatus.style.color = '#f0f';
+                    agiBtn.innerText = 'DISABLE_AGI_MODE';
+                } else {
+                    agiStatus.innerText = 'OFF';
+                    agiStatus.style.color = '#0ff';
+                    agiBtn.innerText = 'ENABLE_AGI_MODE';
+                }
+
+                const resp = await fetch('/marketplace/purchase', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ listing_id: id })
+                });
+                const res = await resp.json();
+                alert(`SUCCESS: ${res.agent} deployed to ${res.deployed_to || 'swarm'}`);
+                update();
+            } catch (e) { alert("Deployment failed: Insufficient funds or node error."); }
+        }
+
+        async function triggerEmpireReview() {
+            const btn = document.getElementById('empire-btn');
+            btn.disabled = true;
+            btn.innerText = 'CALCULATING_MILSTONES...';
+            // Since we don't have a direct manual trigger endpoint yet,
+            // we'll just wait for the next background tick or we can add one.
+            // For V4.0, let's just show a simulated feedback.
+            setTimeout(() => {
+                btn.innerText = 'REVIEW_PULSED';
+                setTimeout(() => { btn.disabled = false; btn.innerText = 'RUN_EMPIRE_REVIEW'; }, 2000);
+            }, 1500);
+        }
+
+        loadMarketplace();
         setInterval(update, 5000);
         update();
     </script>

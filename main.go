@@ -419,8 +419,18 @@ func main() {
 		fmt.Sscanf(string(data), "%d", &lastProcessedAuditOffset)
 	}
 	subManager = NewSubscriptionManager(subsPath)
+
+	initMarketplace()
 	go startMaintenanceLoop()
+	go startEmpireReviewLoop()
 	go startStrategicForesightLoop()
+	go func() {
+		ticker := time.NewTicker(30 * time.Minute)
+		for range ticker.C {
+			globalSwarmManager.SummarizeMemory()
+		}
+	}()
+
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -483,9 +493,9 @@ func main() {
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
 
 	// Initial deployment of revenue swarms
-	globalSwarmManager.DeploySwarms("affiliate", 10)
-	globalSwarmManager.DeploySwarms("bounty", 10)
-	globalSwarmManager.DeploySwarms("content", 10)
+	globalSwarmManager.DeploySwarms("affiliate", 20)
+	globalSwarmManager.DeploySwarms("bounty", 20)
+	globalSwarmManager.DeploySwarms("content", 20)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -568,6 +578,8 @@ func main() {
 	r.Get("/swarm/opportunities", corsMiddleware(handleSwarmOpportunities))
 	r.Get("/swarm/task-forces", corsMiddleware(handleSwarmTaskForces))
 	r.Get("/swarm/nodes", corsMiddleware(handleSwarmNodes))
+	r.Get("/marketplace/listings", corsMiddleware(handleMarketplaceList))
+	r.Post("/marketplace/purchase", corsMiddleware(handleMarketplacePurchase))
 
 	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
 	r.Get("/swarm/report", corsMiddleware(handleSwarmReport))
@@ -1865,6 +1877,112 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		case <-r.Context().Done():
 			return
+		}
+	}
+}
+
+
+type MarketplaceListing struct {
+	ID          string  `json:"id"`
+	AgentType   string  `json:"agent_type"`
+	Description string  `json:"description"`
+	Price       float64 `json:"price"`
+	Rating      float64 `json:"rating"`
+	Vertical    string  `json:"vertical"`
+}
+
+var (
+	marketplaceListings []MarketplaceListing
+	marketplaceMu       sync.RWMutex
+)
+
+func initMarketplace() {
+	marketplaceListings = []MarketplaceListing{
+		{ID: "mkt_001", AgentType: "Quantum Content Viralizer", Description: "Hyper-optimized agent for viral Twitter thread generation.", Price: 49.99, Rating: 4.9, Vertical: "solara"},
+		{ID: "mkt_002", AgentType: "Stellar Arbitrage Bot", Description: "High-frequency trading agent for XLM/USDC pairs.", Price: 199.99, Rating: 4.7, Vertical: "trading"},
+		{ID: "mkt_003", AgentType: "Bounty Hunter Pro", Description: "Autonomous hunter for high-value GitHub and Web3 bounties.", Price: 99.00, Rating: 4.8, Vertical: "bounty"},
+	}
+}
+
+func handleMarketplaceList(w http.ResponseWriter, r *http.Request) {
+	marketplaceMu.RLock()
+	defer marketplaceMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(marketplaceListings)
+}
+
+func handleMarketplacePurchase(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ListingID string `json:"listing_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	marketplaceMu.RLock()
+	var target MarketplaceListing
+	found := false
+	for _, l := range marketplaceListings {
+		if l.ID == req.ListingID {
+			target = l
+			found = true
+			break
+		}
+	}
+	marketplaceMu.RUnlock()
+
+	if !found {
+		http.Error(w, "listing not found", 404)
+		return
+	}
+
+	fundManager.RouteRevenue(-target.Price, "marketplace_purchase")
+	globalSwarmManager.DeploySwarms(target.Vertical, 1)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "purchased", "agent": target.AgentType})
+}
+
+func startEmpireReviewLoop() {
+	log.Printf("Starting AGI Empire Building Review loop...")
+	ticker := time.NewTicker(15 * time.Minute)
+	for range ticker.C {
+		if !globalSwarmManager.IsAGIMode() { continue }
+		apiKey := os.Getenv("DEEPSEEK_API_KEY")
+		if apiKey == "" { continue }
+
+		globalLedger.mu.RLock()
+		revenue := globalLedger.TotalRevenue
+		globalLedger.mu.RUnlock()
+
+		prompt := fmt.Sprintf("EMPIRE_REVIEW_MODE: ACTIVE. Goal: $1M. Current Revenue: $%.2f. Identify the 'Single Critical Constraint' and suggest a 10x pivot.", revenue)
+
+		dsReq := map[string]interface{}{
+			"model": "deepseek-chat",
+			"messages": []map[string]string{
+				{"role": "system", "content": "You are the Superintelligent Empire Architect."},
+				{"role": "user", "content": prompt},
+			},
+		}
+		dsBody, _ := json.Marshal(dsReq)
+		hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+		hReq.Header.Set("Authorization", "Bearer "+apiKey)
+		hReq.Header.Set("Content-Type", "application/json")
+
+		resp, err := (&http.Client{}).Do(hReq)
+		if err == nil {
+			var dsRes struct { Choices []struct { Message struct { Content string } } }
+			if json.NewDecoder(resp.Body).Decode(&dsRes) == nil && len(dsRes.Choices) > 0 {
+				review := dsRes.Choices[0].Message.Content
+				opportunityMu.Lock()
+				proactiveFeed = append(proactiveFeed, map[string]string{
+					"timestamp": time.Now().Format(time.RFC3339),
+					"type":      "empire_review",
+					"content":   review,
+				})
+				opportunityMu.Unlock()
+			}
+			resp.Body.Close()
 		}
 	}
 }
