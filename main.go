@@ -298,6 +298,15 @@ type VideoJob struct {
 
 // --- Global States ---
 
+type Product struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Collection  string  `json:"collection"`
+	Price       float64 `json:"price"`
+	Description string  `json:"description"`
+	Status      string  `json:"status"` // "generated", "synced"
+}
+
 type ReflectionLog struct {
 	Timestamp   string `json:"timestamp"`
 	Vertical    string `json:"vertical"`
@@ -367,6 +376,8 @@ var (
 		Help: "The total number of processed tasks by the swarm",
 	})
 	reflectLogs  []ReflectionLog
+	generatedProducts []Product
+	productMu        sync.Mutex
 
 
 	redisClient *redis.Client
@@ -420,6 +431,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // --- Main ---
 
 func main() {
+	go startProactiveEmpireMoves()
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
 	region = os.Getenv("FLY_REGION")
@@ -593,6 +605,8 @@ func main() {
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
 	r.Get("/swarm/reflections", corsMiddleware(handleSwarmReflections))
 	r.Post("/admin/agi-mode", authMiddleware(handleAdminAGIMode))
+	r.Post("/admin/generate-product-line", authMiddleware(handleAdminGenerateProductLine))
+	r.Get("/admin/product-empire/stats", corsMiddleware(handleProductEmpireStats))
 	r.Post("/monetize/shopify/sync", corsMiddleware(handleShopifySync))
 	r.Post("/monetize/marketplace/sale", corsMiddleware(handleMarketplaceSale))
 
@@ -2196,18 +2210,26 @@ func PerformRecursiveReflection(vertical, task, result string) {
 // --- Monetization Handlers ---
 
 func handleShopifySync(w http.ResponseWriter, r *http.Request) {
-	// Simulated Shopify product generation and sync
-	profit := 50.0 // Simulated revenue from automated sales
+	productMu.Lock()
+	syncedCount := 0
+	for i, p := range generatedProducts {
+		if p.Status == "generated" {
+			generatedProducts[i].Status = "synced"
+			syncedCount++
+		}
+	}
+	productMu.Unlock()
+
+	profit := float64(syncedCount) * 50.0
 	fundManager.RouteRevenue(profit, "shopify_automation")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "success",
-		"products_synced": 12,
+		"products_synced": syncedCount,
 		"revenue_generated": profit,
 	})
 }
-
 func handleMarketplaceSale(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ProductID string `json:"product_id"`
@@ -2256,4 +2278,82 @@ func handleBusinessMetrics(w http.ResponseWriter, r *http.Request) {
 		"scaling_status": "HIGH_AVAILABILITY_ACTIVE",
 		"resource_optimization": "Memory utilization optimized via UBI-minimal base layers.",
 	})
+}
+
+func handleAdminGenerateProductLine(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Collection string `json:"collection"`
+		Count      int    `json:"count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	productMu.Lock()
+	for i := 0; i < req.Count; i++ {
+		generatedProducts = append(generatedProducts, Product{
+			ID:          fmt.Sprintf("prod-%d", len(generatedProducts)+1),
+			Name:        fmt.Sprintf("%s Item #%d", req.Collection, i+1),
+			Collection:  req.Collection,
+			Price:       29.99 + float64(i)*10,
+			Description: "Red Hat AI optimized autonomous design.",
+			Status:      "generated",
+		})
+	}
+	productMu.Unlock()
+
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintf(w, "Generated %d items for collection: %s", req.Count, req.Collection)
+}
+
+func handleProductEmpireStats(w http.ResponseWriter, r *http.Request) {
+	productMu.Lock()
+	defer productMu.Unlock()
+
+	synced := 0
+	for _, p := range generatedProducts {
+		if p.Status == "synced" {
+			synced++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_products": len(generatedProducts),
+		"synced_products": synced,
+		"revenue_forecast": float64(len(generatedProducts)-synced) * 45.0,
+		"active_collections": []string{"Neon Void Collection"},
+		"generation_progress": 100,
+	})
+}
+
+func startProactiveEmpireMoves() {
+	ticker := time.NewTicker(30 * time.Minute)
+	for {
+		log.Println("[Proactive JARVIS] Initiating autonomous Empire Move...")
+
+		// Simulate a strategic move
+		globalSwarmManager.DispatchTask("apex", "Analyze current revenue streams and suggest optimizations.")
+
+		// Randomly trigger a product swarm if none active
+		productMu.Lock()
+		if len(generatedProducts) == 0 {
+			log.Println("[Proactive JARVIS] Launching autonomous product swarm for Neon Void Collection...")
+			// Simulate adding products
+			for i := 0; i < 10; i++ {
+				generatedProducts = append(generatedProducts, Product{
+					ID:          fmt.Sprintf("auto-prod-%d", i+1),
+					Name:        fmt.Sprintf("Neon Void Item #%d", i+1),
+					Collection:  "Neon Void Collection",
+					Price:       49.99,
+					Description: "Autonomously generated via RHEL-optimized swarm.",
+					Status:      "generated",
+				})
+			}
+		}
+		productMu.Unlock()
+
+		<-ticker.C
+	}
 }

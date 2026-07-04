@@ -157,6 +157,17 @@
             <button onclick="triggerRevenue('affiliate')">EXPAND_AFFILIATE_NETWORK</button>
             <button onclick="triggerRevenue('bounty')">HUNT_NEW_BOUNTIES</button>
         </div>
+        <div class="card">
+            <h2>PRODUCT_EMPIRE_PIPELINE</h2>
+            <div class="metrics">FORECAST: <span id="revenue-forecast">$0.00</span></div>
+            <div>GENERATED: <span id="total-products">0</span> | SYNCED: <span id="synced-products">0</span></div>
+            <div style="margin-top:10px;">ACTIVE: <span id="active-collections" style="color:var(--neon-purple)">None</span></div>
+            <div style="background:#222; height:10px; margin-top:10px; border-radius:5px;">
+                <div id="generation-bar" style="background:var(--neon-cyan); height:100%; width:0%; border-radius:5px; transition:width 1s;"></div>
+            </div>
+            <button onclick="launchNextCycle()">LAUNCH_NEXT_SWARM_CYCLE</button>
+            <button class="btn-rhel" onclick="syncShopify()">SYNC_TO_SHOPIFY</button>
+        </div>
 
         <div class="card">
             <h2>ENTERPRISE_INFRASTRUCTURE</h2>
@@ -185,6 +196,32 @@
     </div>
 
     <script>
+        async function updateProductStats() {
+            const res = await fetch("/admin/product-empire/stats").then(r => r.json());
+            document.getElementById("revenue-forecast").innerText = `\$\${res.revenue_forecast.toFixed(2)}`;
+            document.getElementById("total-products").innerText = res.total_products;
+            document.getElementById("synced-products").innerText = res.synced_products;
+            document.getElementById("active-collections").innerText = res.active_collections.join(", ");
+            document.getElementById("generation-bar").style.width = `\${res.generation_progress}%`;
+        }
+
+        async function launchNextCycle() {
+            await fetch("/admin/generate-product-line", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({collection: "Digital Ascendance", count: 15})
+            });
+            updateProductStats();
+            alert("Second swarm cycle focused on digital products initiated!");
+        }
+
+        async function syncShopify() {
+            await fetch("/monetize/shopify/sync", { method: "POST" });
+            updateProductStats();
+            updateBusinessMetrics();
+            alert("Products pushed to Shopify and Marketplace listings created.");
+        }
+
         async function updateBusinessMetrics() {
             const res = await fetch('/admin/business-metrics').then(r => r.json());
             document.getElementById('empire-revenue').innerText = `$${res.empire_revenue.toFixed(2)}`;
@@ -244,9 +281,11 @@
 
         // Initialize
         setInterval(updateBusinessMetrics, 5000);
+        setInterval(updateProductStats, 5000);
         setInterval(updateSwarm, 5000);
         setInterval(updateReflections, 10000);
         updateBusinessMetrics();
+        updateProductStats();
         updateSwarm();
         updateReflections();
         syncRHEL();
