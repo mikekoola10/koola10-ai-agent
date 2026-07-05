@@ -1,5 +1,11 @@
 package agents
 
+import (
+	"fmt"
+	"koola10/tools"
+	"strings"
+)
+
 type GrantSwarmAgent struct {
 	specialty string
 	status    AgentStatus
@@ -8,8 +14,40 @@ type GrantSwarmAgent struct {
 
 func (a *GrantSwarmAgent) Run(task string) (interface{}, error) {
 	a.status = StatusWorking
+	defer func() { a.status = StatusCompleted }()
+
+	// Use Granted MCP tools for relevant tasks
+	if strings.Contains(strings.ToLower(task), "search") || strings.Contains(strings.ToLower(task), "find") {
+		res := tools.RunTool("search_grants", map[string]interface{}{
+			"query": task,
+		})
+		if res.Success {
+			return res.Data, nil
+		}
+		return nil, fmt.Errorf("search_grants tool failed: %s", res.Error)
+	}
+
+	if strings.Contains(strings.ToLower(task), "details") || strings.Contains(strings.ToLower(task), "get") {
+		// Try to extract slug or id from task
+		res := tools.RunTool("get_grant", map[string]interface{}{
+			"slug": task,
+		})
+		if res.Success {
+			return res.Data, nil
+		}
+		// Fallback to searching funders if it looks like funder research
+		if strings.Contains(strings.ToLower(task), "funder") || strings.Contains(strings.ToLower(task), "foundation") {
+			res = tools.RunTool("search_funders", map[string]interface{}{
+				"query": task,
+			})
+			if res.Success {
+				return res.Data, nil
+			}
+		}
+	}
+
+	// Default simulated execution if no tool matches or fails
 	res := "Grant Proposal (" + a.specialty + "): " + a.prompt + " | Task: " + task
-	a.status = StatusCompleted
 	return res, nil
 }
 
