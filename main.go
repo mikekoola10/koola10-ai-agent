@@ -241,6 +241,18 @@ type VaultSummary struct {
 	SpendableFund  float64 `json:"spendable_fund"`
 }
 
+type PayoutDestination struct {
+	ID            string `json:"id"`
+	Type          string `json:"type"` // "wire", "ach", "cashapp"
+	RecipientName string `json:"recipient_name"`
+	BankName      string `json:"bank_name"`
+	RoutingNumber string `json:"routing_number"`
+	AccountNumber string `json:"account_number"`
+	Memo          string `json:"memo"`
+	Status        string `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type Subscription struct {
 	ID          string                  `json:"id"`
 	Service     string                  `json:"service"`
@@ -637,6 +649,9 @@ func main() {
 	r.Post("/admin/bpa/onboard", corsMiddleware(authMiddleware(handleBPAOnboard)))
 	r.Post("/admin/trigger_content", corsMiddleware(authMiddleware(handleTriggerContent)))
 	r.Post("/admin/scheduler/run", corsMiddleware(authMiddleware(handleSchedulerRun)))
+	r.Post("/admin/payout/register", authMiddleware(handleAdminPayoutRegister))
+	r.Get("/admin/payout/list", authMiddleware(handleAdminPayoutList))
+	r.Post("/admin/payout/trigger", authMiddleware(handleAdminPayoutTrigger))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/admin/rhel-mode", authMiddleware(handleAdminRHELMode))
@@ -1981,6 +1996,57 @@ func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
 	defer subManager.mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(subManager.Subscriptions)
+}
+
+func handleAdminPayoutRegister(w http.ResponseWriter, r *http.Request) {
+	var dest PayoutDestination
+	if err := json.NewDecoder(r.Body).Decode(&dest); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	dest.ID = generateID()
+	dest.CreatedAt = time.Now()
+	dest.Status = "active"
+
+	data, _ := os.ReadFile("data/payout_destinations.json")
+	var dests []PayoutDestination
+	json.Unmarshal(data, &dests)
+	dests = append(dests, dest)
+
+	out, _ := json.MarshalIndent(dests, "", "  ")
+	os.WriteFile("data/payout_destinations.json", out, 0644)
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(dest)
+}
+
+func handleAdminPayoutList(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile("data/payout_destinations.json")
+	if err != nil {
+		w.Write([]byte("[]"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
+
+func handleAdminPayoutTrigger(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DestinationID string  `json:"destination_id"`
+		Amount        float64 `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	// In a real scenario, this would interface with a bank API or Stripe Payouts
+	log.Printf("[PayoutSystem] Triggering $%.2f wire transfer to destination %s", req.Amount, req.DestinationID)
+
+	fundManager.PaySubscription("WIRE_PAYOUT_"+req.DestinationID, req.Amount)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "initiated", "message": "Wire transfer process started"})
 }
 
 func handleAdminSubscriptionsRegister(w http.ResponseWriter, r *http.Request) {
