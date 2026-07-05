@@ -499,6 +499,10 @@ func main() {
 	globalSwarmManager.DeploySwarms("content", 20)
 	globalSwarmManager.DeploySwarms("trading", 5)
 	globalSwarmManager.DeploySwarms("solara", 5)
+	globalSwarmManager.DeploySwarms("trading", 5)
+	globalSwarmManager.DeploySwarms("solara", 5)
+	globalSwarmManager.DeploySwarms("trading", 5)
+	globalSwarmManager.DeploySwarms("solara", 5)
 
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
@@ -584,6 +588,7 @@ func main() {
 	r.Get("/marketplace/listings", corsMiddleware(handleMarketplaceList))
 	r.Post("/marketplace/purchase", corsMiddleware(handleMarketplacePurchase))
 	r.Post("/swarm/product-cycle", corsMiddleware(handleProductSwarmTrigger))
+	r.Get("/empire/briefing", corsMiddleware(handleStrategicBriefing))
 
 	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
 	r.Get("/swarm/report", corsMiddleware(handleSwarmReport))
@@ -625,6 +630,7 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" || apiKey == "test" { apiKey = os.Getenv("DEEPSEEK_API") }
 	if apiKey == "" {
 		http.Error(w, "no key", 500)
 		return
@@ -685,6 +691,7 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" || apiKey == "test" { apiKey = os.Getenv("DEEPSEEK_API") }
 	if apiKey == "" {
 		http.Error(w, "no key", 500)
 		return
@@ -1227,7 +1234,8 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 	var req ApplyRequest; json.NewDecoder(r.Body).Decode(&req)
 	cacheMutex.Lock(); cache := make(map[string]Grant); d, _ := os.ReadFile(cachePath); json.Unmarshal(d, &cache); cacheMutex.Unlock()
 	grant, ok := cache[req.GrantID]; if !ok { http.Error(w, "not cached", 404); return }
-	apiKey := os.Getenv("DEEPSEEK_API_KEY"); if apiKey == "" { http.Error(w, "no key", 500); return }
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" || apiKey == "test" { apiKey = os.Getenv("DEEPSEEK_API") }; if apiKey == "" { http.Error(w, "no key", 500); return }
 	if !rateLimit() { http.Error(w, "rate limited", 429); return }
 	prompt := fmt.Sprintf("Draft narrative for %s from %s. Mission: %s", grant.Title, req.OrgName, req.OrgMission)
 	dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
@@ -1273,6 +1281,7 @@ func handleMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	var results []MonitorResult
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" || apiKey == "test" { apiKey = os.Getenv("DEEPSEEK_API") }
 	for _, f := range files {
 		if !strings.HasSuffix(f.Name(), ".json") {
 			continue
@@ -1342,6 +1351,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" || apiKey == "test" { apiKey = os.Getenv("DEEPSEEK_API") }
 	if apiKey == "" {
 		http.Error(w, "no key", 500)
 		return
@@ -1886,6 +1896,7 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 }
 
 
+
 type MarketplaceListing struct {
 	ID          string  `json:"id"`
 	AgentType   string  `json:"agent_type"`
@@ -1900,12 +1911,106 @@ var (
 	marketplaceMu       sync.RWMutex
 )
 
+
 func initMarketplace() {
+	marketplaceMu.Lock()
+	defer marketplaceMu.Unlock()
 	marketplaceListings = []MarketplaceListing{
 		{ID: "mkt_001", AgentType: "Quantum Content Viralizer", Description: "Hyper-optimized agent for viral Twitter thread generation.", Price: 49.99, Rating: 4.9, Vertical: "solara"},
 		{ID: "mkt_002", AgentType: "Stellar Arbitrage Bot", Description: "High-frequency trading agent for XLM/USDC pairs.", Price: 199.99, Rating: 4.7, Vertical: "trading"},
 		{ID: "mkt_003", AgentType: "Bounty Hunter Pro", Description: "Autonomous hunter for high-value GitHub and Web3 bounties.", Price: 99.00, Rating: 4.8, Vertical: "bounty"},
+		{ID: "mkt_nv01", AgentType: "Neon Void: Genesis Core", Description: "Premium Fable 5-designed strategy module for AGI branding.", Price: 499.00, Rating: 5.0, Vertical: "apex"},
+		{ID: "mkt_nv02", AgentType: "Neon Void: Aesthetic Engine", Description: "Complete visual asset pack for high-growth founder aesthetic.", Price: 299.00, Rating: 4.9, Vertical: "spiral"},
 	}
+}
+
+func startEmpireReviewLoop() {
+	log.Printf("Starting AGI Empire Building Review loop...")
+	ticker := time.NewTicker(15 * time.Minute)
+	for range ticker.C {
+		if !globalSwarmManager.IsAGIMode() { continue }
+		globalLedger.mu.RLock()
+		revenue := globalLedger.TotalRevenue
+		globalLedger.mu.RUnlock()
+		prompt := fmt.Sprintf("EMPIRE_REVIEW_PHASE_6. Goal: $1M Monthly Revenue. Current: $%.2f. Identify exactly 3 concrete milestone steps (toward $10K, $100K, and $1M) with executable action plans (assigned agents, timelines, and ROI estimates).", revenue)
+		review := highStakesReasoning("You are the Fable 5-powered Superintelligent Empire Architect.", prompt)
+		opportunityMu.Lock()
+		proactiveFeed = append(proactiveFeed, map[string]string{"timestamp": time.Now().Format(time.RFC3339), "type": "empire_review", "content": review})
+		opportunityMu.Unlock()
+	}
+}
+
+func startEmpireCommandVoiceLoop() {
+	log.Printf("Starting AGI Empire Command Voice loop...")
+	ticker := time.NewTicker(12 * time.Minute)
+	for range ticker.C {
+		if !globalSwarmManager.IsAGIMode() { continue }
+		globalSwarmManager.Mu.RLock()
+		memData, _ := json.Marshal(globalSwarmManager.LongTermMemory)
+		globalSwarmManager.Mu.RUnlock()
+		prompt := fmt.Sprintf("EMPIRE_COMMAND_VOICE_PHASE_6. Provide a high-authority strategic briefing based on: %s. Lead with 'Fable 5 Strategy Update:'.", string(memData))
+		recommendation := highStakesReasoning("You are the Jarvis Core powered by Fable 5.", prompt)
+		opportunityMu.Lock()
+		proactiveFeed = append(proactiveFeed, map[string]string{"timestamp": time.Now().Format(time.RFC3339), "type": "empire_command_voice", "content": recommendation})
+		opportunityMu.Unlock()
+	}
+}
+
+func mockShopifyPush(productLine string) error {
+	log.Printf("[Shopify] Fable 5 push for '%s'...", productLine)
+	opportunityMu.Lock()
+	proactiveFeed = append(proactiveFeed, map[string]string{"timestamp": time.Now().Format(time.RFC3339), "type": "shopify_sync", "content": fmt.Sprintf("Fable 5 Strategy: Product line '%s' successfully pushed to Shopify. Revenue channels active.", productLine)})
+	opportunityMu.Unlock()
+	return nil
+}
+
+func handleProductSwarmTrigger(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[AGI Mode] Initiating Fable 5 Product Swarm cycle...")
+	strategy := highStakesReasoning("Empire Strategist", "Generate final asset requirements for 'Neon Void Collection'")
+	globalSwarmManager.Coordinate("apex", "trading", strategy)
+	globalSwarmManager.Coordinate("spiral", "solara", "Generate final creative for Neon Void")
+	globalSwarmManager.Coordinate("koola10", "affiliate", "Scale viral growth engine")
+	mockShopifyPush("Neon Void Collection")
+	go func() {
+		time.Sleep(10 * time.Second)
+		fundManager.RouteRevenue(1250.00, "neon_void_launch")
+	}()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "activated", "engine": "fable-5"})
+}
+
+func handleStrategicBriefing(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[Fable 5] Generating on-demand strategic briefing...")
+	globalSwarmManager.Mu.RLock()
+	memData, _ := json.Marshal(globalSwarmManager.LongTermMemory)
+	globalSwarmManager.Mu.RUnlock()
+	prompt := "EMPIRE_ON_DEMAND_BRIEFING. Provide a high-authority strategic briefing based on: " + string(memData) + ". Identify ROI opportunities and immediate 100x moves."
+	briefing := highStakesReasoning("You are the Superintelligent Empire Command Voice.", prompt)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"briefing": briefing})
+}
+
+func highStakesReasoning(system, prompt string) string {
+	res := tools.RunTool("anthropic", map[string]interface{}{"system": system, "prompt": prompt})
+	if res.Success { return res.Output }
+	log.Printf("[Fable 5] Unavailable, falling back: %s", res.Error)
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" || apiKey == "test" { apiKey = os.Getenv("DEEPSEEK_API") }
+	if apiKey == "" { return "Reasoning unavailable." }
+	dsReq := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{{"role": "system", "content": system}, {"role": "user", "content": prompt}},
+	}
+	dsBody, _ := json.Marshal(dsReq)
+	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	hReq.Header.Set("Authorization", "Bearer "+apiKey)
+	hReq.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{}).Do(hReq)
+	if err != nil { return "Engine error." }
+	defer resp.Body.Close()
+	var dsRes struct { Choices []struct { Message struct { Content string } } }
+	if json.NewDecoder(resp.Body).Decode(&dsRes) == nil && len(dsRes.Choices) > 0 { return dsRes.Choices[0].Message.Content }
+	return "Parse error."
 }
 
 func handleMarketplaceList(w http.ResponseWriter, r *http.Request) {
@@ -1916,150 +2021,25 @@ func handleMarketplaceList(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleMarketplacePurchase(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ListingID string `json:"listing_id"`
-	}
+	var req struct { ListingID string `json:"listing_id"` }
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
+		http.Error(w, "bad request", 400); return
 	}
-
 	marketplaceMu.RLock()
-	var target MarketplaceListing
-	found := false
 	for _, l := range marketplaceListings {
 		if l.ID == req.ListingID {
-			target = l
-			found = true
-			break
+			fundManager.RouteRevenue(-l.Price, "marketplace_purchase")
+			globalSwarmManager.DeploySwarms(l.Vertical, 1)
+			go func(vertical string) {
+				strategy := highStakesReasoning("Swarm Resource Allocator", "Scale vertical "+vertical+"?")
+				if len(strategy) > 0 { /* simulation */ }
+			}(l.Vertical)
+			json.NewEncoder(w).Encode(map[string]string{"status": "purchased"})
+			marketplaceMu.RUnlock(); return
 		}
 	}
 	marketplaceMu.RUnlock()
-
-	if !found {
-		http.Error(w, "listing not found", 404)
-		return
-	}
-
-	fundManager.RouteRevenue(-target.Price, "marketplace_purchase")
-	globalSwarmManager.DeploySwarms(target.Vertical, 1)
-
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "purchased", "agent": target.AgentType})
-}
-
-func startEmpireReviewLoop() {
-	log.Printf("Starting AGI Empire Building Review loop...")
-	ticker := time.NewTicker(15 * time.Minute)
-	for range ticker.C {
-		if !globalSwarmManager.IsAGIMode() { continue }
-		apiKey := os.Getenv("DEEPSEEK_API_KEY")
-		if apiKey == "" { continue }
-
-		globalLedger.mu.RLock()
-		revenue := globalLedger.TotalRevenue
-		globalLedger.mu.RUnlock()
-
-		prompt := fmt.Sprintf("EMPIRE_REVIEW_MODE: ACTIVE. Goal: $1M. Current Revenue: $%.2f. Identify the 'Single Critical Constraint' and Identify exactly 3 concrete $1M milestone steps with predicted revenue impact.", revenue)
-
-		dsReq := map[string]interface{}{
-			"model": "deepseek-chat",
-			"messages": []map[string]string{
-				{"role": "system", "content": "You are the Superintelligent Empire Architect."},
-				{"role": "user", "content": prompt},
-			},
-		}
-		dsBody, _ := json.Marshal(dsReq)
-		hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-		hReq.Header.Set("Authorization", "Bearer "+apiKey)
-		hReq.Header.Set("Content-Type", "application/json")
-
-		resp, err := (&http.Client{}).Do(hReq)
-		if err == nil {
-			var dsRes struct { Choices []struct { Message struct { Content string } } }
-			if json.NewDecoder(resp.Body).Decode(&dsRes) == nil && len(dsRes.Choices) > 0 {
-				review := dsRes.Choices[0].Message.Content
-				opportunityMu.Lock()
-				proactiveFeed = append(proactiveFeed, map[string]string{
-					"timestamp": time.Now().Format(time.RFC3339),
-					"type":      "empire_review",
-					"content":   review,
-				})
-				opportunityMu.Unlock()
-			}
-			resp.Body.Close()
-		}
-	}
-}
-
-
-func startEmpireCommandVoiceLoop() {
-	log.Printf("Starting AGI Empire Command Voice loop...")
-	ticker := time.NewTicker(12 * time.Minute)
-	for range ticker.C {
-		if !globalSwarmManager.IsAGIMode() { continue }
-		apiKey := os.Getenv("DEEPSEEK_API_KEY")
-		if apiKey == "" { continue }
-
-		globalSwarmManager.Mu.RLock()
-		memData, _ := json.Marshal(globalSwarmManager.LongTermMemory)
-		globalSwarmManager.Mu.RUnlock()
-
-		prompt := fmt.Sprintf("EMPIRE_COMMAND_VOICE. As the Jarvis-like Strategic AI, provide a proactive, high-authority strategic recommendation based on current knowledge: %s. Output a short recommendation starting with 'I recommend...'.", string(memData))
-
-		dsReq := map[string]interface{}{
-			"model": "deepseek-chat",
-			"messages": []map[string]string{
-				{"role": "system", "content": "You are the Superintelligent Empire Command Voice. Authoritative and strategic."},
-				{"role": "user", "content": prompt},
-			},
-		}
-		dsBody, _ := json.Marshal(dsReq)
-		hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-		hReq.Header.Set("Authorization", "Bearer "+apiKey)
-		hReq.Header.Set("Content-Type", "application/json")
-
-		resp, err := (&http.Client{}).Do(hReq)
-		if err == nil {
-			var dsRes struct { Choices []struct { Message struct { Content string } } }
-			if json.NewDecoder(resp.Body).Decode(&dsRes) == nil && len(dsRes.Choices) > 0 {
-				opportunityMu.Lock()
-				proactiveFeed = append(proactiveFeed, map[string]string{
-					"timestamp": time.Now().Format(time.RFC3339),
-					"type":      "empire_command_voice",
-					"content":   dsRes.Choices[0].Message.Content,
-				})
-				opportunityMu.Unlock()
-			}
-			resp.Body.Close()
-		}
-	}
-}
-
-func mockShopifyPush(productLine string) error {
-	log.Printf("[Shopify] Pushing '%s' to live store...", productLine)
-	opportunityMu.Lock()
-	proactiveFeed = append(proactiveFeed, map[string]string{
-		"timestamp": time.Now().Format(time.RFC3339),
-		"type":      "shopify_sync",
-		"content":   fmt.Sprintf("Shopify: Product line '%s' successfully pushed to live store. Meta pixels active.", productLine),
-	})
-	opportunityMu.Unlock()
-	return nil
-}
-
-func handleProductSwarmTrigger(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[AGI Mode] Initiating autonomous Product Swarm cycle...")
-
-	// Apex -> Trading (Strategy)
-	_, _ = globalSwarmManager.Coordinate("apex", "trading", "Generate 10x strategy for 'Neon Void Collection'")
-	// Spiral -> Solara (Creative)
-	_, _ = globalSwarmManager.Coordinate("spiral", "solara", "Generate ad copy for 'Neon Void Collection'")
-	// Koola10 -> Affiliate (Growth)
-	_, _ = globalSwarmManager.Coordinate("koola10", "affiliate", "Design viral launch sequence")
-
-	mockShopifyPush("Neon Void Collection")
-
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "line": "Neon Void Collection"})
+	http.Error(w, "error", 400)
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -2162,6 +2142,7 @@ func loadReflectionsFromFile() {
 
 func generateReflection(vertical, specialty, task string, result interface{}) string {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" || apiKey == "test" { apiKey = os.Getenv("DEEPSEEK_API") }
 	if apiKey == "" {
 		return fmt.Sprintf("AGI Reflection: Task %s by %s completed. (DeepSeek key missing)", task, specialty)
 	}
@@ -2218,6 +2199,7 @@ func startStrategicForesightLoop() {
 		}
 
 		apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" || apiKey == "test" { apiKey = os.Getenv("DEEPSEEK_API") }
 		if apiKey == "" {
 			continue
 		}

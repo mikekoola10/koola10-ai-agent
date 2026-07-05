@@ -23,7 +23,7 @@
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>DIGITAL_MANCAVE V4.1 // EMPIRE_MATURITY</h1>
+        <h1>DIGITAL_MANCAVE V4.2 // FABLE_5_STRATEGIC_EMPIRE</h1>
         <div style="text-align: right;">
             <div>
                 <span id="status-dot" class="status online"></span>
@@ -32,6 +32,7 @@
             <div style="color: #0ff; font-size: 10px; margin-top: 5px; font-weight: bold;">
                 FOUNDER_MODE: <span id="founder-mode">ACTIVE</span> |
                 AGI_MODE: <span id="agi-mode-status">OFF</span>
+                <div style="color: #f0f; font-size: 10px; margin-top: 5px;">STRATEGIC_ENGINE: <span style="color: #fff; font-weight: bold;">FABLE_5_ACTIVE</span></div>
             </div>
         </div>
     </header>
@@ -47,13 +48,22 @@
 
 
 
+
         <div class="card">
-            <h2>EMPIRE_TRAJECTORY</h2>
+            <h2>EMPIRE_TRAJECTORY (PHASE_6)</h2>
             <div style="font-size: 10px; color: #ffcc00; margin-bottom: 5px;">PROGRESS_TO_1M: <span id="progress-text">0.00%</span></div>
             <div style="width: 100%; background: #222; height: 10px; border-radius: 5px; overflow: hidden; border: 1px solid #ffcc00;">
                 <div id="progress-bar" style="width: 0%; background: #ffcc00; height: 100%; transition: width 0.5s ease;"></div>
             </div>
+            <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 8px; color: #888;">
+                <span id="m1">MILESTONE_1: $10K</span>
+                <span id="m2">MILESTONE_2: $100K</span>
+                <span id="m3">MILESTONE_3: $1M</span>
+            </div>
+        </div>
+
             <div style="margin-top: 5px; font-size: 8px; color: #888;">TARGET: $1,000,000 / mo</div>
+            <button onclick="getBriefing()" style="margin-top: 10px; width: 100%; border-color: #0f0; color: #0f0;">GET_STRATEGIC_BRIEFING</button>
         </div>
 <div class="card">
             <h2>SWARM_MARKETPLACE</h2>
@@ -205,21 +215,21 @@
 
 
 
-                // Opportunities & Empire Reviews & Voice
+
+
+                // Opportunities & Voice & Progress
                 const oppResp = await fetch('/swarm/opportunities').then(r => r.json());
                 const oppDiv = document.getElementById('opportunity-feed');
                 if (oppResp.length > 0) {
-                    const sorted = oppResp.slice(-20).reverse();
+                    const sorted = oppResp.slice(-25).reverse();
                     const latestVoice = sorted.find(o => o.type === 'empire_command_voice');
-                    if (latestVoice) document.getElementById('command-voice').innerText = `"${latestVoice.content}"`;
+                    if (latestVoice) document.getElementById('command-voice').innerText = latestVoice.content;
 
                     oppDiv.innerHTML = sorted.map(o => {
-                        let color = '#f0f';
-                        let label = '[STRATEGY]';
+                        let color = '#f0f'; let label = '[STRATEGY]';
                         if (o.type === 'empire_review') { color = '#ffcc00'; label = '[EMPIRE_STEP]'; }
                         if (o.type === 'empire_command_voice') { color = '#0f0'; label = '[JARVIS_VOICE]'; }
                         if (o.type === 'shopify_sync') { color = '#0ff'; label = '[SHOPIFY_LIVE]'; }
-
                         return `<div style="margin-bottom: 10px; border-left: 3px solid ${color}; padding-left: 8px;">
                             <div style="font-weight: bold; color: ${color}; font-size: 9px;">${label}</div>
                             <div>${o.content}</div>
@@ -227,11 +237,26 @@
                     }).join('');
                 }
 
-                // Progress Bar
+                // Progress
                 const rev = parseFloat(document.getElementById('revenue').innerText.replace('$', '').replace(',', ''));
                 const prog = Math.min((rev / 1000000.0) * 100, 100);
-                document.getElementById('progress-text').innerText = `${prog.toFixed(2)}%`;
+                document.getElementById('progress-text').innerText = `${prog.toFixed(4)}%`;
                 document.getElementById('progress-bar').style.width = `${prog}%`;
+                document.getElementById('m1').style.color = rev >= 10000 ? '#0f0' : '#888';
+                document.getElementById('m2').style.color = rev >= 100000 ? '#0f0' : '#888';
+                document.getElementById('m3').style.color = rev >= 1000000 ? '#0f0' : '#888';
+
+
+                // Multi-Milestone Progress
+                const rev = parseFloat(document.getElementById('revenue').innerText.replace('$', '').replace(',', ''));
+                const progress = Math.min((rev / 1000000.0) * 100, 100);
+                document.getElementById('progress-text').innerText = `${progress.toFixed(4)}%`;
+                document.getElementById('progress-bar').style.width = `${progress}%`;
+
+                document.getElementById('m1').style.color = rev >= 10000 ? '#0f0' : '#888';
+                document.getElementById('m2').style.color = rev >= 100000 ? '#0f0' : '#888';
+                document.getElementById('m3').style.color = rev >= 1000000 ? '#0f0' : '#888';
+
 
 
 
@@ -382,16 +407,38 @@
         }
 
 
+
+
+
+
+
+
+
+
+        async function getBriefing() {
+            const voice = document.getElementById('command-voice');
+            voice.innerText = "GENERATING_BRIEFING...";
+            try {
+                const resp = await fetch('/empire/briefing');
+                const res = await resp.json();
+                voice.innerText = `"${res.briefing}"`;
+            } catch (e) { voice.innerText = "Briefing failed."; }
+        }
+
         async function triggerProductSwarm() {
             const btn = document.getElementById('product-btn');
             btn.disabled = true; btn.innerText = 'SWARMING...';
-            await fetch('/swarm/product-cycle', { method: 'POST' });
-            btn.innerText = 'CYCLE_COMPLETE';
+            try {
+                await fetch('/swarm/product-cycle', { method: 'POST' });
+                btn.innerText = 'CYCLE_COMPLETE';
+            } catch (e) { btn.innerText = 'FAILED'; }
             setTimeout(() => { btn.disabled = false; btn.innerText = 'LAUNCH_PRODUCT_SWARM'; }, 2000);
             update();
         }
 
         async function triggerEmpireReview() {
+
+
             const btn = document.getElementById('empire-btn');
             btn.disabled = true;
             btn.innerText = 'CALCULATING_MILSTONES...';
