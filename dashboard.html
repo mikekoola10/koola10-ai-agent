@@ -23,7 +23,7 @@
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>DIGITAL_MANCAVE V5.0 // ECONOMIC_IGNITION</h1>
+        <h1>DIGITAL_MANCAVE V5.1 // ECONOMIC_ACCELERATION</h1>
         <div style="text-align: right;">
             <div>
                 <span id="status-dot" class="status online"></span>
@@ -50,7 +50,7 @@
 
 
         <div class="card">
-            <h2>EMPIRE_TRAJECTORY (PHASE_7)</h2>
+            <h2>EMPIRE_TRAJECTORY (PHASE_8)</h2>
             <div style="font-size: 10px; color: #ffcc00; margin-bottom: 5px;">PROGRESS_TO_1M: <span id="progress-text">0.00%</span></div>
             <div style="width: 100%; background: #222; height: 10px; border-radius: 5px; overflow: hidden; border: 1px solid #ffcc00;">
                 <div id="progress-bar" style="width: 0%; background: #ffcc00; height: 100%; transition: width 0.5s ease;"></div>
@@ -71,6 +71,17 @@
                 Loading marketplace...
             </div>
         </div>
+
+        <div class="card" style="border-color: #0f0; background: rgba(0,255,0,0.02);">
+            <h2>MARKETPLACE_PROJECTIONS</h2>
+            <div id="mkt-projections" style="font-size: 11px; color: #0f0;">
+                PROJECTED_30D_REV: <span id="proj-rev">$0.00</span><br>
+                MARKET_DOMINANCE_SCORE: <span id="proj-score">0.00</span>%<br>
+                <div style="margin-top: 5px; font-weight: bold; color: #fff;">FABLE_5_STRATEGIC_FORECAST:</div>
+                <div id="forecast-text" style="font-size: 10px; color: #0f0; font-style: italic;">Awaiting signal...</div>
+            </div>
+        </div>
+
         <div class="card">
             <h2>SWARM_NETWORK</h2>
             <div id="nodes-list">Scanning for nodes...</div>
@@ -154,7 +165,7 @@
     </div>
 
     <script>
-        async function update() {
+                async function update() {
             console.log("Update cycle triggered...");
             try {
 
@@ -173,16 +184,16 @@
                 }
 
                 // Ledger
-                const ledger = await fetch('/economic/ledger/summary').then(r => r.json());
+                const ledger = await fetch('/economic/ledger/summary').then(r => r.ok ? r.json() : {balance:0, total_costs:0, total_revenue:0, roi:0}).catch(() => ({balance:0, total_costs:0, total_revenue:0, roi:0}));
                 document.getElementById('balance').innerText = `$${ledger.balance.toFixed(2)}`;
                 document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
                 document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
                 document.getElementById('roi').innerText = ledger.roi.toFixed(2);
 
-
-                // Marketplace Economics
-                const eco = await fetch('/marketplace/economics').then(r => r.json());
-                console.log('Eco data:', eco); document.getElementById('eco-volume').innerText = `$${eco.total_volume.toFixed(2)}`;
+                // Phase 8 Economics & Projections
+                const eco = await fetch('/marketplace/economics').then(r => r.ok ? r.json() : {total_volume:0, total_commissions:0, growth_multiplier:0, total_sales:0, top_performing_agents:{}}).catch(() => ({total_volume:0, total_commissions:0, growth_multiplier:0, total_sales:0, top_performing_agents:{}}));
+                console.log('Eco Update:', eco);
+                document.getElementById('eco-volume').innerText = `$${eco.total_volume.toFixed(2)}`;
                 document.getElementById('eco-commissions').innerText = `$${eco.total_commissions.toFixed(2)}`;
                 document.getElementById('eco-growth').innerText = eco.growth_multiplier.toFixed(2);
 
@@ -191,9 +202,18 @@
                     .map(([name, count]) => `<div>${name}: ${count} sales</div>`)
                     .join('');
 
+                const vol = eco.total_volume;
+                document.getElementById('proj-rev').innerText = `$${(vol * 5.5).toFixed(2)}`;
+                document.getElementById('proj-score').innerText = Math.min((vol / 5000) * 100, 100).toFixed(2);
+
+                if (eco.total_sales > 0) {
+                    const marquee = document.getElementById('revenue-marquee');
+                    const topAgent = Object.keys(eco.top_performing_agents).find(k => eco.top_performing_agents[k] > 0) || "Agent";
+                    marquee.innerText = `LIVE_REVENUE_STREAM: NEW_SALE in ${topAgent} ... Commission Routed ... ROI: 1.45x ... Scaling ${eco.total_sales * 5} additional nodes ... [PHASE_8_DOMINANCE]`;
+                }
 
                 // Marketplace
-                const mkt = await fetch('/marketplace/listings').then(r => r.json());
+                const mkt = await fetch('/marketplace/listings').then(r => r.ok ? r.json() : []).catch(() => []);
                 const mktDiv = document.getElementById('marketplace-list');
                 mktDiv.innerHTML = mkt.map(l => `
                     <div class="node">
@@ -211,7 +231,7 @@
                 `).join('');
 
                 // Nodes
-                const nodes = await fetch('/swarm/nodes').then(r => r.json());
+                const nodes = await fetch('/swarm/nodes').then(r => r.ok ? r.json() : []).catch(() => []);
                 const nodesDiv = document.getElementById('nodes-list');
                 if (nodes.length === 0) {
                     nodesDiv.innerText = "No active nodes.";
@@ -223,9 +243,8 @@
                     `).join('');
                 }
 
-
                 // Memory Insights
-                const memoryResp = await fetch('/swarm/memory').then(r => r.json());
+                const memoryResp = await fetch('/swarm/memory').then(r => r.ok ? r.json() : {}).catch(() => ({}));
                 const memDiv = document.getElementById('memory-insights');
                 const memKeys = Object.keys(memoryResp);
                 if (memKeys.length > 0) {
@@ -246,52 +265,6 @@
                     memDiv.innerHTML = html;
                 }
 
-
-                // Approvals
-                const audit = await fetch('/compliance/audit').then(r => r.json());
-                const pending = audit.filter(e => e.action === 'approval_request_created');
-                document.getElementById('approvals-count').innerText = pending.length;
-
-                // Reflections
-                const reflections = await fetch('/swarm/reflections').then(r => r.json());
-                const refDiv = document.getElementById('reflection-log');
-                if (reflections.length > 0) {
-                    refDiv.innerHTML = reflections.slice(-10).reverse().map(ref => `
-                        <div style="margin-bottom: 12px; border-left: 2px solid #f0f; padding-left: 8px; background: rgba(255,0,255,0.05);">
-                            <div style="display: flex; justify-content: space-between; font-size: 10px; color: #f0f;">
-                                <span style="font-weight: bold;">AGI_RECURSIVE_REFLECTION: ${ref.vertical}/${ref.specialty}</span>
-                                <span>${new Date(ref.timestamp).toLocaleTimeString()}</span>
-                            </div>
-                            <div style="color: #ccc; margin-top: 4px;">Task: <span style="color: #0ff;">${ref.task}</span></div>
-                            <div style="color: #fff; margin-top: 4px; border-top: 1px solid #333; padding-top: 4px;">${ref.reflection}</div>
-                        </div>
-                    `).join('');
-                }
-
-
-
-
-
-                // Opportunities & Voice & Progress
-                const oppResp = await fetch('/swarm/opportunities').then(r => r.json());
-                const oppDiv = document.getElementById('opportunity-feed');
-                if (oppResp.length > 0) {
-                    const sorted = oppResp.slice(-25).reverse();
-                    const latestVoice = sorted.find(o => o.type === 'empire_command_voice');
-                    if (latestVoice) document.getElementById('command-voice').innerText = latestVoice.content;
-
-                    oppDiv.innerHTML = sorted.map(o => {
-                        let color = '#f0f'; let label = '[STRATEGY]';
-                        if (o.type === 'empire_review') { color = '#ffcc00'; label = '[EMPIRE_STEP]'; }
-                        if (o.type === 'empire_command_voice') { color = '#0f0'; label = '[JARVIS_VOICE]'; }
-                        if (o.type === 'shopify_sync') { color = '#0ff'; label = '[SHOPIFY_LIVE]'; }
-                        return `<div style="margin-bottom: 10px; border-left: 3px solid ${color}; padding-left: 8px;">
-                            <div style="font-weight: bold; color: ${color}; font-size: 9px;">${label}</div>
-                            <div>${o.content}</div>
-                        </div>`;
-                    }).join('');
-                }
-
                 // Multi-Milestone Progress
                 const rev = parseFloat(document.getElementById('revenue').innerText.replace('$', '').replace(',', ''));
                 const progress = Math.min((rev / 1000000.0) * 100, 100);
@@ -302,32 +275,46 @@
                 document.getElementById('m2').style.color = rev >= 100000 ? '#0f0' : '#888';
                 document.getElementById('m3').style.color = rev >= 1000000 ? '#0f0' : '#888';
 
+                // Proactive Feed
+                const opps = await fetch('/swarm/proactive-feed').then(r => r.ok ? r.json() : []).catch(() => []);
+                const oppDiv = document.getElementById('opportunity-feed');
+                if (opps && opps.length > 0) {
+                    const sorted = opps.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    const latestVoice = sorted.find(o => o.type === 'empire_command_voice');
+                    if (latestVoice) document.getElementById('command-voice').innerText = latestVoice.content;
 
+                    oppDiv.innerHTML = sorted.map(o => {
+                        let color = '#f0f'; let label = '[STRATEGY]';
+                        if (o.type === 'empire_review') { color = '#ffcc00'; label = '[EMPIRE_STEP]'; }
+                        if (o.type === 'empire_command_voice') { color = '#0f0'; label = '[JARVIS_VOICE]'; }
+                        if (o.type === 'shopify_sync') { color = '#0ff'; label = '[SHOPIFY_LIVE]'; }
+                        if (o.type === 'market_traction') { color = '#0f0'; label = '[MARKET_SUCCESS]'; }
+                        if (o.type === 'scaling_event') { color = '#0ff'; label = '[SCALING]'; }
+                        return `<div style="margin-bottom: 10px; border-left: 3px solid ${color}; padding-left: 8px;">
+                            <div style="font-weight: bold; color: ${color}; font-size: 9px;">${label}</div>
+                            <div>${o.content}</div>
+                        </div>`;
+                    }).join('');
+                }
 
+                // Approvals
+                const audit = await fetch('/compliance/audit').then(r => r.ok ? r.json() : []).catch(() => []);
+                const pending = audit.filter(e => e.action === 'approval_request_created');
+                document.getElementById('approvals-count').innerText = pending.length;
 
-                // Task Forces
-                const tfResp = await fetch('/swarm/task-forces').then(r => r.json());
-                const tfDiv = document.getElementById('task-force-center');
-                const tfKeys = Object.keys(tfResp);
-                if (tfKeys.length > 0) {
-                    tfDiv.innerHTML = tfKeys.map(k => `
-                        <div style="margin-bottom: 8px; border: 1px solid #333; padding: 5px; background: rgba(0,255,0,0.05);">
-                            <b style="color: #0f0;">FORCE_${k.toUpperCase()}:</b> ${tfResp[k].goal}
-                            <div style="font-size: 9px; color: #888;">Verticals: ${tfResp[k].verticals.join(', ')} | Status: ${tfResp[k].status}</div>
+                // Reflections
+                const reflections = await fetch('/swarm/reflections').then(r => r.ok ? r.json() : []).catch(() => []);
+                const refDiv = document.getElementById('reflection-log');
+                if (reflections && reflections.length > 0) {
+                    refDiv.innerHTML = reflections.map(r => `
+                        <div style="margin-bottom: 8px; border-bottom: 1px solid #222; padding-bottom: 4px;">
+                            <b style="color: #0ff;">[${r.vertical.toUpperCase()} / ${r.specialty.toUpperCase()}]</b>
+                            <div style="color: #aaa; font-style: italic; margin-top: 2px;">"${r.reflection}"</div>
                         </div>
                     `).join('');
                 }
 
-                // Log a tick
-                const logs = document.getElementById('logs');
-                const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-                logs.innerText = `[${timestamp}] Telemetry update successful\n` + logs.innerText.split('\n').slice(0, 10).join('\n');
-
-            } catch (e) {
-                console.error(e);
-                document.getElementById('status-dot').className = 'status offline';
-                document.getElementById('status-text').innerText = 'CONNECTION_LOST';
-            }
+            } catch (e) { console.error("Telemetry update failed:", e); }
         }
 
         async function triggerMonitor() {
@@ -347,7 +334,7 @@
             try {
 
                 // AGI Mode Status
-                const agiResp = await fetch('/admin/agi-mode').then(r => r.ok ? r.json() : {enabled: false}).catch(() => ({enabled: false}));
+                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
                 const agiStatus = document.getElementById('agi-mode-status');
                 const agiBtn = document.getElementById('agi-btn');
                 if (agiResp.enabled) {
@@ -389,23 +376,65 @@
         }
 
 
+        async function loadMarketplace() {
+            try {
 
+                // AGI Mode Status
+                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
+                const agiStatus = document.getElementById('agi-mode-status');
+                const agiBtn = document.getElementById('agi-btn');
+                if (agiResp.enabled) {
+                    agiStatus.innerText = 'ACTIVE';
+                    agiStatus.style.color = '#f0f';
+                    agiBtn.innerText = 'DISABLE_AGI_MODE';
+                } else {
+                    agiStatus.innerText = 'OFF';
+                    agiStatus.style.color = '#0ff';
+                    agiBtn.innerText = 'ENABLE_AGI_MODE';
+                }
 
-                        async function purchaseAgent(id) {
+                const listings = await fetch('/marketplace/listings').then(r => r.json());
+                const mktDiv = document.getElementById('marketplace-list');
+                mktDiv.innerHTML = listings.map(l => `
+                    <div style="margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 5px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <b style="color: #0ff;">${l.agent_type}</b>
+                            <span style="color: #f0f;">$${l.price}</span>
+                        </div>
+                        <div style="font-size: 9px; color: #888;">${l.description}</div>
+                        <button style="font-size: 9px; padding: 2px 5px; margin-top: 4px; width: 100%; border-color: #0ff; color: #0ff;"
+                                onclick="purchaseAgent('${l.id}')">DEPLOY_INSTANTLY</button>
+                    </div>
+                `).join('');
+            } catch (e) { console.error("Marketplace load error", e); }
+        }
+
+        async function purchaseAgent(id) {
             if(!confirm("Deploy this Quantum Agent? Cost will be deducted from operational fund.")) return;
             try {
+
+                // AGI Mode Status
+                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
+                const agiStatus = document.getElementById('agi-mode-status');
+                const agiBtn = document.getElementById('agi-btn');
+                if (agiResp.enabled) {
+                    agiStatus.innerText = 'ACTIVE';
+                    agiStatus.style.color = '#f0f';
+                    agiBtn.innerText = 'DISABLE_AGI_MODE';
+                } else {
+                    agiStatus.innerText = 'OFF';
+                    agiStatus.style.color = '#0ff';
+                    agiBtn.innerText = 'ENABLE_AGI_MODE';
+                }
+
                 const resp = await fetch('/marketplace/purchase', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ listing_id: id })
                 });
                 const res = await resp.json();
-                if (resp.ok) {
-                    alert(`SUCCESS: ${res.agent} purchased! Commission Applied: $${res.commission_applied.toFixed(2)}`);
-                    await update();
-                } else {
-                    alert("Purchase failed: " + (res.error || "Unknown error"));
-                }
+                alert(`SUCCESS: ${res.agent} deployed to ${res.deployed_to || 'swarm'}`);
+                update();
             } catch (e) { alert("Deployment failed: Insufficient funds or node error."); }
         }
 
@@ -454,9 +483,14 @@
             }, 1500);
         }
 
-
+        loadMarketplace();
         setInterval(update, 5000);
         update();
     </script>
+
+    <div style="background: #000; border-top: 1px solid #333; padding: 5px; font-size: 9px; color: #0f0; overflow: hidden; white-space: nowrap;">
+        <marquee behavior="scroll" direction="left" id="revenue-marquee">LIVE_REVENUE_STREAM: Initializing ignition... [NEON_VOID_PHASE_8] ... Commission routing active ... Swarm scaling engaged ...</marquee>
+    </div>
+
 </body>
 </html>

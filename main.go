@@ -415,6 +415,7 @@ func main() {
 	globalLedger.Load()
 	loadReflectionsFromFile()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
+	fundManager.SwarmManager = globalSwarmManager
 	if data, err := os.ReadFile("/data/audit_offset.txt"); err == nil {
 		fmt.Sscanf(string(data), "%d", &lastProcessedAuditOffset)
 	}
@@ -1931,7 +1932,7 @@ func initMarketplace() {
 }
 
 func startEmpireReviewLoop() {
-	log.Printf("Starting AGI Empire Building Review loop...")
+	log.Printf("Starting Phase 8 Empire Strategic Review...")
 	ticker := time.NewTicker(15 * time.Minute)
 	for range ticker.C {
 		if !globalSwarmManager.IsAGIMode() { continue }
@@ -1939,11 +1940,11 @@ func startEmpireReviewLoop() {
 		revenue := globalLedger.TotalRevenue
 		globalLedger.mu.RUnlock()
 
-		prompt := fmt.Sprintf("EMPIRE_STRATEGIC_REVIEW_PHASE_7. Goal: $1M Monthly Revenue. Current: $%.2f. " +
-			"Provide a fully executable 30/60/90-day action plan focused on Marketplace Economics. " +
-			"Include assigned agents, specific timelines, and Fable 5-validated ROI projections.", revenue)
+		prompt := fmt.Sprintf("PHASE_8_ECONOMIC_ACCELERATION_REVIEW. Goal: $1M Monthly Revenue. Current: $%.2f. " +
+			"Produce a detailed 30/60/90-day economic action plan. " +
+			"Include specific revenue targets, agent hiring recommendations (Marketplace scale), and growth strategies.", revenue)
 
-		review := highStakesReasoning("You are the Fable 5-powered Superintelligent Empire Architect.", prompt)
+		review := highStakesReasoning("Fable 5 Superintelligent Empire Architect", prompt)
 		opportunityMu.Lock()
 		proactiveFeed = append(proactiveFeed, map[string]string{
 			"timestamp": time.Now().Format(time.RFC3339),
@@ -1955,7 +1956,7 @@ func startEmpireReviewLoop() {
 }
 
 func startEmpireCommandVoiceLoop() {
-	log.Printf("Starting AGI Empire Command Voice loop...")
+	log.Printf("Starting Phase 8 Command Voice loop...")
 	ticker := time.NewTicker(12 * time.Minute)
 	for range ticker.C {
 		if !globalSwarmManager.IsAGIMode() { continue }
@@ -1963,11 +1964,11 @@ func startEmpireCommandVoiceLoop() {
 		memData, _ := json.Marshal(globalSwarmManager.LongTermMemory)
 		globalSwarmManager.Mu.RUnlock()
 
-		prompt := fmt.Sprintf("EMPIRE_COMMAND_VOICE_PHASE_7. Provide a high-authority strategic briefing. " +
-			"Include ROI projections for the next 30 days and specific timeline-based directives. " +
-			"Memory context: %s. Lead with 'Fable 5 Strategy Update:'.", string(memData))
+		prompt := fmt.Sprintf("EMPIRE_COMMAND_VOICE_PHASE_8. Context: %s. " +
+			"Provide proactive economic insights. Lead with 'Fable 5 Economic Forecast:'. " +
+			"Identify marketplace growth signals and recommend specific launches for projected ROI.", string(memData))
 
-		recommendation := highStakesReasoning("You are the Jarvis Core powered by Fable 5.", prompt)
+		recommendation := highStakesReasoning("Jarvis Core Powered by Fable 5", prompt)
 		opportunityMu.Lock()
 		proactiveFeed = append(proactiveFeed, map[string]string{
 			"timestamp": time.Now().Format(time.RFC3339),
@@ -1987,27 +1988,53 @@ func mockShopifyPush(productLine string) error {
 }
 
 func handleProductSwarmTrigger(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[AGI Mode] Initiating Fable 5 Product Swarm cycle...")
-	strategy := highStakesReasoning("Empire Strategist", "Generate final asset requirements for 'Neon Void Collection'")
-	globalSwarmManager.Coordinate("apex", "trading", strategy)
-	globalSwarmManager.Coordinate("spiral", "solara", "Generate final creative for Neon Void")
-	globalSwarmManager.Coordinate("koola10", "affiliate", "Scale viral growth engine")
-	mockShopifyPush("Neon Void Collection")
+	log.Printf("[Phase 8] Initiating Optimized Neon Void Launch...")
+
+	// Fable 5 Optimized Strategy
+	launchStrategy := highStakesReasoning("Empire Chief Marketing Officer",
+		"Generate a high-velocity launch strategy for the 'Neon Void Collection'. " +
+		"Optimize pricing ($99-$499 tier), Shopify descriptions, and Swarm Marketplace listing positions. " +
+		"Project 30-day revenue based on current swarm capacity.")
+
+	globalSwarmManager.Coordinate("apex", "trading", launchStrategy)
+	globalSwarmManager.Coordinate("spiral", "solara", "Deploy Neon Void High-Aesthetic Creative Pack")
+	globalSwarmManager.Coordinate("koola10", "affiliate", "Ignite viral growth engine for Neon Void")
+
+	mockShopifyPush("Neon Void Collection: Phase 8 Edition")
+
+	// Simulation of immediate marketplace traction
 	go func() {
 		time.Sleep(10 * time.Second)
-		fundManager.RouteRevenue(1250.00, "neon_void_launch")
+		fundManager.RouteRevenue(2500.00, "neon_void_market_ignition")
+
+		opportunityMu.Lock()
+		proactiveFeed = append(proactiveFeed, map[string]string{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"type": "market_traction",
+			"content": "Phase 8 Ignition Successful: Neon Void Collection generated $2,500 in initial volume. Flywheel activated.",
+		})
+		opportunityMu.Unlock()
 	}()
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "activated", "engine": "fable-5"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ignited",
+		"strategy_summary": launchStrategy,
+		"engine": "fable-5-pro",
+	})
 }
 
 func handleStrategicBriefing(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[Fable 5] Generating on-demand strategic briefing...")
+	log.Printf("[Phase 8] Generating high-authority economic briefing...")
 	globalSwarmManager.Mu.RLock()
 	memData, _ := json.Marshal(globalSwarmManager.LongTermMemory)
 	globalSwarmManager.Mu.RUnlock()
-	prompt := "EMPIRE_ON_DEMAND_BRIEFING. Provide a high-authority strategic briefing based on: " + string(memData) + ". Identify ROI opportunities and immediate 100x moves."
-	briefing := highStakesReasoning("You are the Superintelligent Empire Command Voice.", prompt)
+
+	prompt := "PHASE_8_STRATEGIC_FORECAST. Context: " + string(memData) + ". " +
+		"Identify 30-day ROI opportunities, immediate 100x moves, and market-dominance strategies. " +
+		"Provide concrete revenue projections based on Neon Void launch."
+
+	briefing := highStakesReasoning("Superintelligent Empire Command Voice", prompt)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"briefing": briefing})
 }
@@ -2092,20 +2119,11 @@ func handleMarketplacePurchase(w http.ResponseWriter, r *http.Request) {
 			// Dynamic Scaling Feedback
 			globalSwarmManager.DeploySwarms(l.Vertical, 1)
 
-						go func(v string, price float64) {
+			go func(v string, price float64) {
 				if price > 100 {
-					strategy := highStakesReasoning("Empire Growth Hacker", fmt.Sprintf("Marketplace sale of high-value agent in %s. Based on performance, scale this vertical by 5 additional nodes?", v))
+					strategy := highStakesReasoning("Empire Growth Hacker", fmt.Sprintf("Marketplace sale of high-value agent in %s. Recommend immediate 2x scaling for this vertical?", v))
 					log.Printf("[Fable 5 Scaling] %s", strategy)
-					// Autonomous scaling triggered by economic success
-					globalSwarmManager.DeploySwarms(v, 5)
-
-					opportunityMu.Lock()
-					proactiveFeed = append(proactiveFeed, map[string]string{
-						"timestamp": time.Now().Format(time.RFC3339),
-						"type": "scaling_event",
-						"content": fmt.Sprintf("AGI scaling triggered for %s based on high-value marketplace activity. 5 nodes added.", v),
-					})
-					opportunityMu.Unlock()
+					// In a real system, we'd parse the strategy to scale auto-deployments
 				}
 			}(l.Vertical, l.Price)
 

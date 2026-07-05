@@ -38,6 +38,9 @@ type FundManager struct {
 	storagePath         string
 	mu                  sync.RWMutex
 	ledger              Ledger
+	SwarmManager        interface {
+		DeploySwarms(vertical string, count int) error
+	}
 }
 
 func NewFundManager(path string, ledger Ledger) *FundManager {
@@ -93,6 +96,9 @@ func (fm *FundManager) RouteRevenue(amount float64, source string) {
 	if fm.ledger != nil {
 		fm.ledger.RecordRevenue(glAmount, fmt.Sprintf("70%% split from %s", source))
 	}
+
+	// Phase 8: Automatic Revenue Flywheel
+	fm.ReinvestSurplus(1000.0, 20.0)
 }
 
 func (fm *FundManager) CoverStripeFees(transactionAmount float64) {
@@ -230,6 +236,15 @@ func (fm *FundManager) ReinvestSurplus(threshold, percentage float64) {
 			Description: msg,
 		})
 		fm.save()
+
+		// Phase 8: Trigger automated scaling based on reinvestment
+		if fm.SwarmManager != nil {
+			go func() {
+				// Prioritize high-performance verticals like solara and trading
+				fm.SwarmManager.DeploySwarms("solara", 1)
+				fm.SwarmManager.DeploySwarms("trading", 1)
+			}()
+		}
 	}
 }
 
