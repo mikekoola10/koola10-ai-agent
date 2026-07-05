@@ -346,20 +346,20 @@ var (
 	reflectMu    sync.RWMutex
 
 
-	cachePath      = "/data/grants_cache.json"
-	appsDir        = "/data/applications"
-	memoryPath     = "/data/memory.json"
-	graphPath      = "/data/memory_graph.json"
-	semanticPath   = "/data/semantic_index.json"
-	auditPath      = "/data/audit_chain.jsonl"
-	usagePath      = "/data/usage.jsonl"
-	killSwitchPath = "/data/kill_switch"
-	subsPath       = "/data/subscriptions.json"
-	serverLogPath  = "/data/server.log"
+	cachePath      = "data/grants_cache.json"
+	appsDir        = "data/applications"
+	memoryPath     = "data/memory.json"
+	graphPath      = "data/memory_graph.json"
+	semanticPath   = "data/semantic_index.json"
+	auditPath      = "data/audit_chain.jsonl"
+	usagePath      = "data/usage.jsonl"
+	killSwitchPath = "data/kill_switch"
+	subsPath       = "data/subscriptions.json"
+	serverLogPath  = "data/server.log"
 	lastProcessedAuditOffset int64
 
-	ledgerPath     = "/data/economic_ledger.json"
-	fundPath       = "/data/operational_fund.json"
+	ledgerPath     = "data/economic_ledger.json"
+	fundPath       = "data/fund_manager.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -471,7 +471,7 @@ func main() {
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
-	if data, err := os.ReadFile("/data/audit_offset.txt"); err == nil {
+	if data, err := os.ReadFile("data/audit_offset.txt"); err == nil {
 		fmt.Sscanf(string(data), "%d", &lastProcessedAuditOffset)
 	}
 
@@ -2128,7 +2128,7 @@ func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
 		"sage":     "Sage reports all systems SOC2 compliant; 1 minor GDPR advisory generated.",
 		"vale":     "Vale reports 5 competitor pricing shifts detected in the EMEA region.",
 		"trading":  "Trading Swarm (Sterling) reports consolidated P&L: +$1,240.50 today.",
-		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
+		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in data/leads/.",
 	}
 	json.NewEncoder(w).Encode(report)
 }
@@ -2372,7 +2372,7 @@ func startMaintenanceLoop() {
 		}
 		f.Close()
 		lastProcessedAuditOffset = newOffset
-		os.WriteFile("/data/audit_offset.txt", []byte(fmt.Sprintf("%d", lastProcessedAuditOffset)), 0644)
+		os.WriteFile("data/audit_offset.txt", []byte(fmt.Sprintf("%d", lastProcessedAuditOffset)), 0644)
 
 		if lastError != "" {
 			log.Printf("[Self-Healing] Detected system failure: %s. Dispatching repair task.", lastError)
