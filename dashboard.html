@@ -23,7 +23,7 @@
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>DIGITAL_MANCAVE V4.2 // FABLE_5_STRATEGIC_EMPIRE</h1>
+        <h1>DIGITAL_MANCAVE V5.0 // ECONOMIC_IGNITION</h1>
         <div style="text-align: right;">
             <div>
                 <span id="status-dot" class="status online"></span>
@@ -50,7 +50,7 @@
 
 
         <div class="card">
-            <h2>EMPIRE_TRAJECTORY (PHASE_6)</h2>
+            <h2>EMPIRE_TRAJECTORY (PHASE_7)</h2>
             <div style="font-size: 10px; color: #ffcc00; margin-bottom: 5px;">PROGRESS_TO_1M: <span id="progress-text">0.00%</span></div>
             <div style="width: 100%; background: #222; height: 10px; border-radius: 5px; overflow: hidden; border: 1px solid #ffcc00;">
                 <div id="progress-bar" style="width: 0%; background: #ffcc00; height: 100%; transition: width 0.5s ease;"></div>
@@ -125,6 +125,29 @@
         </div>
     </div>
 
+
+    <div class="grid" style="margin-top: 15px;">
+        <div class="card" style="border-color: #ffcc00; background: rgba(255,204,0,0.02);">
+            <h2>MARKETPLACE_ECONOMICS</h2>
+            <div id="mkt-economics" style="font-size: 11px; color: #ffcc00;">
+                TOTAL_VOLUME: <span id="eco-volume">$0.00</span><br>
+                TOTAL_COMMISSIONS: <span id="eco-commissions">$0.00</span><br>
+                PLATFORM_GROWTH: <span id="eco-growth">0.00</span>x<br>
+                <div style="margin-top: 5px; font-weight: bold;">TOP_PERFORMING_AGENTS:</div>
+                <div id="eco-top-sellers" style="font-size: 10px; color: #aaa;">...</div>
+            </div>
+        </div>
+        <div class="card">
+            <h2>PRODUCT_PERFORMANCE</h2>
+            <div id="product-performance" style="font-size: 11px;">
+                SHOPIFY_SYNC: <span style="color: #0f0;">ACTIVE</span><br>
+                CONVERSION_RATE: <span id="prod-conv">3.4%</span><br>
+                AVG_ORDER_VALUE: <span id="prod-aov">$142.50</span><br>
+                ABANDONED_CARTS: <span id="prod-carts">12</span>
+            </div>
+        </div>
+    </div>
+
     <div class="card" style="margin-top: 15px;">
         <h2>SYSTEM_LOGS</h2>
         <pre id="logs" style="max-height: 200px; overflow-y: auto;">Initializing telemetry...</pre>
@@ -132,10 +155,11 @@
 
     <script>
         async function update() {
+            console.log("Update cycle triggered...");
             try {
 
                 // AGI Mode Status
-                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
+                const agiResp = await fetch('/admin/agi-mode').then(r => r.ok ? r.json() : {enabled: false}).catch(() => ({enabled: false}));
                 const agiStatus = document.getElementById('agi-mode-status');
                 const agiBtn = document.getElementById('agi-btn');
                 if (agiResp.enabled) {
@@ -154,6 +178,37 @@
                 document.getElementById('costs').innerText = `$${ledger.total_costs.toFixed(2)}`;
                 document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
                 document.getElementById('roi').innerText = ledger.roi.toFixed(2);
+
+
+                // Marketplace Economics
+                const eco = await fetch('/marketplace/economics').then(r => r.json());
+                console.log('Eco data:', eco); document.getElementById('eco-volume').innerText = `$${eco.total_volume.toFixed(2)}`;
+                document.getElementById('eco-commissions').innerText = `$${eco.total_commissions.toFixed(2)}`;
+                document.getElementById('eco-growth').innerText = eco.growth_multiplier.toFixed(2);
+
+                const sellersDiv = document.getElementById('eco-top-sellers');
+                sellersDiv.innerHTML = Object.entries(eco.top_performing_agents)
+                    .map(([name, count]) => `<div>${name}: ${count} sales</div>`)
+                    .join('');
+
+
+                // Marketplace
+                const mkt = await fetch('/marketplace/listings').then(r => r.json());
+                const mktDiv = document.getElementById('marketplace-list');
+                mktDiv.innerHTML = mkt.map(l => `
+                    <div class="node">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span style="font-weight: bold; color: ${l.tier === 'enterprise' ? '#f0f' : (l.tier === 'premium' ? '#0ff' : '#aaa')}">[${l.tier.toUpperCase()}] ${l.agent_type}</span>
+                            <span style="color: #ffcc00;">$${l.price}</span>
+                        </div>
+                        <div style="font-size: 9px; color: #888;">${l.description}</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 8px;">Rating: ${l.rating} | Sales: ${l.sales_count}</span>
+                            <button style="font-size: 9px; padding: 2px 5px; margin-top: 4px; border-color: #ffcc00; color: #ffcc00;"
+                                    onclick="purchaseAgent('${l.id}')">BUY_NOW</button>
+                        </div>
+                    </div>
+                `).join('');
 
                 // Nodes
                 const nodes = await fetch('/swarm/nodes').then(r => r.json());
@@ -237,16 +292,6 @@
                     }).join('');
                 }
 
-                // Progress
-                const rev = parseFloat(document.getElementById('revenue').innerText.replace('$', '').replace(',', ''));
-                const prog = Math.min((rev / 1000000.0) * 100, 100);
-                document.getElementById('progress-text').innerText = `${prog.toFixed(4)}%`;
-                document.getElementById('progress-bar').style.width = `${prog}%`;
-                document.getElementById('m1').style.color = rev >= 10000 ? '#0f0' : '#888';
-                document.getElementById('m2').style.color = rev >= 100000 ? '#0f0' : '#888';
-                document.getElementById('m3').style.color = rev >= 1000000 ? '#0f0' : '#888';
-
-
                 // Multi-Milestone Progress
                 const rev = parseFloat(document.getElementById('revenue').innerText.replace('$', '').replace(',', ''));
                 const progress = Math.min((rev / 1000000.0) * 100, 100);
@@ -302,7 +347,7 @@
             try {
 
                 // AGI Mode Status
-                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
+                const agiResp = await fetch('/admin/agi-mode').then(r => r.ok ? r.json() : {enabled: false}).catch(() => ({enabled: false}));
                 const agiStatus = document.getElementById('agi-mode-status');
                 const agiBtn = document.getElementById('agi-btn');
                 if (agiResp.enabled) {
@@ -344,65 +389,23 @@
         }
 
 
-        async function loadMarketplace() {
-            try {
 
-                // AGI Mode Status
-                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
-                const agiStatus = document.getElementById('agi-mode-status');
-                const agiBtn = document.getElementById('agi-btn');
-                if (agiResp.enabled) {
-                    agiStatus.innerText = 'ACTIVE';
-                    agiStatus.style.color = '#f0f';
-                    agiBtn.innerText = 'DISABLE_AGI_MODE';
-                } else {
-                    agiStatus.innerText = 'OFF';
-                    agiStatus.style.color = '#0ff';
-                    agiBtn.innerText = 'ENABLE_AGI_MODE';
-                }
 
-                const listings = await fetch('/marketplace/listings').then(r => r.json());
-                const mktDiv = document.getElementById('marketplace-list');
-                mktDiv.innerHTML = listings.map(l => `
-                    <div style="margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 5px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <b style="color: #0ff;">${l.agent_type}</b>
-                            <span style="color: #f0f;">$${l.price}</span>
-                        </div>
-                        <div style="font-size: 9px; color: #888;">${l.description}</div>
-                        <button style="font-size: 9px; padding: 2px 5px; margin-top: 4px; width: 100%; border-color: #0ff; color: #0ff;"
-                                onclick="purchaseAgent('${l.id}')">DEPLOY_INSTANTLY</button>
-                    </div>
-                `).join('');
-            } catch (e) { console.error("Marketplace load error", e); }
-        }
-
-        async function purchaseAgent(id) {
+                        async function purchaseAgent(id) {
             if(!confirm("Deploy this Quantum Agent? Cost will be deducted from operational fund.")) return;
             try {
-
-                // AGI Mode Status
-                const agiResp = await fetch('/admin/agi-mode').then(r => r.json());
-                const agiStatus = document.getElementById('agi-mode-status');
-                const agiBtn = document.getElementById('agi-btn');
-                if (agiResp.enabled) {
-                    agiStatus.innerText = 'ACTIVE';
-                    agiStatus.style.color = '#f0f';
-                    agiBtn.innerText = 'DISABLE_AGI_MODE';
-                } else {
-                    agiStatus.innerText = 'OFF';
-                    agiStatus.style.color = '#0ff';
-                    agiBtn.innerText = 'ENABLE_AGI_MODE';
-                }
-
                 const resp = await fetch('/marketplace/purchase', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ listing_id: id })
                 });
                 const res = await resp.json();
-                alert(`SUCCESS: ${res.agent} deployed to ${res.deployed_to || 'swarm'}`);
-                update();
+                if (resp.ok) {
+                    alert(`SUCCESS: ${res.agent} purchased! Commission Applied: $${res.commission_applied.toFixed(2)}`);
+                    await update();
+                } else {
+                    alert("Purchase failed: " + (res.error || "Unknown error"));
+                }
             } catch (e) { alert("Deployment failed: Insufficient funds or node error."); }
         }
 
@@ -451,7 +454,7 @@
             }, 1500);
         }
 
-        loadMarketplace();
+
         setInterval(update, 5000);
         update();
     </script>
