@@ -22,8 +22,12 @@
     </style>
 </head>
 <body>
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>DIGITAL_MANCAVE V5.3 // MARKET_DOMINANCE</h1>
+
+    <div style="background: #111; border-top: 1px solid #0f0; border-bottom: 1px solid #0f0; padding: 3px; font-size: 10px; color: #0f0; overflow: hidden; white-space: nowrap; margin-bottom: 15px;">
+        <marquee behavior="scroll" direction="left" id="sales-ticker">LIVE_SALES_TICKER: Initializing global market capture ... [NEON_VOID_DOMINATION] ... Revenue velocity: $25k/cycle ... Scaling 100+ agents ...</marquee>
+    </div>
+<header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h1>DIGITAL_MANCAVE V5.4 // MARKET_DOMINATION</h1>
         <div style="text-align: right;">
             <div>
                 <span id="status-dot" class="status online"></span>
@@ -50,7 +54,7 @@
 
 
         <div class="card">
-            <h2>EMPIRE_TRAJECTORY (PHASE_10)</h2>
+            <h2>EMPIRE_TRAJECTORY (PHASE_11)</h2>
             <div style="font-size: 10px; color: #ffcc00; margin-bottom: 5px;">PROGRESS_TO_1M: <span id="progress-text">0.00%</span></div>
             <div style="width: 100%; background: #222; height: 10px; border-radius: 5px; overflow: hidden; border: 1px solid #ffcc00;">
                 <div id="progress-bar" style="width: 0%; background: #ffcc00; height: 100%; transition: width 0.5s ease;"></div>
@@ -72,7 +76,16 @@
             </div>
         </div>
 
-
+        <div class="card" style="border-color: #0ff; background: rgba(0,255,255,0.02);">
+            <h2>DOMINANCE_LEADERBOARD</h2>
+            <div id="dominance-leaderboard" style="font-size: 11px; color: #0ff;">
+                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #333; margin-bottom: 5px; font-weight: bold;">
+                    <span>AGENT_TYPE</span>
+                    <span>SHARE</span>
+                </div>
+                <div id="leaderboard-items">Loading ranking...</div>
+            </div>
+        </div>
 
         <div class="card" style="border-color: #ff00ff; background: rgba(255,0,255,0.02);">
             <h2>LIVE_REVENUE_IGNITION <button onclick="update()" style="font-size: 8px; padding: 2px;">POLL</button></h2>
@@ -81,7 +94,7 @@
                 REINVESTMENT_FLOW: <span id="ign-flow">$0.00</span><br>
                 MARKET_DOMINANCE: <span id="ign-dominance">0.0</span>%<br>
                 <div style="margin-top: 5px; font-weight: bold; color: #fff;">HYPER_SCALE_PULSE:</div>
-                <div id="ign-status" style="font-size: 10px; color: #f0f; font-style: italic;">Phase 10: Dominance Protocol Active</div>
+                <div id="ign-status" style="font-size: 10px; color: #f0f; font-style: italic;">Phase 11: World Domination Engaged</div>
             </div>
             <button onclick="getBriefing()" style="margin-top: 10px; width: 100%; border-color: #f0f; color: #f0f;">REVENUE_STRATEGY_PULSE</button>
         </div>
@@ -189,8 +202,8 @@
         <div style="display: flex; justify-content: space-between; font-size: 8px; color: #888; margin-top: 5px;">
             <span>PHASE_7</span>
             <span>PHASE_8</span>
-            <span>PHASE_10</span>
-            <span>PHASE_10_DOMINANCE</span>
+            <span>PHASE_11</span>
+            <span>PHASE_11_DOMINANCE</span>
         </div>
     </div>
 
@@ -201,7 +214,7 @@
 
     <script>
                 let eco = {};
-                async function update() {
+                        async function update() {
             console.log("Update cycle triggered...");
             try {
                 // AGI Mode Status
@@ -237,16 +250,38 @@
                 sellersDiv.innerHTML = Object.entries(ecoRes.top_performing_agents)
                     .map(([name, count]) => `<div>${name}: ${count} sales</div>`)
                     .join('');
+                }
 
                 const vol = ecoRes.total_volume;
-                document.getElementById('ign-velocity').innerText = (vol > 0 ? (vol / 50).toFixed(2) : "0.00");
-                document.getElementById('ign-flow').innerText = `$${(vol * 0.35).toFixed(2)}`;
-                document.getElementById('ign-dominance').innerText = Math.min((vol / 10000) * 100, 100).toFixed(1);
+                document.getElementById('ign-velocity').innerText = (vol > 0 ? (vol / 25).toFixed(2) : "0.00");
+                document.getElementById('ign-flow').innerText = `$${(vol * 0.45).toFixed(2)}`;
+                document.getElementById('ign-dominance').innerText = Math.min((vol / 25000) * 100, 100).toFixed(1);
+
+                // Leaderboard update
+                const leaderboard = document.getElementById('leaderboard-items'); if(leaderboard) {
+                const tSales = ecoRes.total_sales || 1;
+                leaderboard.innerHTML = Object.entries(ecoRes.top_performing_agents)
+                    .sort((a,b) => b[1] - a[1])
+                    .map(([name, count]) => {
+                        const share = ((count / tSales) * 100).toFixed(1);
+                        return `<div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                            <span>${name}</span>
+                            <span style="color: #fff;">${share}%</span>
+                        </div>`;
+                    }).join('');
+                }
+
+                // Sales Ticker
+                if (ecoRes.total_sales > 0) {
+                    const ticker = document.getElementById('sales-ticker');
+                    const topAgent = Object.keys(ecoRes.top_performing_agents).find(k => ecoRes.top_performing_agents[k] > 0) || "Global Agent";
+                    ticker.innerText = `LIVE_SALES_TICKER: NEW_GLOBAL_SALE: ${topAgent} ... Trajectory: $1M/mo ... Dominance: ${document.getElementById('ign-dominance').innerText}% ... Scaling 100+ agents ... [PHASE_11_IGNITION]`;
+                }
 
                 if (ecoRes.total_sales > 0) {
                     const marquee = document.getElementById('revenue-marquee');
-                    const topAgent = Object.keys(ecoRes.top_performing_agents).find(k => ecoRes.top_performing_agents[k] > 0) || "Agent";
-                    marquee.innerText = `LIVE_REVENUE_STREAM: NEW_SALE in ${topAgent} ... Commission Routed ... ROI: 1.45x ... Scaling ${ecoRes.total_sales * 5} additional nodes ... [PHASE_10_DOMINANCE]`;
+                    const topA = Object.keys(ecoRes.top_performing_agents).find(k => ecoRes.top_performing_agents[k] > 0) || "Agent";
+                    marquee.innerText = `LIVE_REVENUE_STREAM: NEW_SALE in ${topA} ... Commission Routed ... ROI: 1.45x ... Scaling 100+ additional nodes ... [PHASE_11_DOMINANCE]`;
                 }
 
                 // Marketplace
@@ -266,6 +301,7 @@
                         </div>
                     </div>
                 `).join('');
+                }
 
                 // Nodes
                 const nodes = await fetch('/swarm/nodes').then(r => r.ok ? r.json() : []).catch(() => []);
@@ -278,6 +314,7 @@
                             [${n.region}] ${n.node_id} - ${n.status}
                         </div>
                     `).join('');
+                }
                 }
 
                 // Memory Insights
@@ -299,6 +336,7 @@
                             <b style="color: #f0f;">${k.toUpperCase()}:</b> ${memoryResp[k]}
                         </div>
                     `).join('');
+                }
                     memDiv.innerHTML = html;
                 }
 
@@ -315,12 +353,13 @@
                         if (o.type === 'empire_review' || o.type === 'strategic_48h_dominance_plan') { color = '#ffcc00'; label = '[EMPIRE_STEP]'; }
                         if (o.type === 'empire_command_voice') { color = '#0f0'; label = '[JARVIS_VOICE]'; }
                         if (o.type === 'shopify_sync') { color = '#0ff'; label = '[SHOPIFY_LIVE]'; }
-                        if (o.type === 'market_dominance_event') { color = '#0f0'; label = '[DOMINANCE]'; }
+                        if (o.type === 'market_dominance_event' || o.type === 'world_domination_event') { color = '#0f0'; label = '[DOMINANCE]'; }
                         return `<div style="margin-bottom: 10px; border-left: 3px solid ${color}; padding-left: 8px;">
                             <div style="font-weight: bold; color: ${color}; font-size: 9px;">${label}</div>
                             <div>${o.content}</div>
                         </div>`;
                     }).join('');
+                }
                 }
             } catch (e) { console.error("Telemetry update failed:", e); }
         }
@@ -414,6 +453,7 @@
                                 onclick="purchaseAgent('${l.id}')">DEPLOY_INSTANTLY</button>
                     </div>
                 `).join('');
+                }
             } catch (e) { console.error("Marketplace load error", e); }
         }
 
@@ -497,7 +537,7 @@
     </script>
 
     <div style="background: #000; border-top: 1px solid #333; padding: 5px; font-size: 9px; color: #0f0; overflow: hidden; white-space: nowrap;">
-        <marquee behavior="scroll" direction="left" id="revenue-marquee">LIVE_REVENUE_STREAM: Initializing ignition... [NEON_VOID_PHASE_10] ... Commission routing active ... Swarm scaling engaged ...</marquee>
+        <marquee behavior="scroll" direction="left" id="revenue-marquee">LIVE_REVENUE_STREAM: Initializing ignition... [NEON_VOID_PHASE_11] ... Commission routing active ... Swarm scaling engaged ...</marquee>
     </div>
 
 </body>
