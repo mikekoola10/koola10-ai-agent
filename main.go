@@ -206,6 +206,7 @@ type Transaction struct {
 }
 
 type EconomicLedger struct {
+	EnergyCosts  float64       `json:"energy_costs"` // Total energy costs tracked
 	Balance      float64       `json:"balance"`
 	TotalCosts   float64       `json:"total_costs"`
 	TotalRevenue float64       `json:"total_revenue"`
@@ -269,6 +270,34 @@ type SwarmNode struct {
 
 // --- Studio Structs ---
 
+// --- Home AI Brain Structs ---
+
+type SensorData struct {
+	ID        string    `json:"sensor_id"`
+	Type      string    `json:"type"` // "motion", "temp", "humidity", "light", "door", "energy"
+	Value     float64   `json:"value"`
+	Unit      string    `json:"unit"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type HomeScenario struct {
+	ID          string   `json:"scenario_id"`
+	Name        string   `json:"name"`
+	Trigger     string   `json:"trigger"`
+	Actions     []string `json:"actions"`
+	LastActive  time.Time `json:"last_active"`
+	IsActive    bool     `json:"is_active"`
+}
+
+type HomeState struct {
+	Sensors   map[string]SensorData `json:"sensors"`
+	Scenarios []HomeScenario        `json:"scenarios"`
+	LastUpdate time.Time            `json:"last_update"`
+	EnergyUsage float64             `json:"energy_usage_kwh"`
+	EnergyCost  float64             `json:"energy_cost"`
+	mu          sync.RWMutex
+}
+
 type LoreRequest struct {
 	Question string `json:"question"`
 }
@@ -326,20 +355,21 @@ var (
 	reflectMu    sync.RWMutex
 
 
-	cachePath      = "/data/grants_cache.json"
-	appsDir        = "/data/applications"
-	memoryPath     = "/data/memory.json"
-	graphPath      = "/data/memory_graph.json"
-	semanticPath   = "/data/semantic_index.json"
-	auditPath      = "/data/audit_chain.jsonl"
-	usagePath      = "/data/usage.jsonl"
-	killSwitchPath = "/data/kill_switch"
-	subsPath       = "/data/subscriptions.json"
-	serverLogPath  = "/data/server.log"
+	cachePath      = "./data/grants_cache.json"
+	appsDir        = "./data/applications"
+	memoryPath     = "./data/memory.json"
+	graphPath      = "./data/memory_graph.json"
+	semanticPath   = "./data/semantic_index.json"
+	auditPath      = "./data/audit_chain.jsonl"
+	usagePath      = "./data/usage.jsonl"
+	killSwitchPath = "./data/kill_switch"
+	subsPath       = "./data/subscriptions.json"
+	serverLogPath  = "./data/server.log"
+	homeBrainPath  = "./data/home_brain.json"
 	lastProcessedAuditOffset int64
 
-	ledgerPath     = "/data/economic_ledger.json"
-	fundPath       = "/data/operational_fund.json"
+	ledgerPath     = "./data/economic_ledger.json"
+	fundPath       = "./data/operational_fund.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -359,6 +389,10 @@ var (
 	subManager  *SubscriptionManager
 
 	globalSwarmManager = agents.NewSwarmManager()
+	globalHomeBrain    = &HomeState{
+		Sensors:   make(map[string]SensorData),
+		Scenarios: []HomeScenario{},
+	}
 
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
@@ -432,6 +466,8 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 func main() {
 	go startProactiveEmpireMoves()
+	globalHomeBrain.Load()
+	go startHomeBrainOrchestrator()
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
 	region = os.Getenv("FLY_REGION")
@@ -451,7 +487,7 @@ func main() {
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
-	if data, err := os.ReadFile("/data/audit_offset.txt"); err == nil {
+	if data, err := os.ReadFile("./data/audit_offset.txt"); err == nil {
 		fmt.Sscanf(string(data), "%d", &lastProcessedAuditOffset)
 	}
 
@@ -503,6 +539,7 @@ func main() {
 	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory
 	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["content"] = agents.ContentFactory
+	globalSwarmManager.Factories["home"] = agents.PersonaFactory("home")
 	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
 
@@ -538,6 +575,9 @@ func main() {
 	})
 
 	r.Get("/", corsMiddleware(handleRoot))
+	r.Get("/home/status", corsMiddleware(handleHomeStatus))
+	r.Post("/home/sensor-update", corsMiddleware(handleHomeSensorUpdate))
+	r.Post("/home/trigger-scenario", corsMiddleware(handleHomeTriggerScenario))
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -1866,7 +1906,7 @@ func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
 		"sage":     "Sage reports all systems SOC2 compliant; 1 minor GDPR advisory generated.",
 		"vale":     "Vale reports 5 competitor pricing shifts detected in the EMEA region.",
 		"trading":  "Trading Swarm (Sterling) reports consolidated P&L: +$1,240.50 today.",
-		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
+		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in ./data/leads/.",
 	}
 	json.NewEncoder(w).Encode(report)
 }
@@ -2110,7 +2150,7 @@ func startMaintenanceLoop() {
 		}
 		f.Close()
 		lastProcessedAuditOffset = newOffset
-		os.WriteFile("/data/audit_offset.txt", []byte(fmt.Sprintf("%d", lastProcessedAuditOffset)), 0644)
+		os.WriteFile("./data/audit_offset.txt", []byte(fmt.Sprintf("%d", lastProcessedAuditOffset)), 0644)
 
 		if lastError != "" {
 			log.Printf("[Self-Healing] Detected system failure: %s. Dispatching repair task.", lastError)
@@ -2355,5 +2395,89 @@ func startProactiveEmpireMoves() {
 		productMu.Unlock()
 
 		<-ticker.C
+	}
+}
+
+func (hs *HomeState) Load() {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	data, err := os.ReadFile(homeBrainPath)
+	if err == nil {
+		json.Unmarshal(data, hs)
+	}
+}
+
+func (hs *HomeState) Save() {
+	hs.mu.RLock()
+	defer hs.mu.RUnlock()
+	data, _ := json.MarshalIndent(hs, "", "  ")
+	os.WriteFile(homeBrainPath, data, 0644)
+}
+
+func handleHomeStatus(w http.ResponseWriter, r *http.Request) {
+	globalHomeBrain.mu.RLock()
+	defer globalHomeBrain.mu.RUnlock()
+	json.NewEncoder(w).Encode(globalHomeBrain)
+}
+
+func handleHomeSensorUpdate(w http.ResponseWriter, r *http.Request) {
+	var data SensorData
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	data.Timestamp = time.Now()
+	globalHomeBrain.mu.Lock()
+	globalHomeBrain.Sensors[data.ID] = data
+	globalHomeBrain.LastUpdate = time.Now()
+
+	if data.Type == "energy" {
+		globalHomeBrain.EnergyUsage += data.Value
+		cost := data.Value * 0.15 // Dummy cost per kWh
+		globalHomeBrain.EnergyCost += cost
+		globalLedger.RecordCost("home", "utilities", cost, fmt.Sprintf("Energy usage update: %s", data.ID))
+		globalLedger.mu.Lock()
+		globalLedger.EnergyCosts += cost
+		globalLedger.mu.Unlock()
+	}
+	globalHomeBrain.mu.Unlock()
+	globalHomeBrain.Save()
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleHomeTriggerScenario(w http.ResponseWriter, r *http.Request) {
+	var req struct { ID string `json:"scenario_id"` }
+	json.NewDecoder(r.Body).Decode(&req)
+
+	globalHomeBrain.mu.Lock()
+	defer globalHomeBrain.mu.Unlock()
+	for i, s := range globalHomeBrain.Scenarios {
+		if s.ID == req.ID {
+			globalHomeBrain.Scenarios[i].LastActive = time.Now()
+			globalHomeBrain.Scenarios[i].IsActive = true
+			log.Printf("Triggered Home Scenario: %s", s.Name)
+			break
+		}
+	}
+	globalHomeBrain.Save()
+	w.WriteHeader(http.StatusOK)
+}
+
+func startHomeBrainOrchestrator() {
+	ticker := time.NewTicker(1 * time.Minute)
+	for {
+		<-ticker.C
+		evaluateHomeScenarios()
+	}
+}
+
+func evaluateHomeScenarios() {
+	globalHomeBrain.mu.Lock()
+	defer globalHomeBrain.mu.Unlock()
+
+	// Example Logic for Welcome Home
+	motion, ok := globalHomeBrain.Sensors["front_door_motion"]
+	if ok && time.Since(motion.Timestamp) < 2 * time.Minute && motion.Value > 0 {
+		// Logic to trigger Welcome Home
 	}
 }
