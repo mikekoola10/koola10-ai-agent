@@ -420,6 +420,8 @@ var (
 
 	//go:embed dashboard.html
 	dashboardHTML string
+	//go:embed omega_dashboard.html
+	omegaDashboardHTML string
 )
 
 // --- Middleware ---
@@ -468,6 +470,7 @@ func main() {
 	go startProactiveEmpireMoves()
 	globalHomeBrain.Load()
 	go startHomeBrainOrchestrator()
+	go startOmegaSwarmLoop()
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
 	region = os.Getenv("FLY_REGION")
@@ -2051,7 +2054,12 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(dashboardHTML))
+	role := r.URL.Query().Get("role")
+	if role == "omega" {
+		w.Write([]byte(omegaDashboardHTML))
+	} else {
+		w.Write([]byte(dashboardHTML))
+	}
 }
 
 func handleAdminStellarSend(w http.ResponseWriter, r *http.Request) {
@@ -2479,5 +2487,28 @@ func evaluateHomeScenarios() {
 	motion, ok := globalHomeBrain.Sensors["front_door_motion"]
 	if ok && time.Since(motion.Timestamp) < 2 * time.Minute && motion.Value > 0 {
 		// Logic to trigger Welcome Home
+	}
+}
+
+// --- Omega Specific Logic ---
+
+func evaluateOmegaHealth() {
+	globalHomeBrain.mu.RLock()
+	defer globalHomeBrain.mu.RUnlock()
+
+	// Motion detection check (Omega)
+	motion, ok := globalHomeBrain.Sensors["bedroom_motion"]
+	if ok && time.Since(motion.Timestamp) > 12 * time.Hour {
+		log.Printf("[Omega Alert] No motion detected in bedroom for 12 hours!")
+		// Trigger AgentMail notification (dummy)
+		globalLedger.RecordCost("omega", "safety", 0.0, "Health alert: No motion detected")
+	}
+}
+
+func startOmegaSwarmLoop() {
+	ticker := time.NewTicker(30 * time.Minute)
+	for {
+		<-ticker.C
+		evaluateOmegaHealth()
 	}
 }

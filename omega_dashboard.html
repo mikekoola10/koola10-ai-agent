@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koola10 Omega - Family Care</title>
+    <style>
+        :root {
+            --bg: #000;
+            --text: #fff;
+            --neon-cyan: #0ff;
+            --neon-purple: #f0f;
+            --emergency: #ff4444;
+            --safe: #44ff44;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-size: 1.5rem; /* Large font for Omega */
+        }
+        header {
+            width: 100%;
+            padding: 30px;
+            background: #111;
+            text-align: center;
+            border-bottom: 3px solid var(--neon-cyan);
+        }
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 25px;
+            padding: 25px;
+            width: 90%;
+            max-width: 800px;
+        }
+        .omega-card {
+            background: #111;
+            border: 2px solid #333;
+            padding: 40px;
+            text-align: center;
+            border-radius: 15px;
+        }
+        .omega-btn {
+            width: 100%;
+            padding: 30px;
+            margin-top: 20px;
+            font-size: 2rem;
+            font-weight: bold;
+            border-radius: 12px;
+            cursor: pointer;
+            border: none;
+            text-transform: uppercase;
+        }
+        .btn-blue { background: var(--neon-cyan); color: #000; }
+        .btn-purple { background: var(--neon-purple); color: #fff; }
+        .btn-red { background: var(--emergency); color: #fff; border: 5px solid #fff; }
+        .status-indicator {
+            font-size: 2.5rem;
+            margin: 20px 0;
+            font-weight: 800;
+        }
+        .safe { color: var(--safe); }
+        .alert { color: var(--emergency); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>KOOLA10 OMEGA</h1>
+        <div style="font-size: 1.2rem; color: var(--neon-cyan);">YOUR FAMILY PROTECTOR</div>
+    </header>
+
+    <div class="main-grid">
+        <div class="omega-card">
+            <h2>HEALTH & SAFETY</h2>
+            <div id="health-status" class="status-indicator safe">ALL GOOD</div>
+            <div style="font-size: 1.2rem; color: #888;">No issues detected today.</div>
+            <button class="omega-btn btn-purple" onclick="alert('Checking medication status...')">MY MEDICATIONS</button>
+        </div>
+
+        <div class="omega-card">
+            <h2>BILLS & FINANCE</h2>
+            <div id="bill-summary">YOU HAVE 2 BILLS DUE</div>
+            <button class="omega-btn btn-blue" onclick="payBills()">PAY ALL BILLS NOW</button>
+        </div>
+
+        <div class="omega-card" style="border-color: var(--emergency);">
+            <button class="omega-btn btn-red" onclick="triggerEmergency()">🚨 EMERGENCY HELP</button>
+            <div style="margin-top: 15px; font-size: 1rem;">Press this if you need immediate assistance.</div>
+        </div>
+
+        <div class="omega-card">
+            <button class="omega-btn btn-purple" onclick="alert('Recording message for Mike...')">🎤 SEND MESSAGE TO SON</button>
+        </div>
+    </div>
+
+    <script>
+        async function payBills() {
+            if(confirm("Are you sure you want to pay all utility bills now?")) {
+                const res = await fetch("/economic/ledger/cost", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({
+                        vertical: "home",
+                        category: "bills",
+                        amount: 150.0,
+                        description: "Omega manual bill payment"
+                    })
+                });
+                if(res.ok) alert("All bills have been paid! You are all set.");
+            }
+        }
+
+        async function triggerEmergency() {
+            const msg = "EMERGENCY ALERT: Omega user has triggered the manual help button!";
+            await fetch("/ai/chat", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({message: msg})
+            });
+            alert("Emergency alert sent to Mike. Help is on the way!");
+        }
+
+        async function updateStatus() {
+            const res = await fetch("/home/status").then(r => r.json());
+            // If energy usage is unusually high or no motion for 2 hours
+            // Simple dummy logic for demo
+            const statusDiv = document.getElementById("health-status");
+            if (res.energy_usage_kwh > 50) {
+                 statusDiv.innerText = "CHECK SYSTEM";
+                 statusDiv.className = "status-indicator alert";
+            } else {
+                 statusDiv.innerText = "ALL GOOD";
+                 statusDiv.className = "status-indicator safe";
+            }
+        }
+
+        setInterval(updateStatus, 10000);
+        updateStatus();
+    </script>
+</body>
+</html>
