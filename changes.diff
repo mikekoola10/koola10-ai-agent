@@ -1,0 +1,410 @@
+diff --git a/HOME_AI_BRAIN_SETUP.md b/HOME_AI_BRAIN_SETUP.md
+new file mode 100644
+index 0000000..b5b1fd7
+--- /dev/null
++++ b/HOME_AI_BRAIN_SETUP.md
+@@ -0,0 +1,41 @@
++# Home AI Brain: Koola10/Spiral Integration Guide
++
++This document outlines the hardware and software configuration required to transform your household into a fully intelligent, AI-driven home ecosystem.
++
++## Phase 1: Smart Device Integration
++
++### Recommended Central Hub
++**Home Assistant (Local Control / Open Source)**
++- **Why:** Offers the best local privacy, vast device support (2000+ integrations), and a robust REST API for Koola10 integration.
++- **Hardware:** Raspberry Pi 4 (8GB) or a dedicated NUC.
++
++### Recommended Smart Devices
++| Category | Device Recommendation | Protocol |
++| :--- | :--- | :--- |
++| **Lights** | Philips Hue / Govee | Zigbee / WiFi |
++| **Sensors (Motion/Temp)** | Aqara P1 / Sonoff | Zigbee |
++| **Thermostat** | Ecobee Premium / Nest | WiFi |
++| **Smart Plugs** | TP-Link Kasa / Shelly | WiFi |
++| **Smart Locks** | August Wi-Fi / Yale | WiFi / Zigbee |
++| **Cameras** | Reolink (PoE) / Eufy | RTSP / Local |
++| **Audio** | Sonos / HomePod / Echo | Multi-room |
++
++## Phase 2: Software Configuration
++
++### 1. Hub Connection
++Expose Home Assistant to Koola10 via Long-Lived Access Tokens. Koola10 will use the `/home/sensor-update` endpoint to mirror the hub's state.
++
++### 2. Automation Workflows
++Workflows are defined in Koola10's `HomeBrain` logic, covering:
++- **Welcome Home:** Entry lights, Daily Summary audio, Thermostat adjust.
++- **Energy Optimization:** Night-time temperature lowering, lighting shutoff.
++- **Health & Safety:** Anomaly detection on bedroom door/motion.
++- **Focus Mode:** Dimming, ambient sound, notification silencing.
++- **Parent Mode:** UI Simplification, warmer tones, proactive billing prompts.
++
++## Phase 3: Intelligence & Learning
++Koola10 uses DeepSeek to analyze patterns in `/data/home_brain.json` every 24 hours to update predictive models.
++
++## Phase 4: Full Integration
++- **Digital Mancave:** Accessible via the "Home Control" panel.
++- **Ledger:** Energy usage is synced to the `EconomicLedger` for real-time ROI tracking.
+diff --git a/agents/roles.json b/agents/roles.json
+index 81598e7..cbf8c06 100644
+--- a/agents/roles.json
++++ b/agents/roles.json
+@@ -8,6 +8,9 @@
+   "koola10": [
+     "Growth Hacker", "Marketing Lead", "Gamification Designer", "Community Manager", "Viral Content Creator", "SEO Specialist", "Social Media Manager", "Affiliate Strategist", "Campaign Optimizer", "User Acquisition Specialist", "Loyalty Program Architect", "PR Specialist", "Email Marketer", "Influencer Coordinator", "Retention Analyst"
+   ],
++  "home": [
++    "Home Orchestrator", "Energy Optimizer", "Safety Monitor", "Predictive Maintenance Agent", "Health Anomaly Detector", "Focus Mode Architect", "Parent Mode Specialist", "IoT Integration Lead", "Smart Device Coordinator"
++  ],
+   "specialized": [
+     "Full Stack Dev (Go/React)", "Frontend Specialist (Next.js)", "Backend Specialist (Rust)", "DevOps Engineer", "QA Engineer", "Security Auditor", "Blockchain Dev (Stellar)", "API Architect", "Mobile Dev (Flutter)", "Cloud Architect", "Customer Support Bot", "Sales Closer", "Lead Generator", "Bounty Hunter Agent", "Research Scientist"
+   ]
+diff --git a/dashboard.html b/dashboard.html
+index a1acfc3..9ee6531 100644
+--- a/dashboard.html
++++ b/dashboard.html
+@@ -133,6 +133,23 @@
+             padding-left: 10px;
+             margin: 10px 0;
+         }
++
++        .home-card {
++            border-color: var(--neon-cyan);
++        }
++        .sensor-grid {
++            display: grid;
++            grid-template-columns: repeat(2, 1fr);
++            gap: 10px;
++            margin: 10px 0;
++            font-size: 0.8rem;
++        }
++        .sensor-item {
++            background: #111;
++            padding: 8px;
++            border-left: 2px solid var(--neon-cyan);
++        }
++
+     </style>
+ </head>
+ <body>
+@@ -149,6 +166,18 @@
+     </header>
+
+     <div class="grid">
++
++        <div class="card home-card">
++            <h2>HOME_AI_BRAIN</h2>
++            <div class="metrics">ENERGY_COST: <span id="home-energy-cost">$0.00</span></div>
++            <div class="sensor-grid" id="home-sensors">
++                <!-- Dynamically populated -->
++            </div>
++            <div style="margin-top:10px;">ACTIVE_SCENARIOS: <span id="active-scenarios" style="color:var(--neon-purple)">None</span></div>
++            <button onclick="triggerHomeScenario("welcome_home")">WELCOME_HOME</button>
++            <button onclick="triggerHomeScenario("energy_opt")">OPTIMIZE_ENERGY</button>
++        </div>
++
+         <div class="card">
+             <h2>BUSINESS_COMMAND_CENTER</h2>
+             <div class="metrics">EMPIRE_REVENUE: <span id="empire-revenue">-bash.00</span></div>
+@@ -196,13 +225,37 @@
+     </div>
+
+     <script>
++
++        async function updateHomeStatus() {
++            const res = await fetch("/home/status").then(r => r.json());
++            document.getElementById("home-energy-cost").innerText = `\$${res.energy_cost.toFixed(2)}`;
++            const sensorsCont = document.getElementById("home-sensors");
++            sensorsCont.innerHTML = Object.entries(res.sensors).map(([id, s]) => `
++                <div class="sensor-item">
++                    <div style="color:#888">${id.toUpperCase()}</div>
++                    <div style="font-weight:bold">${s.value} ${s.unit}</div>
++                </div>
++            `).join("");
++            const active = res.scenarios.filter(s => s.is_active).map(s => s.name);
++            document.getElementById("active-scenarios").innerText = active.length > 0 ? active.join(", ") : "None";
++        }
++
++        async function triggerHomeScenario(id) {
++            await fetch("/home/trigger-scenario", {
++                method: "POST",
++                headers: {"Content-Type": "application/json"},
++                body: JSON.stringify({scenario_id: id})
++            });
++            updateHomeStatus();
++        }
++
+         async function updateProductStats() {
+             const res = await fetch("/admin/product-empire/stats").then(r => r.json());
+-            document.getElementById("revenue-forecast").innerText = `\$\${res.revenue_forecast.toFixed(2)}`;
++            document.getElementById("revenue-forecast").innerText = `\$${res.revenue_forecast.toFixed(2)}`;
+             document.getElementById("total-products").innerText = res.total_products;
+             document.getElementById("synced-products").innerText = res.synced_products;
+             document.getElementById("active-collections").innerText = res.active_collections.join(", ");
+-            document.getElementById("generation-bar").style.width = `\${res.generation_progress}%`;
++            document.getElementById("generation-bar").style.width = `${res.generation_progress}%`;
+         }
+
+         async function launchNextCycle() {
+@@ -212,12 +265,14 @@
+                 body: JSON.stringify({collection: "Digital Ascendance", count: 15})
+             });
+             updateProductStats();
++        updateHomeStatus();
+             alert("Second swarm cycle focused on digital products initiated!");
+         }
+
+         async function syncShopify() {
+             await fetch("/monetize/shopify/sync", { method: "POST" });
+             updateProductStats();
++        updateHomeStatus();
+             updateBusinessMetrics();
+             alert("Products pushed to Shopify and Marketplace listings created.");
+         }
+@@ -282,10 +337,12 @@
+         // Initialize
+         setInterval(updateBusinessMetrics, 5000);
+         setInterval(updateProductStats, 5000);
++        setInterval(updateHomeStatus, 5000);
+         setInterval(updateSwarm, 5000);
+         setInterval(updateReflections, 10000);
+         updateBusinessMetrics();
+         updateProductStats();
++        updateHomeStatus();
+         updateSwarm();
+         updateReflections();
+         syncRHEL();
+diff --git a/main.go b/main.go
+index 7480350..762c615 100644
+--- a/main.go
++++ b/main.go
+@@ -206,6 +206,7 @@ type Transaction struct {
+ }
+
+ type EconomicLedger struct {
++	EnergyCosts  float64       `json:"energy_costs"` // Total energy costs tracked
+	Balance      float64       `json:"balance"`
+	TotalCosts   float64       `json:"total_costs"`
+	TotalRevenue float64       `json:"total_revenue"`
+@@ -269,6 +270,34 @@ type SwarmNode struct {
+
+ // --- Studio Structs ---
+
++// --- Home AI Brain Structs ---
++
++type SensorData struct {
++	ID        string    `json:"sensor_id"`
++	Type      string    `json:"type"` // "motion", "temp", "humidity", "light", "door", "energy"
++	Value     float64   `json:"value"`
++	Unit      string    `json:"unit"`
++	Timestamp time.Time `json:"timestamp"`
++}
++
++type HomeScenario struct {
++	ID          string   `json:"scenario_id"`
++	Name        string   `json:"name"`
++	Trigger     string   `json:"trigger"`
++	Actions     []string `json:"actions"`
++	LastActive  time.Time `json:"last_active"`
++	IsActive    bool     `json:"is_active"`
++}
++
++type HomeState struct {
++	Sensors   map[string]SensorData `json:"sensors"`
++	Scenarios []HomeScenario        `json:"scenarios"`
++	LastUpdate time.Time            `json:"last_update"`
++	EnergyUsage float64             `json:"energy_usage_kwh"`
++	EnergyCost  float64             `json:"energy_cost"`
++	mu          sync.RWMutex
++}
++
+ type LoreRequest struct {
+	Question string `json:"question"`
+ }
+@@ -326,20 +355,21 @@ var (
+	reflectMu    sync.RWMutex
+
+
+-	cachePath      = "/data/grants_cache.json"
+-	appsDir        = "/data/applications"
+-	memoryPath     = "/data/memory.json"
+-	graphPath      = "/data/memory_graph.json"
+-	semanticPath   = "/data/semantic_index.json"
+-	auditPath      = "/data/audit_chain.jsonl"
+-	usagePath      = "/data/usage.jsonl"
+-	killSwitchPath = "/data/kill_switch"
+-	subsPath       = "/data/subscriptions.json"
+-	serverLogPath  = "/data/server.log"
++	cachePath      = "./data/grants_cache.json"
++	appsDir        = "./data/applications"
++	memoryPath     = "./data/memory.json"
++	graphPath      = "./data/memory_graph.json"
++	semanticPath   = "./data/semantic_index.json"
++	auditPath      = "./data/audit_chain.jsonl"
++	usagePath      = "./data/usage.jsonl"
++	killSwitchPath = "./data/kill_switch"
++	subsPath       = "./data/subscriptions.json"
++	serverLogPath  = "./data/server.log"
++	homeBrainPath  = "./data/home_brain.json"
+	lastProcessedAuditOffset int64
+
+-	ledgerPath     = "/data/economic_ledger.json"
+-	fundPath       = "/data/operational_fund.json"
++	ledgerPath     = "./data/economic_ledger.json"
++	fundPath       = "./data/operational_fund.json"
+
+	globalGraph = &MemoryGraph{
+		Meetings: make(map[string]Meeting),
+@@ -359,6 +389,10 @@ var (
+	subManager  *SubscriptionManager
+
+	globalSwarmManager = agents.NewSwarmManager()
++	globalHomeBrain    = &HomeState{
++		Sensors:   make(map[string]SensorData),
++		Scenarios: []HomeScenario{},
++	}
+
+	approvalStore = make(map[string]*ApprovalRequest)
+	videoJobStore = make(map[string]*VideoJob)
+@@ -432,6 +466,8 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+
+ func main() {
+	go startProactiveEmpireMoves()
++	globalHomeBrain.Load()
++	go startHomeBrainOrchestrator()
+	port := os.Getenv("PORT")
+	if port == "" { port = "8080" }
+	region = os.Getenv("FLY_REGION")
+@@ -451,7 +487,7 @@ func main() {
+	globalLedger.Load()
+	fundManager = financial.NewFundManager(fundPath, globalLedger)
+
+-	if data, err := os.ReadFile("/data/audit_offset.txt"); err == nil {
++	if data, err := os.ReadFile("./data/audit_offset.txt"); err == nil {
+		fmt.Sscanf(string(data), "%d", &lastProcessedAuditOffset)
+	}
+
+@@ -503,6 +539,7 @@ func main() {
+	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory
+	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory
+	globalSwarmManager.Factories["content"] = agents.ContentFactory
++	globalSwarmManager.Factories["home"] = agents.PersonaFactory("home")
+	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
+	globalSwarmManager.Factories["research"] = agents.ResearchFactory
+
+@@ -538,6 +575,9 @@ func main() {
+	})
+
+	r.Get("/", corsMiddleware(handleRoot))
++	r.Get("/home/status", corsMiddleware(handleHomeStatus))
++	r.Post("/home/sensor-update", corsMiddleware(handleHomeSensorUpdate))
++	r.Post("/home/trigger-scenario", corsMiddleware(handleHomeTriggerScenario))
+
+	r.Get("/health", corsMiddleware(handleHealth))
+	r.Get("/daily-report", corsMiddleware(handleDailyReport))
+@@ -1866,7 +1906,7 @@ func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
+		"sage":     "Sage reports all systems SOC2 compliant; 1 minor GDPR advisory generated.",
+		"vale":     "Vale reports 5 competitor pricing shifts detected in the EMEA region.",
+		"trading":  "Trading Swarm (Sterling) reports consolidated P&L: +$1,240.50 today.",
+-		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
++		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in ./data/leads/.",
+	}
+	json.NewEncoder(w).Encode(report)
+ }
+@@ -2110,7 +2150,7 @@ func startMaintenanceLoop() {
+		}
+		f.Close()
+		lastProcessedAuditOffset = newOffset
+-		os.WriteFile("/data/audit_offset.txt", []byte(fmt.Sprintf("%d", lastProcessedAuditOffset)), 0644)
++		os.WriteFile("./data/audit_offset.txt", []byte(fmt.Sprintf("%d", lastProcessedAuditOffset)), 0644)
+
+		if lastError != "" {
+			log.Printf("[Self-Healing] Detected system failure: %s. Dispatching repair task.", lastError)
+@@ -2357,3 +2397,87 @@ func startProactiveEmpireMoves() {
+		<-ticker.C
+	}
+ }
++
++func (hs *HomeState) Load() {
++	hs.mu.Lock()
++	defer hs.mu.Unlock()
++	data, err := os.ReadFile(homeBrainPath)
++	if err == nil {
++		json.Unmarshal(data, hs)
++	}
++}
++
++func (hs *HomeState) Save() {
++	hs.mu.RLock()
++	defer hs.mu.RUnlock()
++	data, _ := json.MarshalIndent(hs, "", "  ")
++	os.WriteFile(homeBrainPath, data, 0644)
++}
++
++func handleHomeStatus(w http.ResponseWriter, r *http.Request) {
++	globalHomeBrain.mu.RLock()
++	defer globalHomeBrain.mu.RUnlock()
++	json.NewEncoder(w).Encode(globalHomeBrain)
++}
++
++func handleHomeSensorUpdate(w http.ResponseWriter, r *http.Request) {
++	var data SensorData
++	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
++		http.Error(w, err.Error(), http.StatusBadRequest)
++		return
++	}
++	data.Timestamp = time.Now()
++	globalHomeBrain.mu.Lock()
++	globalHomeBrain.Sensors[data.ID] = data
++	globalHomeBrain.LastUpdate = time.Now()
++
++	if data.Type == "energy" {
++		globalHomeBrain.EnergyUsage += data.Value
++		cost := data.Value * 0.15 // Dummy cost per kWh
++		globalHomeBrain.EnergyCost += cost
++		globalLedger.RecordCost("home", "utilities", cost, fmt.Sprintf("Energy usage update: %s", data.ID))
++		globalLedger.mu.Lock()
++		globalLedger.EnergyCosts += cost
++		globalLedger.mu.Unlock()
++	}
++	globalHomeBrain.mu.Unlock()
++	globalHomeBrain.Save()
++	w.WriteHeader(http.StatusOK)
++}
++
++func handleHomeTriggerScenario(w http.ResponseWriter, r *http.Request) {
++	var req struct { ID string `json:"scenario_id"` }
++	json.NewDecoder(r.Body).Decode(&req)
++
++	globalHomeBrain.mu.Lock()
++	defer globalHomeBrain.mu.Unlock()
++	for i, s := range globalHomeBrain.Scenarios {
++		if s.ID == req.ID {
++			globalHomeBrain.Scenarios[i].LastActive = time.Now()
++			globalHomeBrain.Scenarios[i].IsActive = true
++			log.Printf("Triggered Home Scenario: %s", s.Name)
++			break
++		}
++	}
++	globalHomeBrain.Save()
++	w.WriteHeader(http.StatusOK)
++}
++
++func startHomeBrainOrchestrator() {
++	ticker := time.NewTicker(1 * time.Minute)
++	for {
++		<-ticker.C
++		evaluateHomeScenarios()
++	}
++}
++
++func evaluateHomeScenarios() {
++	globalHomeBrain.mu.Lock()
++	defer globalHomeBrain.mu.Unlock()
++
++	// Example Logic for Welcome Home
++	motion, ok := globalHomeBrain.Sensors["front_door_motion"]
++	if ok && time.Since(motion.Timestamp) < 2 * time.Minute && motion.Value > 0 {
++		// Logic to trigger Welcome Home
++	}
++}

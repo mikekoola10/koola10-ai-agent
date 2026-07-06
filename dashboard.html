@@ -133,6 +133,23 @@
             padding-left: 10px;
             margin: 10px 0;
         }
+
+        .home-card {
+            border-color: var(--neon-cyan);
+        }
+        .sensor-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 10px 0;
+            font-size: 0.8rem;
+        }
+        .sensor-item {
+            background: #111;
+            padding: 8px;
+            border-left: 2px solid var(--neon-cyan);
+        }
+
     </style>
 </head>
 <body>
@@ -149,6 +166,18 @@
     </header>
 
     <div class="grid">
+
+        <div class="card home-card">
+            <h2>HOME_AI_BRAIN</h2>
+            <div class="metrics">ENERGY_COST: <span id="home-energy-cost">$0.00</span></div>
+            <div class="sensor-grid" id="home-sensors">
+                <!-- Dynamically populated -->
+            </div>
+            <div style="margin-top:10px;">ACTIVE_SCENARIOS: <span id="active-scenarios" style="color:var(--neon-purple)">None</span></div>
+            <button onclick="triggerHomeScenario("welcome_home")">WELCOME_HOME</button>
+            <button onclick="triggerHomeScenario("energy_opt")">OPTIMIZE_ENERGY</button>
+        </div>
+
         <div class="card">
             <h2>BUSINESS_COMMAND_CENTER</h2>
             <div class="metrics">EMPIRE_REVENUE: <span id="empire-revenue">-bash.00</span></div>
@@ -196,13 +225,37 @@
     </div>
 
     <script>
+
+        async function updateHomeStatus() {
+            const res = await fetch("/home/status").then(r => r.json());
+            document.getElementById("home-energy-cost").innerText = `\$${res.energy_cost.toFixed(2)}`;
+            const sensorsCont = document.getElementById("home-sensors");
+            sensorsCont.innerHTML = Object.entries(res.sensors).map(([id, s]) => `
+                <div class="sensor-item">
+                    <div style="color:#888">${id.toUpperCase()}</div>
+                    <div style="font-weight:bold">${s.value} ${s.unit}</div>
+                </div>
+            `).join("");
+            const active = res.scenarios.filter(s => s.is_active).map(s => s.name);
+            document.getElementById("active-scenarios").innerText = active.length > 0 ? active.join(", ") : "None";
+        }
+
+        async function triggerHomeScenario(id) {
+            await fetch("/home/trigger-scenario", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({scenario_id: id})
+            });
+            updateHomeStatus();
+        }
+
         async function updateProductStats() {
             const res = await fetch("/admin/product-empire/stats").then(r => r.json());
-            document.getElementById("revenue-forecast").innerText = `\$\${res.revenue_forecast.toFixed(2)}`;
+            document.getElementById("revenue-forecast").innerText = `\$${res.revenue_forecast.toFixed(2)}`;
             document.getElementById("total-products").innerText = res.total_products;
             document.getElementById("synced-products").innerText = res.synced_products;
             document.getElementById("active-collections").innerText = res.active_collections.join(", ");
-            document.getElementById("generation-bar").style.width = `\${res.generation_progress}%`;
+            document.getElementById("generation-bar").style.width = `${res.generation_progress}%`;
         }
 
         async function launchNextCycle() {
@@ -212,12 +265,14 @@
                 body: JSON.stringify({collection: "Digital Ascendance", count: 15})
             });
             updateProductStats();
+        updateHomeStatus();
             alert("Second swarm cycle focused on digital products initiated!");
         }
 
         async function syncShopify() {
             await fetch("/monetize/shopify/sync", { method: "POST" });
             updateProductStats();
+        updateHomeStatus();
             updateBusinessMetrics();
             alert("Products pushed to Shopify and Marketplace listings created.");
         }
@@ -282,10 +337,12 @@
         // Initialize
         setInterval(updateBusinessMetrics, 5000);
         setInterval(updateProductStats, 5000);
+        setInterval(updateHomeStatus, 5000);
         setInterval(updateSwarm, 5000);
         setInterval(updateReflections, 10000);
         updateBusinessMetrics();
         updateProductStats();
+        updateHomeStatus();
         updateSwarm();
         updateReflections();
         syncRHEL();
