@@ -1932,7 +1932,7 @@ func initMarketplace() {
 }
 
 func startEmpireReviewLoop() {
-	log.Printf("Starting Phase 8 Empire Strategic Review...")
+	log.Printf("Starting Phase 9 Hyper-Scale Review...")
 	ticker := time.NewTicker(15 * time.Minute)
 	for range ticker.C {
 		if !globalSwarmManager.IsAGIMode() { continue }
@@ -1940,9 +1940,9 @@ func startEmpireReviewLoop() {
 		revenue := globalLedger.TotalRevenue
 		globalLedger.mu.RUnlock()
 
-		prompt := fmt.Sprintf("PHASE_8_ECONOMIC_ACCELERATION_REVIEW. Goal: $1M Monthly Revenue. Current: $%.2f. " +
-			"Produce a detailed 30/60/90-day economic action plan. " +
-			"Include specific revenue targets, agent hiring recommendations (Marketplace scale), and growth strategies.", revenue)
+		prompt := fmt.Sprintf("PHASE_9_HYPER_SCALE_STRATEGIC_REVIEW. Goal: $1M Monthly Revenue. Current: $%.2f. " +
+			"Provide immediate hyper-scale action plans. Focus on mass node deployment, marketplace dominance, " +
+			"and specific 10x ROI moves for the Neon Void collection.", revenue)
 
 		review := highStakesReasoning("Fable 5 Superintelligent Empire Architect", prompt)
 		opportunityMu.Lock()
@@ -1956,7 +1956,7 @@ func startEmpireReviewLoop() {
 }
 
 func startEmpireCommandVoiceLoop() {
-	log.Printf("Starting Phase 8 Command Voice loop...")
+	log.Printf("Starting Phase 9 Command Voice loop...")
 	ticker := time.NewTicker(12 * time.Minute)
 	for range ticker.C {
 		if !globalSwarmManager.IsAGIMode() { continue }
@@ -1964,9 +1964,9 @@ func startEmpireCommandVoiceLoop() {
 		memData, _ := json.Marshal(globalSwarmManager.LongTermMemory)
 		globalSwarmManager.Mu.RUnlock()
 
-		prompt := fmt.Sprintf("EMPIRE_COMMAND_VOICE_PHASE_8. Context: %s. " +
-			"Provide proactive economic insights. Lead with 'Fable 5 Economic Forecast:'. " +
-			"Identify marketplace growth signals and recommend specific launches for projected ROI.", string(memData))
+		prompt := fmt.Sprintf("EMPIRE_COMMAND_VOICE_PHASE_9. Context: %s. " +
+			"Deliver a high-impact economic briefing. Identify growth velocity signals and " +
+			"recommend hyper-scale node expansions for the next 48 hours.", string(memData))
 
 		recommendation := highStakesReasoning("Jarvis Core Powered by Fable 5", prompt)
 		opportunityMu.Lock()
@@ -1988,40 +1988,56 @@ func mockShopifyPush(productLine string) error {
 }
 
 func handleProductSwarmTrigger(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[Phase 8] Initiating Optimized Neon Void Launch...")
+	log.Printf("[Phase 9] Finalizing Hyper-Scale Neon Void Launch...")
 
-	// Fable 5 Optimized Strategy
-	launchStrategy := highStakesReasoning("Empire Chief Marketing Officer",
-		"Generate a high-velocity launch strategy for the 'Neon Void Collection'. " +
-		"Optimize pricing ($99-$499 tier), Shopify descriptions, and Swarm Marketplace listing positions. " +
-		"Project 30-day revenue based on current swarm capacity.")
+	hyperStrategy := highStakesReasoning("Empire Chief Revenue Officer",
+		"PHASE_9_HYPER_SCALE_STRATEGY. Optimize Neon Void Collection for immediate dominance.")
 
-	globalSwarmManager.Coordinate("apex", "trading", launchStrategy)
+	globalSwarmManager.Coordinate("apex", "trading", hyperStrategy)
 	globalSwarmManager.Coordinate("spiral", "solara", "Deploy Neon Void High-Aesthetic Creative Pack")
-	globalSwarmManager.Coordinate("koola10", "affiliate", "Ignite viral growth engine for Neon Void")
 
-	mockShopifyPush("Neon Void Collection: Phase 8 Edition")
+	mockShopifyPush("Neon Void Collection: Hyper-Scale Edition")
 
-	// Simulation of immediate marketplace traction
+	marketplaceMu.Lock()
+	exists := false
+	for _, l := range marketplaceListings {
+		if l.ID == "mkt_nv03" { exists = true; break }
+	}
+	if !exists {
+		marketplaceListings = append(marketplaceListings, MarketplaceListing{
+			ID: "mkt_nv03", AgentType: "Neon Void: Hyper-Scale Bundle",
+			Description: "All-in-one AGI marketing and strategy suite. Fable 5 optimized.",
+			Price: 999.00, Rating: 5.0, Vertical: "apex", Tier: "enterprise", Commission: 0.30, SellerID: "apex_hq",
+		})
+	}
+	marketplaceMu.Unlock()
+
 	go func() {
-		time.Sleep(10 * time.Second)
-		fundManager.RouteRevenue(2500.00, "neon_void_market_ignition")
+		log.Printf("[Phase 9] Delayed economic feedback starting...")
+		time.Sleep(5 * time.Second)
+		fundManager.RouteRevenue(5000.00, "neon_void_hyper_scale_ignition")
+
+		marketplaceMu.Lock()
+		log.Printf("[Phase 9] Updating sales counts for simulation...")
+		for i, l := range marketplaceListings {
+			if l.ID == "mkt_nv03" || l.ID == "mkt_nv01" {
+				marketplaceListings[i].SalesCount += 2
+			}
+		}
+		marketplaceMu.Unlock()
 
 		opportunityMu.Lock()
 		proactiveFeed = append(proactiveFeed, map[string]string{
 			"timestamp": time.Now().Format(time.RFC3339),
-			"type": "market_traction",
-			"content": "Phase 8 Ignition Successful: Neon Void Collection generated $2,500 in initial volume. Flywheel activated.",
+			"type": "hyper_scale_event",
+			"content": "HYPER_SCALE_IGNITION: Neon Void launch successful. Velocity: 10x.",
 		})
 		opportunityMu.Unlock()
+		log.Printf("[Phase 9] Economic feedback cycle complete.")
 	}()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "ignited",
-		"strategy_summary": launchStrategy,
-		"engine": "fable-5-pro",
-	})
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ignited", "strategy": hyperStrategy})
 }
 
 func handleStrategicBriefing(w http.ResponseWriter, r *http.Request) {

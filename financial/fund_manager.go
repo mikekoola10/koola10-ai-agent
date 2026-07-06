@@ -40,6 +40,7 @@ type FundManager struct {
 	ledger              Ledger
 	SwarmManager        interface {
 		DeploySwarms(vertical string, count int) error
+		HyperScale(vertical string, baseCount int) error
 	}
 }
 
@@ -237,12 +238,13 @@ func (fm *FundManager) ReinvestSurplus(threshold, percentage float64) {
 		})
 		fm.save()
 
-		// Phase 8: Trigger automated scaling based on reinvestment
+		// Phase 9: Hyper-Scale Revenue Flywheel
 		if fm.SwarmManager != nil {
 			go func() {
-				// Prioritize high-performance verticals like solara and trading
-				fm.SwarmManager.DeploySwarms("solara", 1)
-				fm.SwarmManager.DeploySwarms("trading", 1)
+				// High-Velocity Expansion
+				fm.SwarmManager.HyperScale("solara", 2)
+				fm.SwarmManager.HyperScale("trading", 2)
+				fm.SwarmManager.HyperScale("affiliate", 2)
 			}()
 		}
 	}

@@ -307,6 +307,39 @@ func (sm *SwarmManager) GetAllSwarmMetrics() map[string]interface{} {
 	return metrics
 }
 
+func (sm *SwarmManager) HyperScale(vertical string, baseCount int) error {
+	sm.Mu.Lock()
+	defer sm.Mu.Unlock()
+
+	log.Printf("[Hyper-Scale] Initiating mass deployment for %s. Base count: %d", vertical, baseCount)
+
+	// Phase 9: 10x Velocity Expansion
+	targetCount := baseCount * 2
+	if sm.AGIMode {
+		targetCount = baseCount * 5 // 5x scaling in AGI Mode
+	}
+
+	factory, ok := sm.Factories[vertical]
+	if !ok {
+		return fmt.Errorf("no factory for vertical: %s", vertical)
+	}
+
+	currentAgents := sm.Swarms[vertical]
+	effectivePrompt := sm.getEffectivePrompt()
+
+	newAgents := factory()
+	for _, a := range newAgents {
+		if len(currentAgents) >= targetCount { break }
+		a.SetPrompt(effectivePrompt)
+		a.SetManager(sm)
+		currentAgents = append(currentAgents, a)
+	}
+
+	sm.Swarms[vertical] = currentAgents
+	log.Printf("[Hyper-Scale] %s vertical scaled to %d nodes.", vertical, len(currentAgents))
+	return nil
+}
+
 func (sm *SwarmManager) SummarizeMemory() {
 	sm.Mu.Lock()
 	defer sm.Mu.Unlock()

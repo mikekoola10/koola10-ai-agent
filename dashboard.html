@@ -23,7 +23,7 @@
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>DIGITAL_MANCAVE V5.1 // ECONOMIC_ACCELERATION</h1>
+        <h1>DIGITAL_MANCAVE V5.2 // REVENUE_IGNITION</h1>
         <div style="text-align: right;">
             <div>
                 <span id="status-dot" class="status online"></span>
@@ -50,7 +50,7 @@
 
 
         <div class="card">
-            <h2>EMPIRE_TRAJECTORY (PHASE_8)</h2>
+            <h2>EMPIRE_TRAJECTORY (PHASE_9)</h2>
             <div style="font-size: 10px; color: #ffcc00; margin-bottom: 5px;">PROGRESS_TO_1M: <span id="progress-text">0.00%</span></div>
             <div style="width: 100%; background: #222; height: 10px; border-radius: 5px; overflow: hidden; border: 1px solid #ffcc00;">
                 <div id="progress-bar" style="width: 0%; background: #ffcc00; height: 100%; transition: width 0.5s ease;"></div>
@@ -70,6 +70,19 @@
             <div id="marketplace-list" style="font-size: 11px; max-height: 150px; overflow-y: auto;">
                 Loading marketplace...
             </div>
+        </div>
+
+
+        <div class="card" style="border-color: #ff00ff; background: rgba(255,0,255,0.02);">
+            <h2>LIVE_REVENUE_IGNITION</h2>
+            <div id="rev-ignition" style="font-size: 11px; color: #f0f;">
+                GROWTH_VELOCITY: <span id="ign-velocity">0.00</span>x<br>
+                REINVESTMENT_FLOW: <span id="ign-flow">$0.00</span><br>
+                MARKET_CONVERSION: <span id="ign-conv">0.0%</span><br>
+                <div style="margin-top: 5px; font-weight: bold; color: #fff;">HYPER_SCALE_STATUS:</div>
+                <div id="ign-status" style="font-size: 10px; color: #f0f; font-style: italic;">Engaged - 10x Goal</div>
+            </div>
+            <button onclick="getBriefing()" style="margin-top: 10px; width: 100%; border-color: #f0f; color: #f0f;">REVENUE_STRATEGY_PULSE</button>
         </div>
 
         <div class="card" style="border-color: #0f0; background: rgba(0,255,0,0.02);">
@@ -209,7 +222,7 @@
                 if (eco.total_sales > 0) {
                     const marquee = document.getElementById('revenue-marquee');
                     const topAgent = Object.keys(eco.top_performing_agents).find(k => eco.top_performing_agents[k] > 0) || "Agent";
-                    marquee.innerText = `LIVE_REVENUE_STREAM: NEW_SALE in ${topAgent} ... Commission Routed ... ROI: 1.45x ... Scaling ${eco.total_sales * 5} additional nodes ... [PHASE_8_DOMINANCE]`;
+                    marquee.innerText = `LIVE_REVENUE_STREAM: NEW_SALE in ${topAgent} ... Commission Routed ... ROI: 1.45x ... Scaling ${eco.total_sales * 5} additional nodes ... [PHASE_9_DOMINANCE]`;
                 }
 
                 // Marketplace
@@ -489,7 +502,7 @@
     </script>
 
     <div style="background: #000; border-top: 1px solid #333; padding: 5px; font-size: 9px; color: #0f0; overflow: hidden; white-space: nowrap;">
-        <marquee behavior="scroll" direction="left" id="revenue-marquee">LIVE_REVENUE_STREAM: Initializing ignition... [NEON_VOID_PHASE_8] ... Commission routing active ... Swarm scaling engaged ...</marquee>
+        <marquee behavior="scroll" direction="left" id="revenue-marquee">LIVE_REVENUE_STREAM: Initializing ignition... [NEON_VOID_PHASE_9] ... Commission routing active ... Swarm scaling engaged ...</marquee>
     </div>
 
 </body>
