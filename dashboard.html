@@ -23,7 +23,7 @@
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>DIGITAL_MANCAVE V5.2 // REVENUE_IGNITION</h1>
+        <h1>DIGITAL_MANCAVE V5.3 // MARKET_DOMINANCE</h1>
         <div style="text-align: right;">
             <div>
                 <span id="status-dot" class="status online"></span>
@@ -50,7 +50,7 @@
 
 
         <div class="card">
-            <h2>EMPIRE_TRAJECTORY (PHASE_9)</h2>
+            <h2>EMPIRE_TRAJECTORY (PHASE_10)</h2>
             <div style="font-size: 10px; color: #ffcc00; margin-bottom: 5px;">PROGRESS_TO_1M: <span id="progress-text">0.00%</span></div>
             <div style="width: 100%; background: #222; height: 10px; border-radius: 5px; overflow: hidden; border: 1px solid #ffcc00;">
                 <div id="progress-bar" style="width: 0%; background: #ffcc00; height: 100%; transition: width 0.5s ease;"></div>
@@ -73,17 +73,19 @@
         </div>
 
 
+
         <div class="card" style="border-color: #ff00ff; background: rgba(255,0,255,0.02);">
-            <h2>LIVE_REVENUE_IGNITION</h2>
+            <h2>LIVE_REVENUE_IGNITION <button onclick="update()" style="font-size: 8px; padding: 2px;">POLL</button></h2>
             <div id="rev-ignition" style="font-size: 11px; color: #f0f;">
                 GROWTH_VELOCITY: <span id="ign-velocity">0.00</span>x<br>
                 REINVESTMENT_FLOW: <span id="ign-flow">$0.00</span><br>
-                MARKET_CONVERSION: <span id="ign-conv">0.0%</span><br>
-                <div style="margin-top: 5px; font-weight: bold; color: #fff;">HYPER_SCALE_STATUS:</div>
-                <div id="ign-status" style="font-size: 10px; color: #f0f; font-style: italic;">Engaged - 10x Goal</div>
+                MARKET_DOMINANCE: <span id="ign-dominance">0.0</span>%<br>
+                <div style="margin-top: 5px; font-weight: bold; color: #fff;">HYPER_SCALE_PULSE:</div>
+                <div id="ign-status" style="font-size: 10px; color: #f0f; font-style: italic;">Phase 10: Dominance Protocol Active</div>
             </div>
             <button onclick="getBriefing()" style="margin-top: 10px; width: 100%; border-color: #f0f; color: #f0f;">REVENUE_STRATEGY_PULSE</button>
         </div>
+
 
         <div class="card" style="border-color: #0f0; background: rgba(0,255,0,0.02);">
             <h2>MARKETPLACE_PROJECTIONS</h2>
@@ -172,16 +174,36 @@
         </div>
     </div>
 
+
+    <div class="card" style="margin-top: 15px;">
+        <h2>EMPIRE_GROWTH_VELOCITY</h2>
+        <div style="height: 40px; display: flex; align-items: flex-end; gap: 2px;">
+            <div style="flex: 1; background: #333; height: 10%;"></div>
+            <div style="flex: 1; background: #444; height: 15%;"></div>
+            <div style="flex: 1; background: #555; height: 25%;"></div>
+            <div style="flex: 1; background: #666; height: 35%;"></div>
+            <div style="flex: 1; background: #0f0; height: 60%;"></div>
+            <div style="flex: 1; background: #0f0; height: 85%; box-shadow: 0 0 10px #0f0;"></div>
+            <div style="flex: 1; background: #f0f; height: 100%; box-shadow: 0 0 15px #f0f;"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 8px; color: #888; margin-top: 5px;">
+            <span>PHASE_7</span>
+            <span>PHASE_8</span>
+            <span>PHASE_10</span>
+            <span>PHASE_10_DOMINANCE</span>
+        </div>
+    </div>
+
     <div class="card" style="margin-top: 15px;">
         <h2>SYSTEM_LOGS</h2>
         <pre id="logs" style="max-height: 200px; overflow-y: auto;">Initializing telemetry...</pre>
     </div>
 
     <script>
+                let eco = {};
                 async function update() {
             console.log("Update cycle triggered...");
             try {
-
                 // AGI Mode Status
                 const agiResp = await fetch('/admin/agi-mode').then(r => r.ok ? r.json() : {enabled: false}).catch(() => ({enabled: false}));
                 const agiStatus = document.getElementById('agi-mode-status');
@@ -203,26 +225,28 @@
                 document.getElementById('revenue').innerText = `$${ledger.total_revenue.toFixed(2)}`;
                 document.getElementById('roi').innerText = ledger.roi.toFixed(2);
 
-                // Phase 8 Economics & Projections
-                const eco = await fetch('/marketplace/economics').then(r => r.ok ? r.json() : {total_volume:0, total_commissions:0, growth_multiplier:0, total_sales:0, top_performing_agents:{}}).catch(() => ({total_volume:0, total_commissions:0, growth_multiplier:0, total_sales:0, top_performing_agents:{}}));
-                console.log('Eco Update:', eco);
-                document.getElementById('eco-volume').innerText = `$${eco.total_volume.toFixed(2)}`;
-                document.getElementById('eco-commissions').innerText = `$${eco.total_commissions.toFixed(2)}`;
-                document.getElementById('eco-growth').innerText = eco.growth_multiplier.toFixed(2);
+                // Economics
+                const ecoRes = await fetch('/marketplace/economics').then(r => r.ok ? r.json() : {total_volume:0, total_commissions:0, growth_multiplier:0, total_sales:0, top_performing_agents:{}}).catch(() => ({total_volume:0, total_commissions:0, growth_multiplier:0, total_sales:0, top_performing_agents:{}}));
+                window.eco = ecoRes; // Global for debug
+                console.log('Eco Update:', ecoRes);
+                document.getElementById('eco-volume').innerText = `$${ecoRes.total_volume.toFixed(2)}`;
+                document.getElementById('eco-commissions').innerText = `$${ecoRes.total_commissions.toFixed(2)}`;
+                document.getElementById('eco-growth').innerText = ecoRes.growth_multiplier.toFixed(2);
 
                 const sellersDiv = document.getElementById('eco-top-sellers');
-                sellersDiv.innerHTML = Object.entries(eco.top_performing_agents)
+                sellersDiv.innerHTML = Object.entries(ecoRes.top_performing_agents)
                     .map(([name, count]) => `<div>${name}: ${count} sales</div>`)
                     .join('');
 
-                const vol = eco.total_volume;
-                document.getElementById('proj-rev').innerText = `$${(vol * 5.5).toFixed(2)}`;
-                document.getElementById('proj-score').innerText = Math.min((vol / 5000) * 100, 100).toFixed(2);
+                const vol = ecoRes.total_volume;
+                document.getElementById('ign-velocity').innerText = (vol > 0 ? (vol / 50).toFixed(2) : "0.00");
+                document.getElementById('ign-flow').innerText = `$${(vol * 0.35).toFixed(2)}`;
+                document.getElementById('ign-dominance').innerText = Math.min((vol / 10000) * 100, 100).toFixed(1);
 
-                if (eco.total_sales > 0) {
+                if (ecoRes.total_sales > 0) {
                     const marquee = document.getElementById('revenue-marquee');
-                    const topAgent = Object.keys(eco.top_performing_agents).find(k => eco.top_performing_agents[k] > 0) || "Agent";
-                    marquee.innerText = `LIVE_REVENUE_STREAM: NEW_SALE in ${topAgent} ... Commission Routed ... ROI: 1.45x ... Scaling ${eco.total_sales * 5} additional nodes ... [PHASE_9_DOMINANCE]`;
+                    const topAgent = Object.keys(ecoRes.top_performing_agents).find(k => ecoRes.top_performing_agents[k] > 0) || "Agent";
+                    marquee.innerText = `LIVE_REVENUE_STREAM: NEW_SALE in ${topAgent} ... Commission Routed ... ROI: 1.45x ... Scaling ${ecoRes.total_sales * 5} additional nodes ... [PHASE_10_DOMINANCE]`;
                 }
 
                 // Marketplace
@@ -278,16 +302,6 @@
                     memDiv.innerHTML = html;
                 }
 
-                // Multi-Milestone Progress
-                const rev = parseFloat(document.getElementById('revenue').innerText.replace('$', '').replace(',', ''));
-                const progress = Math.min((rev / 1000000.0) * 100, 100);
-                document.getElementById('progress-text').innerText = `${progress.toFixed(4)}%`;
-                document.getElementById('progress-bar').style.width = `${progress}%`;
-
-                document.getElementById('m1').style.color = rev >= 10000 ? '#0f0' : '#888';
-                document.getElementById('m2').style.color = rev >= 100000 ? '#0f0' : '#888';
-                document.getElementById('m3').style.color = rev >= 1000000 ? '#0f0' : '#888';
-
                 // Proactive Feed
                 const opps = await fetch('/swarm/proactive-feed').then(r => r.ok ? r.json() : []).catch(() => []);
                 const oppDiv = document.getElementById('opportunity-feed');
@@ -298,35 +312,16 @@
 
                     oppDiv.innerHTML = sorted.map(o => {
                         let color = '#f0f'; let label = '[STRATEGY]';
-                        if (o.type === 'empire_review') { color = '#ffcc00'; label = '[EMPIRE_STEP]'; }
+                        if (o.type === 'empire_review' || o.type === 'strategic_48h_dominance_plan') { color = '#ffcc00'; label = '[EMPIRE_STEP]'; }
                         if (o.type === 'empire_command_voice') { color = '#0f0'; label = '[JARVIS_VOICE]'; }
                         if (o.type === 'shopify_sync') { color = '#0ff'; label = '[SHOPIFY_LIVE]'; }
-                        if (o.type === 'market_traction') { color = '#0f0'; label = '[MARKET_SUCCESS]'; }
-                        if (o.type === 'scaling_event') { color = '#0ff'; label = '[SCALING]'; }
+                        if (o.type === 'market_dominance_event') { color = '#0f0'; label = '[DOMINANCE]'; }
                         return `<div style="margin-bottom: 10px; border-left: 3px solid ${color}; padding-left: 8px;">
                             <div style="font-weight: bold; color: ${color}; font-size: 9px;">${label}</div>
                             <div>${o.content}</div>
                         </div>`;
                     }).join('');
                 }
-
-                // Approvals
-                const audit = await fetch('/compliance/audit').then(r => r.ok ? r.json() : []).catch(() => []);
-                const pending = audit.filter(e => e.action === 'approval_request_created');
-                document.getElementById('approvals-count').innerText = pending.length;
-
-                // Reflections
-                const reflections = await fetch('/swarm/reflections').then(r => r.ok ? r.json() : []).catch(() => []);
-                const refDiv = document.getElementById('reflection-log');
-                if (reflections && reflections.length > 0) {
-                    refDiv.innerHTML = reflections.map(r => `
-                        <div style="margin-bottom: 8px; border-bottom: 1px solid #222; padding-bottom: 4px;">
-                            <b style="color: #0ff;">[${r.vertical.toUpperCase()} / ${r.specialty.toUpperCase()}]</b>
-                            <div style="color: #aaa; font-style: italic; margin-top: 2px;">"${r.reflection}"</div>
-                        </div>
-                    `).join('');
-                }
-
             } catch (e) { console.error("Telemetry update failed:", e); }
         }
 
@@ -502,7 +497,7 @@
     </script>
 
     <div style="background: #000; border-top: 1px solid #333; padding: 5px; font-size: 9px; color: #0f0; overflow: hidden; white-space: nowrap;">
-        <marquee behavior="scroll" direction="left" id="revenue-marquee">LIVE_REVENUE_STREAM: Initializing ignition... [NEON_VOID_PHASE_9] ... Commission routing active ... Swarm scaling engaged ...</marquee>
+        <marquee behavior="scroll" direction="left" id="revenue-marquee">LIVE_REVENUE_STREAM: Initializing ignition... [NEON_VOID_PHASE_10] ... Commission routing active ... Swarm scaling engaged ...</marquee>
     </div>
 
 </body>
