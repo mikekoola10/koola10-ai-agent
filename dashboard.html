@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>A.S.K. Agency - Digital Mancave V3.1</title>
+    <title>A.S.K. Agency - Digital Mancave V4.2 (FABLE_5_STRATEGIC_EMPIRE)</title>
     <style>
         :root {
             --neon-cyan: #67e8f9;
@@ -161,7 +161,12 @@
         <div style="text-align:right;">
             <div id="rhel-badge" class="enterprise-status" style="display:none; margin-bottom: 5px;">RED_HAT_ENTERPRISE_MODE: ACTIVE</div>
             <div>AGI_MODE: <span id="agi-status" style="color:var(--neon-purple)">ACTIVE</span></div>
-            <div id="clock">00:00:00</div>
+            <div class="empire-controls">
+  <button onclick="runFullSprint()" class="btn-sprint" style="background: #00ff00; color: #000; border: none; padding: 10px; cursor: pointer; margin-right: 10px;">RUN_FULL_REVENUE_SPRINT</button>
+  <button onclick="getStrategicBriefing()" class="btn-briefing" style="background: #00ffff; color: #000; border: none; padding: 10px; cursor: pointer;">GET_STRATEGIC_BRIEFING</button>
+</div>
+<div id="strategic-briefing-text" style="color: #00ff00; font-family: monospace; margin-top: 10px;"></div>
+<div id="clock">00:00:00</div>
         </div>
     </header>
 
@@ -351,6 +356,19 @@
         setInterval(() => {
             document.getElementById('clock').innerText = new Date().toLocaleTimeString();
         }, 1000);
-    </script>
+
+        async function runFullSprint() {
+            const res = await fetch('/admin/run-full-sprint', { method: 'POST' });
+            const data = await res.json();
+            alert(data.message || 'Sprint Launched');
+            updateBusinessMetrics();
+        }
+
+        async function getStrategicBriefing() {
+            const res = await fetch('/empire/briefing');
+            const data = await res.json();
+            document.getElementById('strategic-briefing-text').innerText = data.briefing;
+        }
+        </script>
 </body>
 </html>
