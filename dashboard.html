@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A.S.K. Agency - Digital Mancave V4.2 (FABLE_5_STRATEGIC_EMPIRE)</title>
+    <style>
+        :root {
+            --neon-cyan: #67e8f9;
+            --neon-purple: #a855f7;
+            --rhel-red: #ee0000;
+            --dark-bg: #050505;
+            --card-bg: #111111;
+        }
+        body {
+            background: var(--dark-bg);
+            color: var(--neon-cyan);
+            font-family: 'Inter', 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%),
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            z-index: 1000;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--rhel-red);
+            padding-bottom: 15px;
+            margin-bottom: 30px;
+            text-shadow: 0 0 15px rgba(238, 0, 0, 0.5);
+        }
+        .tagline {
+            font-size: 0.9rem;
+            color: var(--neon-purple);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+            gap: 25px;
+        }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid #222;
+            padding: 25px;
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: transform 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: var(--rhel-red);
+        }
+        .card h2 {
+            margin-top: 0;
+            color: var(--neon-purple);
+            font-size: 1.1rem;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .metrics {
+            font-size: 1.8rem;
+            font-weight: 800;
+            margin: 15px 0;
+            background: linear-gradient(to right, var(--neon-cyan), var(--neon-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .enterprise-status {
+            color: var(--rhel-red);
+            font-weight: bold;
+            font-size: 0.8rem;
+            border: 1px solid var(--rhel-red);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        button {
+            background: transparent;
+            color: var(--neon-cyan);
+            border: 1px solid var(--neon-cyan);
+            padding: 12px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+            text-transform: uppercase;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background: var(--neon-cyan);
+            color: #000;
+            box-shadow: 0 0 25px var(--neon-cyan);
+        }
+        .btn-rhel {
+            border-color: var(--rhel-red);
+            color: var(--rhel-red);
+        }
+        .btn-rhel:hover {
+            background: var(--rhel-red);
+            color: #fff;
+            box-shadow: 0 0 25px var(--rhel-red);
+        }
+        .reflection-log {
+            height: 250px;
+            overflow-y: auto;
+            background: #000;
+            padding: 15px;
+            font-size: 0.85rem;
+            border: 1px solid #222;
+        }
+        .reflection-entry {
+            margin-bottom: 15px;
+            border-bottom: 1px solid #111;
+            padding-bottom: 10px;
+        }
+        .foresight {
+            font-style: italic;
+            color: #888;
+            border-left: 2px solid var(--neon-purple);
+            padding-left: 10px;
+            margin: 10px 0;
+        }
+
+        .home-card {
+            border-color: var(--neon-cyan);
+        }
+        .sensor-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 10px 0;
+            font-size: 0.8rem;
+        }
+        .sensor-item {
+            background: #111;
+            padding: 8px;
+            border-left: 2px solid var(--neon-cyan);
+        }
+
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <h1 style="margin:0; font-size: 2rem;">A.S.K._AGENCY <span style="font-size:0.8rem; color:var(--rhel-red);">v3.1_ENTERPRISE</span></h1>
+            <div class="tagline">AI THAT BUILDS EMPIRES</div>
+        </div>
+        <div style="text-align:right;">
+            <div id="rhel-badge" class="enterprise-status" style="display:none; margin-bottom: 5px;">RED_HAT_ENTERPRISE_MODE: ACTIVE</div>
+            <div>AGI_MODE: <span id="agi-status" style="color:var(--neon-purple)">ACTIVE</span></div>
+            <div class="empire-controls">
+  <button onclick="runFullSprint()" class="btn-sprint" style="background: #00ff00; color: #000; border: none; padding: 10px; cursor: pointer; margin-right: 10px;">RUN_FULL_REVENUE_SPRINT</button>
+  <button onclick="getStrategicBriefing()" class="btn-briefing" style="background: #00ffff; color: #000; border: none; padding: 10px; cursor: pointer;">GET_STRATEGIC_BRIEFING</button>
+</div>
+<div id="strategic-briefing-text" style="color: #00ff00; font-family: monospace; margin-top: 10px;"></div>
+<div id="clock">00:00:00</div>
+        </div>
+    </header>
+
+    <div class="grid">
+
+        <div class="card home-card">
+            <h2>HOME_AI_BRAIN</h2>
+            <div class="metrics">ENERGY_COST: <span id="home-energy-cost">$0.00</span></div>
+            <div class="sensor-grid" id="home-sensors">
+                <!-- Dynamically populated -->
+            </div>
+            <div style="margin-top:10px;">ACTIVE_SCENARIOS: <span id="active-scenarios" style="color:var(--neon-purple)">None</span></div>
+            <button onclick="triggerHomeScenario("welcome_home")">WELCOME_HOME</button>
+            <button onclick="triggerHomeScenario("energy_opt")">OPTIMIZE_ENERGY</button>
+        </div>
+
+        <div class="card">
+            <h2>BUSINESS_COMMAND_CENTER</h2>
+            <div class="metrics">EMPIRE_REVENUE: <span id="empire-revenue">-bash.00</span></div>
+            <div>ACTIVE_PROJECTS: <span id="active-projects">0</span></div>
+            <div class="foresight" id="strategic-foresight">Analyzing global markets for autonomous expansion...</div>
+            <button onclick="triggerRevenue('affiliate')">EXPAND_AFFILIATE_NETWORK</button>
+            <button onclick="triggerRevenue('bounty')">HUNT_NEW_BOUNTIES</button>
+        </div>
+        <div class="card">
+            <h2>PRODUCT_EMPIRE_PIPELINE</h2>
+            <div class="metrics">FORECAST: <span id="revenue-forecast">$0.00</span></div>
+            <div>GENERATED: <span id="total-products">0</span> | SYNCED: <span id="synced-products">0</span></div>
+            <div style="margin-top:10px;">ACTIVE: <span id="active-collections" style="color:var(--neon-purple)">None</span></div>
+            <div style="background:#222; height:10px; margin-top:10px; border-radius:5px;">
+                <div id="generation-bar" style="background:var(--neon-cyan); height:100%; width:0%; border-radius:5px; transition:width 1s;"></div>
+            </div>
+            <button onclick="launchNextCycle()">LAUNCH_NEXT_SWARM_CYCLE</button>
+            <button class="btn-rhel" onclick="syncShopify()">SYNC_TO_SHOPIFY</button>
+        </div>
+
+        <div class="card">
+            <h2>ENTERPRISE_INFRASTRUCTURE</h2>
+            <div>SCALING_STATUS: <span id="scaling-status" style="color:var(--rhel-red)">STABLE</span></div>
+            <div style="margin: 10px 0;">RESOURCE_OPTIMIZATION: <span id="resource-opt" style="color:#888">N/A</span></div>
+            <button class="btn-rhel" onclick="toggleRHEL()">TOGGLE_RHEL_MODE</button>
+            <button onclick="deployNewSwarm()">SCALE_SWARM_CAPACITY</button>
+        </div>
+
+        <div class="card">
+            <h2>SWARM_INTELLIGENCE</h2>
+            <div>TOTAL_AGENTS: <span id="total-agents">0</span></div>
+            <div id="swarm-metrics" style="margin-top:10px; font-size: 0.8rem;">
+                <!-- Dynamically populated -->
+            </div>
+            <button onclick="refreshSwarm()">RECALIBRATE_SWARM</button>
+        </div>
+
+        <div class="card">
+            <h2>RECURSIVE_REFLECTIONS</h2>
+            <div id="reflections" class="reflection-log">
+                Waiting for AGI reflections...
+            </div>
+            <button onclick="updateReflections()">PULL_STRATEGIC_LOGS</button>
+        </div>
+    </div>
+
+    <script>
+
+        async function updateHomeStatus() {
+            const res = await fetch("/home/status").then(r => r.json());
+            document.getElementById("home-energy-cost").innerText = `\$${res.energy_cost.toFixed(2)}`;
+            const sensorsCont = document.getElementById("home-sensors");
+            sensorsCont.innerHTML = Object.entries(res.sensors).map(([id, s]) => `
+                <div class="sensor-item">
+                    <div style="color:#888">${id.toUpperCase()}</div>
+                    <div style="font-weight:bold">${s.value} ${s.unit}</div>
+                </div>
+            `).join("");
+            const active = res.scenarios.filter(s => s.is_active).map(s => s.name);
+            document.getElementById("active-scenarios").innerText = active.length > 0 ? active.join(", ") : "None";
+        }
+
+        async function triggerHomeScenario(id) {
+            await fetch("/home/trigger-scenario", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({scenario_id: id})
+            });
+            updateHomeStatus();
+        }
+
+        async function updateProductStats() {
+            const res = await fetch("/admin/product-empire/stats").then(r => r.json());
+            document.getElementById("revenue-forecast").innerText = `\$${res.revenue_forecast.toFixed(2)}`;
+            document.getElementById("total-products").innerText = res.total_products;
+            document.getElementById("synced-products").innerText = res.synced_products;
+            document.getElementById("active-collections").innerText = res.active_collections.join(", ");
+            document.getElementById("generation-bar").style.width = `${res.generation_progress}%`;
+        }
+
+        async function launchNextCycle() {
+            await fetch("/admin/generate-product-line", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({collection: "Digital Ascendance", count: 15})
+            });
+            updateProductStats();
+        updateHomeStatus();
+            alert("Second swarm cycle focused on digital products initiated!");
+        }
+
+        async function syncShopify() {
+            await fetch("/monetize/shopify/sync", { method: "POST" });
+            updateProductStats();
+        updateHomeStatus();
+            updateBusinessMetrics();
+            alert("Products pushed to Shopify and Marketplace listings created.");
+        }
+
+        async function updateBusinessMetrics() {
+            const res = await fetch('/admin/business-metrics').then(r => r.json());
+            document.getElementById('empire-revenue').innerText = `$${res.empire_revenue.toFixed(2)}`;
+            document.getElementById('active-projects').innerText = res.active_projects;
+            document.getElementById('strategic-foresight').innerText = res.strategic_foresight;
+            document.getElementById('scaling-status').innerText = res.scaling_status;
+            document.getElementById('resource-opt').innerText = res.resource_optimization;
+        }
+
+        async function updateSwarm() {
+            const res = await fetch('/swarm/metrics').then(r => r.json());
+            const container = document.getElementById('swarm-metrics');
+            let total = 0;
+            container.innerHTML = Object.entries(res).map(([k, v]) => {
+                total += v.total;
+                return `<div>[${k.toUpperCase()}] ACTIVE: ${v.working} | STANDBY: ${v.idle}</div>`;
+            }).join('');
+            document.getElementById('total-agents').innerText = total;
+        }
+
+        async function updateReflections() {
+            const res = await fetch('/swarm/reflections').then(r => r.json());
+            const container = document.getElementById('reflections');
+            if (!res || res.length === 0) return;
+            container.innerHTML = res.reverse().map(r => `
+                <div class="reflection-entry">
+                    <div style="color:var(--neon-purple)">[${r.timestamp}] ${r.vertical.toUpperCase()} ANALYSIS</div>
+                    <div>${r.analysis}</div>
+                    <div style="color:var(--neon-cyan); font-size: 0.75rem; margin-top:5px;">SUGGESTIONS: ${r.suggestions.join(' | ')}</div>
+                </div>
+            `).join('');
+        }
+
+        async function syncRHEL() {
+            const res = await fetch('/admin/rhel-mode').then(r => r.json());
+            document.getElementById('rhel-badge').style.display = res.enabled ? 'block' : 'none';
+        }
+
+        async function toggleRHEL() {
+            const badge = document.getElementById('rhel-badge');
+            const current = badge.style.display === 'block';
+            await fetch('/admin/rhel-mode', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled: !current})
+            });
+            syncRHEL();
+        }
+
+        async function triggerRevenue(v) {
+            await fetch(`/admin/trigger_${v}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            });
+            alert(`Swarm ${v} expansion sequence initiated.`);
+        }
+
+        // Initialize
+        setInterval(updateBusinessMetrics, 5000);
+        setInterval(updateProductStats, 5000);
+        setInterval(updateHomeStatus, 5000);
+        setInterval(updateSwarm, 5000);
+        setInterval(updateReflections, 10000);
+        updateBusinessMetrics();
+        updateProductStats();
+        updateHomeStatus();
+        updateSwarm();
+        updateReflections();
+        syncRHEL();
+
+        // Clock
+        setInterval(() => {
+            document.getElementById('clock').innerText = new Date().toLocaleTimeString();
+        }, 1000);
+
+        async function runFullSprint() {
+            const res = await fetch('/admin/run-full-sprint', { method: 'POST' });
+            const data = await res.json();
+            alert(data.message || 'Sprint Launched');
+            updateBusinessMetrics();
+        }
+
+        async function getStrategicBriefing() {
+            const res = await fetch('/empire/briefing');
+            const data = await res.json();
+            document.getElementById('strategic-briefing-text').innerText = data.briefing;
+        }
+        </script>
+</body>
+</html>

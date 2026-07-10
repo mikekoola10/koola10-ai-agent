@@ -1,0 +1,10 @@
+.git
+node_modules
+app
+agent
+app.log
+agent.log
+*.test
+.dockerignore
+Dockerfile
+fly.toml

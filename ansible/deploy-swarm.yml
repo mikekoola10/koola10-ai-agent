@@ -1,0 +1,25 @@
+---
+- name: Deploy ASK Agency Swarm
+  hosts: all
+  become: yes
+  tasks:
+    - name: Ensure podman is installed
+      package:
+        name: podman
+        state: present
+
+    - name: Pull latest agent image
+      podman_image:
+        name: registry.access.redhat.com/ubi8/ubi-minimal:latest
+        source: pull
+
+    - name: Run ASK Agency Agent
+      podman_container:
+        name: ask-agent
+        image: ask-agency/agent:latest
+        state: started
+        restart_policy: always
+        ports:
+          - "8080:8080"
+        env:
+          RHEL_MODE: "true"

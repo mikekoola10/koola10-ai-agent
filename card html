@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Koola10 Card Generator</title>
+  <style>
+    body { font-family: system-ui; max-width: 400px; margin: 2rem auto; padding: 1rem; background: #0b0820; color: #fff; }
+    button { background: #F59E0B; color: #000; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 1rem; }
+    pre { background: #111; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>🎮 PS Plus Card</h1>
+  <button onclick="generate()">Generate $110 PlayStation Card</button>
+  <pre id="result"></pre>
+
+  <script>
+    async function generate() {
+      const res = await fetch('https://koola10.fly.dev/agent/create-agent-card', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ merchant: 'PlayStation', amount: 110.00 })
+      });
+      const data = await res.json();
+      document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+    }
+  </script>
+</body>
+</html>
