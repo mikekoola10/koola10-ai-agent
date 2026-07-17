@@ -582,6 +582,7 @@ func main() {
 
 	r.HandleFunc("/admin/run-full-sprint", handleRunFullSprint)
 	r.HandleFunc("/empire/briefing", handleStrategicBriefing)
+	r.Post("/admin/run-scheduled-sprint", corsMiddleware(authMiddleware(handleScheduledSprint)))
 
 	r.Get("/", corsMiddleware(handleRoot))
 	r.Get("/home/status", corsMiddleware(handleHomeStatus))
@@ -690,6 +691,87 @@ func main() {
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
+}
+
+// --- Scheduled Sprint Handler ---
+
+// handleScheduledSprint accepts a sprint request and runs it asynchronously.
+// It returns 202 Accepted immediately, then pre-checks /health before kicking
+// off /admin/run-full-sprint with the ADMIN_API_KEY as a Bearer token. All
+// progress is recorded in the audit chain and in server logs.
+func handleScheduledSprint(w http.ResponseWriter, r *http.Request) {
+	sprintID := generateID()
+
+	// 1) Return 202 Accepted immediately so callers can move on.
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":    "accepted",
+		"sprint_id": sprintID,
+		"message":   "Sprint scheduled. Running asynchronously.",
+	})
+
+	// 2) Run the actual sprint asynchronously so the request doesn't hang.
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("[ScheduledSprint] %s panicked: %v", sprintID, rec)
+				AddAuditEntry("scheduled_sprint_panic", map[string]interface{}{"sprint_id": sprintID, "panic": fmt.Sprintf("%v", rec)})
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "8080"
+		}
+		baseURL := fmt.Sprintf("http://localhost:%s", port)
+
+		log.Printf("[ScheduledSprint] %s queued", sprintID)
+		AddAuditEntry("scheduled_sprint_queued", map[string]interface{}{"sprint_id": sprintID})
+
+		// --- Pre-check: /health ---
+		healthReq, _ := http.NewRequestWithContext(ctx, "GET", baseURL+"/health", nil)
+		healthResp, err := http.DefaultClient.Do(healthReq)
+		if err != nil || (healthResp != nil && healthResp.StatusCode != http.StatusOK) {
+			errMsg := "health endpoint unreachable"
+			if err != nil {
+				errMsg = err.Error()
+			}
+			log.Printf("[ScheduledSprint] %s aborted: %s", sprintID, errMsg)
+			AddAuditEntry("scheduled_sprint_aborted", map[string]interface{}{"sprint_id": sprintID, "reason": errMsg})
+			if healthResp != nil {
+				healthResp.Body.Close()
+			}
+			return
+		}
+		healthResp.Body.Close()
+
+		log.Printf("[ScheduledSprint] %s healthy - dispatching full sprint", sprintID)
+
+		// --- Internal call: POST /admin/run-full-sprint with admin key ---
+		sprintReq, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/admin/run-full-sprint", nil)
+		sprintReq.Header.Set("Content-Type", "application/json")
+		if adminKey := os.Getenv("ADMIN_API_KEY"); adminKey != "" {
+			sprintReq.Header.Set("Authorization", "Bearer "+adminKey)
+		}
+
+		sprintResp, err := http.DefaultClient.Do(sprintReq)
+		if err != nil {
+			log.Printf("[ScheduledSprint] %s dispatch failed: %v", sprintID, err)
+			AddAuditEntry("scheduled_sprint_dispatch_error", map[string]interface{}{"sprint_id": sprintID, "error": err.Error()})
+			return
+		}
+		defer sprintResp.Body.Close()
+
+		log.Printf("[ScheduledSprint] %s finished with status %d", sprintID, sprintResp.StatusCode)
+		AddAuditEntry("scheduled_sprint_dispatched", map[string]interface{}{
+			"sprint_id":   sprintID,
+			"status_code": sprintResp.StatusCode,
+		})
+	}()
 }
 
 // --- Studio Handlers ---
