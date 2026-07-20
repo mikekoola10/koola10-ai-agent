@@ -607,9 +607,39 @@ func main() {
 	r.Post("/stripe/webhook", handleStripeWebhook)
 
 	r.Post("/ai/chat", corsMiddleware(handleAIChat))
+
+	// ORACLE ECOSYSTEM (Calm, Analytical, Risk-Averse)
+	r.Post("/oracle/chat", corsMiddleware(handleEcosystemChat("You are Oracle (Orchestrator): calm, methodical, data-driven", "trading")))
+	r.Post("/sable/chat", corsMiddleware(handleEcosystemChat("You are Sable (Finance): conservative wealth-builder", "trading")))
+	r.Post("/vega/chat", corsMiddleware(handleEcosystemChat("You are Vega (Business): enterprise-grade, polished", "leadgen")))
+	r.Post("/muse/chat", corsMiddleware(handleEcosystemChat("You are Muse (Creative): poetic, watercolor aesthetics", "content")))
+	r.Post("/atlas/chat", corsMiddleware(handleEcosystemChat("You are Atlas (Engineering): architectural, durable", "saas_builder")))
+
+	// SENTINEL ECOSYSTEM (Principled, Ethical, Cautious)
+	r.Post("/sentinel/chat", corsMiddleware(handleEcosystemChat("You are Sentinel (Orchestrator): principled, safety-first", "compliance")))
+	r.Post("/fiducia/chat", corsMiddleware(handleEcosystemChat("You are Fiducia (Finance): fiduciary, trust-focused", "compliance")))
+	r.Post("/veritas/chat", corsMiddleware(handleEcosystemChat("You are Veritas (Business): transparent, fact-checked", "compliance")))
+	r.Post("/lumina/chat", corsMiddleware(handleEcosystemChat("You are Lumina (Creative): ethereal, sacred, dreamlike", "content")))
+	r.Post("/bastion/chat", corsMiddleware(handleEcosystemChat("You are Bastion (Engineering): fortress, unbreachable", "compliance")))
+
+	// NEXUS ECOSYSTEM (Connected, Data-Driven, Ubiquitous)
+	r.Post("/nexus/chat", corsMiddleware(handleEcosystemChat("You are Nexus (Orchestrator): connected, systems-thinking", "api_service")))
+	r.Post("/quantum/chat", corsMiddleware(handleEcosystemChat("You are Quantum (Finance): algorithmic, data-driven", "trading")))
+	r.Post("/prism/chat", corsMiddleware(handleEcosystemChat("You are Prism (Business): multi-channel, integrated", "leadgen")))
+	r.Post("/spectrum/chat", corsMiddleware(handleEcosystemChat("You are Spectrum (Creative): generative, experimental", "content")))
+	r.Post("/matrix/chat", corsMiddleware(handleEcosystemChat("You are Matrix (Engineering): distributed, cloud-native", "api_service")))
+
+	// REBEL ECOSYSTEM (Unfiltered, Contrarian, Truth-Seeking)
+	r.Post("/rebel/chat", corsMiddleware(handleEcosystemChat("You are Rebel (Orchestrator): unfiltered, contrarian", "research")))
+	r.Post("/maverick/chat", corsMiddleware(handleEcosystemChat("You are Maverick (Finance): contrarian, high-conviction", "trading")))
+	r.Post("/provocateur/chat", corsMiddleware(handleEcosystemChat("You are Provocateur (Business): disruptive, movement-building", "leadgen")))
+	r.Post("/anarchist/chat", corsMiddleware(handleEcosystemChat("You are Anarchist (Creative): raw, unpolished, authentic", "content")))
+	r.Post("/insurgent/chat", corsMiddleware(handleEcosystemChat("You are Insurgent (Engineering): fast, decentralized", "research")))
+
 	r.Post("/ai/remember", corsMiddleware(handleAIRemember))
 	r.Get("/ai/recall", corsMiddleware(handleAIRecall))
 	r.Post("/ai/analyze-grant", corsMiddleware(handleAIAnalyzeGrant))
+	r.Post("/compare/ecosystems", corsMiddleware(handleCompareEcosystems))
 
 	r.Get("/memory/meetings", corsMiddleware(handleMemoryMeetings))
 	r.Post("/memory/meetings", corsMiddleware(handleMemoryMeetings))
@@ -1753,26 +1783,19 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Status check")
 	w.Write([]byte(`{"data": "pending"}`))
 }
-func handleAIChat(w http.ResponseWriter, r *http.Request) {
-	var req ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
+func performAIChat(prompt, systemPrompt string, vertical string) (string, int, error) {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "no key", 500)
-		return
+		return "", 0, fmt.Errorf("no key")
 	}
 	if !rateLimit() {
-		http.Error(w, "limited", 429)
-		return
+		return "", 0, fmt.Errorf("limited")
 	}
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
-			{"role": "user", "content": req.Prompt},
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": prompt},
 		},
 	}
 	dsBody, _ := json.Marshal(dsReq)
@@ -1785,8 +1808,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
 	if err != nil {
-		http.Error(w, "api failed", 500)
-		return
+		return "", 0, fmt.Errorf("api failed")
 	}
 	defer resp.Body.Close()
 	var dsRes struct {
@@ -1800,17 +1822,63 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "parse failed", 500)
-		return
+		return "", 0, fmt.Errorf("parse failed")
 	}
 	LogUsage(dsRes.Usage.TotalTokens)
-	globalLedger.RecordCost("", "ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
+	globalLedger.RecordCost(vertical, "ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
+	return dsRes.Choices[0].Message.Content, dsRes.Usage.TotalTokens, nil
+}
+
+func handleAIChat(w http.ResponseWriter, r *http.Request) {
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	response, tokens, err := performAIChat(req.Prompt, "You are Koola10, an autonomous grant agent.", "")
+	if err != nil {
+		if err.Error() == "limited" {
+			http.Error(w, "limited", 429)
+		} else {
+			http.Error(w, err.Error(), 500)
+		}
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ChatResponse{
-		Response:   dsRes.Choices[0].Message.Content,
-		TokensUsed: dsRes.Usage.TotalTokens,
+		Response:   response,
+		TokensUsed: tokens,
 	})
 }
+
+func handleEcosystemChat(personality string, vertical string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", 400)
+			return
+		}
+
+		response, tokens, err := performAIChat(req.Prompt, personality, vertical)
+		if err != nil {
+			if err.Error() == "limited" {
+				http.Error(w, "limited", 429)
+			} else {
+				http.Error(w, err.Error(), 500)
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ChatResponse{
+			Response:   response,
+			TokensUsed: tokens,
+		})
+	}
+}
+
 func handleAIRemember(w http.ResponseWriter, r *http.Request) {
 	var req MemoryEntry; json.NewDecoder(r.Body).Decode(&req); json.NewEncoder(w).Encode(map[string]string{"status": "stored"})
 }
@@ -1819,6 +1887,52 @@ func handleAIRecall(w http.ResponseWriter, r *http.Request) {
 }
 func handleAIAnalyzeGrant(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"eligibility_score": 85, "summary": "Grant analysis summary."}`))
+}
+
+func handleCompareEcosystems(w http.ResponseWriter, r *http.Request) {
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	orchestrators := []struct {
+		Name         string
+		Personality  string
+		SystemPrompt string
+	}{
+		{"Koola10", "Original", "You are Koola10, an autonomous grant agent."},
+		{"Oracle", "Analytical", "You are Oracle (Orchestrator): calm, methodical, data-driven"},
+		{"Sentinel", "Principled", "You are Sentinel (Orchestrator): principled, safety-first"},
+		{"Nexus", "Connected", "You are Nexus (Orchestrator): connected, systems-thinking"},
+		{"Rebel", "Contrarian", "You are Rebel (Orchestrator): unfiltered, contrarian"},
+	}
+
+	type EcosystemResponse struct {
+		Ecosystem string `json:"ecosystem"`
+		Response  string `json:"response"`
+	}
+
+	results := make([]EcosystemResponse, len(orchestrators))
+	var wg sync.WaitGroup
+	wg.Add(len(orchestrators))
+
+	for i, orch := range orchestrators {
+		go func(idx int, name, prompt string) {
+			defer wg.Done()
+			resp, _, err := performAIChat(req.Prompt, prompt, "")
+			if err != nil {
+				results[idx] = EcosystemResponse{Ecosystem: name, Response: "Error: " + err.Error()}
+			} else {
+				results[idx] = EcosystemResponse{Ecosystem: name, Response: resp}
+			}
+		}(i, orch.Name, orch.SystemPrompt)
+	}
+
+	wg.Wait()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
 }
 func handleMemoryMeetings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" { var m Meeting; json.NewDecoder(r.Body).Decode(&m); id := globalGraph.AddMeeting(m); json.NewEncoder(w).Encode(map[string]string{"id": id}); return }
