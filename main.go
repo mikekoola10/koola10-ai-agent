@@ -426,6 +426,111 @@ var (
 	dashboardHTML string
 )
 
+// --- Ledger Correction ---
+
+func CorrectLedger() {
+	log.Println("Starting ledger correction task...")
+
+	// Helper to check if a transaction belongs to koola10
+	isKoola10 := func(tx Transaction) bool {
+		if tx.Amount > 5000 {
+			log.Printf("Removing abnormally large transaction: %v", tx)
+			return false
+		}
+		desc := strings.ToLower(tx.Description)
+		if strings.Contains(desc, "ecosystem:") && !strings.Contains(desc, "koola10") {
+			return false
+		}
+		// Based on user feedback, the valid balance was ~$745.
+		// Everything after the May 18th transactions seems to be swarm-related duplication.
+		// If we want to return to exactly ~$745, we should be very strict.
+		if strings.Contains(desc, "agent") || strings.Contains(desc, "swarm") {
+			return false
+		}
+		return true
+	}
+
+	// 1. Correct economic_ledger.json
+	data, err := os.ReadFile(ledgerPath)
+	if err == nil {
+		var ledger EconomicLedger
+		if err := json.Unmarshal(data, &ledger); err == nil {
+			var filtered []Transaction
+			var removedCount int
+			var newTotalRevenue float64
+			var newTotalCosts float64
+			var newBalance float64 = 100.0 // Starting balance from initialization
+
+			for _, tx := range ledger.Transactions {
+				if isKoola10(tx) {
+					filtered = append(filtered, tx)
+					if tx.Type == "revenue" {
+						newTotalRevenue += tx.Amount
+						newBalance += tx.Amount
+					} else if tx.Type == "cost" {
+						newTotalCosts += tx.Amount
+						newBalance -= tx.Amount
+					}
+				} else {
+					removedCount++
+				}
+			}
+
+			log.Printf("Economic ledger: keeping %d transactions, removed %d", len(filtered), removedCount)
+			ledger.Transactions = filtered
+			ledger.TotalRevenue = newTotalRevenue
+			ledger.TotalCosts = newTotalCosts
+			ledger.Balance = newBalance
+			newData, _ := json.MarshalIndent(ledger, "", "  ")
+			os.WriteFile(ledgerPath, newData, 0644)
+			globalLedger.Load() // Reload global state
+		}
+	}
+
+	// 2. Correct operational_fund.json
+	data, err = os.ReadFile(fundPath)
+	if err == nil {
+		var fund struct {
+			Balance             float64       `json:"balance"`
+			TotalEarned         float64       `json:"total_earned"`
+			TotalSpent          float64       `json:"total_spent"`
+			ReinvestmentHistory []string      `json:"reinvestment_history"`
+			Transactions        []Transaction `json:"transactions"`
+		}
+		if err := json.Unmarshal(data, &fund); err == nil {
+			var filtered []Transaction
+			var removedCount int
+			var newBalance float64
+			var newTotalEarned float64
+			var newTotalSpent float64
+
+			for _, tx := range fund.Transactions {
+				if isKoola10(tx) {
+					filtered = append(filtered, tx)
+					if tx.Type == "revenue_split" {
+						newBalance += tx.Amount
+						newTotalEarned += tx.Amount
+					} else if tx.Type == "expense" || tx.Type == "reinvestment" {
+						newBalance -= tx.Amount
+						newTotalSpent += tx.Amount
+					}
+				} else {
+					removedCount++
+				}
+			}
+
+			log.Printf("Operational fund: keeping %d transactions, removed %d", len(filtered), removedCount)
+			fund.Transactions = filtered
+			fund.Balance = newBalance
+			fund.TotalEarned = newTotalEarned
+			fund.TotalSpent = newTotalSpent
+			newData, _ := json.MarshalIndent(fund, "", "  ")
+			os.WriteFile(fundPath, newData, 0644)
+		}
+	}
+	log.Println("Ledger correction task completed.")
+}
+
 // --- Middleware ---
 
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -491,6 +596,7 @@ func main() {
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
+	CorrectLedger() // Filter erroneous transactions before starting
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
 
 	if data, err := os.ReadFile("./data/audit_offset.txt"); err == nil {

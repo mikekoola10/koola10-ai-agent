@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -72,6 +73,13 @@ func (fm *FundManager) save() {
 }
 
 func (fm *FundManager) RouteRevenue(amount float64, source string) {
+	// Guard: Ensure we only process revenue for the koola10 ecosystem.
+	// Check for "Ecosystem:" or "ecosystem:" tags.
+	srcLower := strings.ToLower(source)
+	if strings.Contains(srcLower, "ecosystem:") && !strings.Contains(srcLower, "koola10") {
+		return
+	}
+
 	fm.mu.Lock()
 
 	opAmount := amount * 0.30
