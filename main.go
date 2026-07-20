@@ -32,6 +32,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v76"
+	"github.com/stripe/stripe-go/v76/price"
+	"github.com/stripe/stripe-go/v76/product"
 	"github.com/stripe/stripe-go/v76/webhook"
 )
 
@@ -691,7 +693,55 @@ func main() {
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
-	registerStripeManagerRoutes(r)
+	// Stripe Manager: create a product + price
+	r.Post("/admin/stripe/products", corsMiddleware(authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Price       int64  `json:"price"`
+			Mode        string `json:"mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Name == "" {
+			http.Error(w, "name required", http.StatusBadRequest)
+			return
+		}
+		if req.Price == 0 {
+			req.Price = 4900
+		}
+		if req.Mode == "" {
+			req.Mode = "payment"
+		}
+
+		p, err := product.New(&stripe.ProductParams{
+			Name:        stripe.String(req.Name),
+			Description: stripe.String(req.Description),
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("product error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		pr, err := price.New(&stripe.PriceParams{
+			Product:    stripe.String(p.ID),
+			UnitAmount: stripe.Int64(req.Price),
+			Currency:   stripe.String("usd"),
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("price error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{
+			"product_id": p.ID,
+			"price_id":   pr.ID,
+			"name":       p.Name,
+		})
+	}))))
 
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
