@@ -668,6 +668,8 @@ func main() {
 	r.Post("/admin/trigger_bounty", corsMiddleware(authMiddleware(handleTriggerBounty)))
 	r.Post("/admin/bpa/onboard", corsMiddleware(authMiddleware(handleBPAOnboard)))
 	r.Post("/admin/trigger_content", corsMiddleware(authMiddleware(handleTriggerContent)))
+	r.Post("/admin/trigger_grants", corsMiddleware(authMiddleware(handleTriggerGrants)))
+	r.Post("/admin/capital/deploy", corsMiddleware(authMiddleware(handleCapitalDeploy)))
 	r.Post("/admin/scheduler/run", corsMiddleware(authMiddleware(handleSchedulerRun)))
 
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
@@ -772,6 +774,147 @@ func handleScheduledSprint(w http.ResponseWriter, r *http.Request) {
 			"status_code": sprintResp.StatusCode,
 		})
 	}()
+}
+
+// --- Grants Trigger + Capital Deploy ---
+
+// CapitalDeployRequest is the JSON body for POST /admin/capital/deploy.
+type CapitalDeployRequest struct {
+	Vertical string  `json:"vertical"`
+	Amount   float64 `json:"amount"`
+}
+
+// handleTriggerGrants creates a Stripe checkout session for the "Grant
+// Application Package" ($49). On success it routes $49 through
+// fundManager.RouteRevenue (which performs the 30/70 ops/spendable split
+// that drives /vault/summary), journals an audit entry, and returns the
+// Stripe URL so the caller can redirect the user. Requires the
+// STRIPE_PRICE_GRANT env var to point at a real Stripe Price.
+func handleTriggerGrants(w http.ResponseWriter, r *http.Request) {
+	res := tools.RunTool("stripe", map[string]interface{}{
+		"action":      "create_checkout_session",
+		"price_id":    os.Getenv("STRIPE_PRICE_GRANT"),
+		"success_url": "https://koola10.ai/thanks",
+		"cancel_url":  "https://koola10.ai/pricing",
+	})
+	w.Header().Set("Content-Type", "application/json")
+	if !res.Success {
+		AddAuditEntry("grant_checkout_failed", map[string]interface{}{"error": res.Error})
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": res.Error})
+		return
+	}
+	fundManager.RouteRevenue(49.0, "grants")
+	AddAuditEntry("grant_checkout_created", map[string]interface{}{
+		"checkout_url": res.Output,
+		"session":      res.Data,
+		"amount":       49.0,
+	})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "ok",
+		"checkout_url": res.Output,
+		"session":      res.Data,
+		"amount":       49.0,
+	})
+}
+
+// handleCapitalDeploy commits spendable_fund capital into repeated runs
+// of a chosen vertical. Each iteration creates its own Stripe checkout
+// session (the caller gets back N URLs). Sequential issuance keeps us
+// safely under Stripe's ~100 req/s rate limit. Per-iteration successes
+// route $perUnitCost via fundManager.RouteRevenue (30/70 split into
+// vault/summary). The full requested amount is also booked via
+// globalLedger.RecordCost so the spendable ledger accurately reflects
+// capital that has been committed out.
+func handleCapitalDeploy(w http.ResponseWriter, r *http.Request) {
+	var req CapitalDeployRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Amount <= 0 || req.Vertical == "" {
+		http.Error(w, "vertical and positive amount required", http.StatusBadRequest)
+		return
+	}
+
+	perUnitCost := 49.0
+	iterations := int(req.Amount / perUnitCost)
+	if iterations == 0 {
+		iterations = 1 // allow sub-unit smoke tests with $1
+	}
+
+	var priceEnv string
+	switch req.Vertical {
+	case "grants":
+		priceEnv = "STRIPE_PRICE_GRANT"
+	case "affiliate":
+		priceEnv = "STRIPE_PRICE_AFFILIATE"
+	case "bounty":
+		priceEnv = "STRIPE_PRICE_BOUNTY"
+	case "content":
+		priceEnv = "STRIPE_PRICE_CONTENT"
+	default:
+		priceEnv = ""
+	}
+
+	type iterResult struct {
+		OK      bool   `json:"ok"`
+		URL     string `json:"url,omitempty"`
+		Message string `json:"message,omitempty"`
+	}
+	results := make([]iterResult, 0, iterations)
+	successes, failures := 0, 0
+
+	for i := 0; i < iterations; i++ {
+		if priceEnv == "" {
+			results = append(results, iterResult{OK: false, Message: "no STRIPE_PRICE for vertical " + req.Vertical})
+			failures++
+			continue
+		}
+		res := tools.RunTool("stripe", map[string]interface{}{
+			"action":      "create_checkout_session",
+			"price_id":    os.Getenv(priceEnv),
+			"success_url": "https://koola10.ai/thanks",
+			"cancel_url":  "https://koola10.ai/pricing",
+		})
+		if res.Success {
+			successes++
+			fundManager.RouteRevenue(perUnitCost, req.Vertical)
+			results = append(results, iterResult{OK: true, URL: res.Output})
+		} else {
+			failures++
+			results = append(results, iterResult{OK: false, Message: res.Error})
+		}
+	}
+
+	// Book the FULL deployment amount as a ledger cost so the spendable
+	// balance reflects committed-out capital.
+	globalLedger.RecordCost(req.Vertical, "capital_deploy", req.Amount,
+		fmt.Sprintf("capital_deploy %s: %d iterations (%d ok / %d fail)",
+			req.Vertical, iterations, successes, failures))
+
+	AddAuditEntry("capital_deploy", map[string]interface{}{
+		"vertical":   req.Vertical,
+		"amount":     req.Amount,
+		"iterations": iterations,
+		"successes":  successes,
+		"failures":   failures,
+	})
+
+	// One WriteHeader per response — the user's draft repeatedly called
+	// handleTriggerGrants(w, r) inside the loop, which would have
+	// triggered "superfluous WriteHeader call" on iteration > 0.
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":     "ok",
+		"vertical":   req.Vertical,
+		"amount":     req.Amount,
+		"per_unit":   perUnitCost,
+		"iterations": iterations,
+		"successes":  successes,
+		"failures":   failures,
+		"urls":       results,
+	})
 }
 
 // --- Studio Handlers ---
