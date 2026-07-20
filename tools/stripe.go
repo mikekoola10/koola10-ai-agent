@@ -58,10 +58,13 @@ func createCheckoutSession(payload map[string]interface{}) ToolResult {
 				Quantity: stripe.Int64(1),
 			},
 		},
-		Mode:          stripe.String(mode),
-		SuccessURL:    stripe.String(successURL),
-		CancelURL:     stripe.String(cancelURL),
-		CustomerEmail: stripe.String(customerEmail),
+		Mode:       stripe.String(mode),
+		SuccessURL: stripe.String(successURL),
+		CancelURL:  stripe.String(cancelURL),
+	}
+
+	if customerEmail != "" {
+		params.CustomerEmail = stripe.String(customerEmail)
 	}
 
 	s, err := session.New(params)
