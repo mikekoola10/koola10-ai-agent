@@ -691,6 +691,8 @@ func main() {
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
+	registerStripeManagerRoutes(r)
+
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
 }
