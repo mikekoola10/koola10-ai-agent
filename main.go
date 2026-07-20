@@ -564,6 +564,21 @@ func main() {
 	globalSwarmManager.DeploySwarms("bounty", 10)
 	globalSwarmManager.DeploySwarms("content", 10)
 
+	// Register aliases and ecosystem-specific factories
+	globalSwarmManager.Factories["saas"] = agents.DeveloperFactory
+	globalSwarmManager.Factories["api"] = agents.APIFactory
+
+	ecosystems := []string{"oracle", "sentinel", "nexus", "rebel"}
+	baseVerticals := []string{"trading", "leadgen", "saas", "api", "grant", "compliance", "content", "research"}
+	for _, eco := range ecosystems {
+		for _, v := range baseVerticals {
+			tag := eco + ":" + v
+			if f, ok := globalSwarmManager.Factories[v]; ok {
+				globalSwarmManager.Factories[tag] = f
+			}
+		}
+	}
+
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		if opt, err := redis.ParseURL(url); err == nil {
 			redisClient = redis.NewClient(opt)
@@ -607,6 +622,7 @@ func main() {
 	r.Post("/stripe/webhook", handleStripeWebhook)
 
 	r.Post("/ai/chat", corsMiddleware(handleAIChat))
+	r.Post("/{ecosystem}/{vertical}/start", corsMiddleware(handleEcosystemVerticalStart))
 	r.Post("/ai/remember", corsMiddleware(handleAIRemember))
 	r.Get("/ai/recall", corsMiddleware(handleAIRecall))
 	r.Post("/ai/analyze-grant", corsMiddleware(handleAIAnalyzeGrant))
@@ -1594,7 +1610,7 @@ func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", 400)
 		return
 	}
-	fundManager.RouteRevenue(req.Profit, "trading")
+	fundManager.RouteRevenue(req.Profit, "trading", "trading")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1753,28 +1769,106 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	globalLedger.RecordCost("", "browser_automation", 0.02, "Status check")
 	w.Write([]byte(`{"data": "pending"}`))
 }
-func handleAIChat(w http.ResponseWriter, r *http.Request) {
-	var req ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
+var (
+	personalityTraits = map[string]string{
+		"Sable":       "conservative, risk-averse",
+		"Fiducia":     "ethical, trust-focused",
+		"Quantum":     "algorithmic, data-driven",
+		"Maverick":    "contrarian, high-conviction",
+		"Vega":        "enterprise-grade, polished",
+		"Veritas":     "transparent, fact-checked",
+		"Prism":       "multi-channel, integrated",
+		"Provocateur": "disruptive, movement-building",
+		"Atlas":       "architectural, durable",
+		"Bastion":     "fortress, unbreachable",
+		"Matrix":      "distributed, cloud-native",
+		"Insurgent":   "fast, decentralized",
+		"Muse":        "poetic, watercolor aesthetics",
+		"Lumina":      "ethereal, sacred, dreamlike",
+		"Spectrum":    "generative, experimental",
+		"Anarchist":   "raw, unpolished, authentic",
 	}
+
+	ecosystemVerticalMap = map[string]map[string]string{
+		"oracle": {
+			"trading":    "Sable",
+			"leadgen":    "Vega",
+			"saas":       "Atlas",
+			"api":        "Sable",
+			"grant":      "Vega",
+			"compliance": "Sable",
+			"content":    "Muse",
+			"research":   "Vega",
+		},
+		"sentinel": {
+			"trading":    "Fiducia",
+			"leadgen":    "Veritas",
+			"saas":       "Bastion",
+			"api":        "Fiducia",
+			"grant":      "Veritas",
+			"compliance": "Fiducia",
+			"content":    "Lumina",
+			"research":   "Veritas",
+		},
+		"nexus": {
+			"trading":    "Quantum",
+			"leadgen":    "Prism",
+			"saas":       "Matrix",
+			"api":        "Quantum",
+			"grant":      "Prism",
+			"compliance": "Quantum",
+			"content":    "Spectrum",
+			"research":   "Prism",
+		},
+		"rebel": {
+			"trading":    "Maverick",
+			"leadgen":    "Provocateur",
+			"saas":       "Insurgent",
+			"api":        "Maverick",
+			"grant":      "Provocateur",
+			"compliance": "Maverick",
+			"content":    "Anarchist",
+			"research":   "Provocateur",
+		},
+	}
+)
+
+func getSystemPrompt(ecosystem, vertical string) string {
+	personality := "Koola10"
+	traits := "autonomous grant agent"
+
+	if ecoMap, ok := ecosystemVerticalMap[ecosystem]; ok {
+		if p, ok := ecoMap[vertical]; ok {
+			personality = p
+			traits = personalityTraits[p]
+		}
+	}
+
+	return fmt.Sprintf("You are %s, part of the %s ecosystem's %s vertical. Your personality is %s. All your decisions and communication must reflect this identity.", personality, ecosystem, vertical, traits)
+}
+
+func performAIChat(ecosystem, vertical, prompt string) (ChatResponse, error) {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "no key", 500)
-		return
+		return ChatResponse{}, fmt.Errorf("no api key")
 	}
 	if !rateLimit() {
-		http.Error(w, "limited", 429)
-		return
+		return ChatResponse{}, fmt.Errorf("rate limited")
 	}
+
+	systemPrompt := getSystemPrompt(ecosystem, vertical)
+	if ecosystem == "" && vertical == "" {
+		systemPrompt = "You are Koola10, an autonomous grant agent."
+	}
+
 	dsReq := map[string]interface{}{
 		"model": "deepseek-chat",
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are Koola10, an autonomous grant agent."},
-			{"role": "user", "content": req.Prompt},
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": prompt},
 		},
 	}
+
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
 	if rhelMode {
@@ -1783,12 +1877,13 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
+
 	resp, err := (&http.Client{}).Do(hReq)
 	if err != nil {
-		http.Error(w, "api failed", 500)
-		return
+		return ChatResponse{}, err
 	}
 	defer resp.Body.Close()
+
 	var dsRes struct {
 		Choices []struct {
 			Message struct {
@@ -1799,17 +1894,60 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 			TotalTokens int
 		}
 	}
+
 	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		http.Error(w, "parse failed", 500)
-		return
+		return ChatResponse{}, err
 	}
+
+	if len(dsRes.Choices) == 0 {
+		return ChatResponse{}, fmt.Errorf("no response from AI")
+	}
+
 	LogUsage(dsRes.Usage.TotalTokens)
-	globalLedger.RecordCost("", "ai_chat", float64(dsRes.Usage.TotalTokens)*0.000002, "AI Chat interaction")
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ChatResponse{
+	cost := float64(dsRes.Usage.TotalTokens) * 0.000002
+	ledgerVertical := vertical
+	if ecosystem != "" {
+		ledgerVertical = ecosystem + ":" + vertical
+	}
+	globalLedger.RecordCost(ledgerVertical, "ai_inference", cost, fmt.Sprintf("AI Interaction: %s", ledgerVertical))
+
+	return ChatResponse{
 		Response:   dsRes.Choices[0].Message.Content,
 		TokensUsed: dsRes.Usage.TotalTokens,
-	})
+	}, nil
+}
+
+func handleAIChat(w http.ResponseWriter, r *http.Request) {
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+
+	res, err := performAIChat("", "", req.Prompt)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func handleEcosystemVerticalStart(w http.ResponseWriter, r *http.Request) {
+	ecosystem := chi.URLParam(r, "ecosystem")
+	vertical := chi.URLParam(r, "vertical")
+
+	prompt := fmt.Sprintf("Initialize %s vertical within the %s ecosystem. Conduct a first-pass analysis of current opportunities and risks.", vertical, ecosystem)
+
+	res, err := performAIChat(ecosystem, vertical, prompt)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
 }
 func handleAIRemember(w http.ResponseWriter, r *http.Request) {
 	var req MemoryEntry; json.NewDecoder(r.Body).Decode(&req); json.NewEncoder(w).Encode(map[string]string{"status": "stored"})
@@ -2231,7 +2369,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		amount := float64(session.AmountTotal) / 100.0
-		fundManager.RouteRevenue(amount, "stripe")
+		fundManager.RouteRevenue(amount, "stripe", "stripe")
 		fundManager.CoverStripeFees(amount)
 		AddAuditEntry("stripe_checkout_completed", map[string]interface{}{"session_id": session.ID, "amount": amount})
 
