@@ -793,6 +793,7 @@ type CapitalDeployRequest struct {
 func handleTriggerGrants(w http.ResponseWriter, r *http.Request) {
 	res := tools.RunTool("stripe", map[string]interface{}{
 		"action":      "create_checkout_session",
+		"mode":        "payment",
 		"price_id":    os.Getenv("STRIPE_PRICE_GRANT"),
 		"success_url": "https://koola10.ai/thanks",
 		"cancel_url":  "https://koola10.ai/pricing",
@@ -873,6 +874,7 @@ func handleCapitalDeploy(w http.ResponseWriter, r *http.Request) {
 		}
 		res := tools.RunTool("stripe", map[string]interface{}{
 			"action":      "create_checkout_session",
+			"mode":        "payment",
 			"price_id":    os.Getenv(priceEnv),
 			"success_url": "https://koola10.ai/thanks",
 			"cancel_url":  "https://koola10.ai/pricing",
