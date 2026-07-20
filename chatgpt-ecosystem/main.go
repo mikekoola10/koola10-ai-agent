@@ -1,9 +1,6 @@
 package main
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"bufio"
 	"bytes"
 	"context"
@@ -206,7 +203,6 @@ type Transaction struct {
 }
 
 type EconomicLedger struct {
-	EnergyCosts  float64       `json:"energy_costs"` // Total energy costs tracked
 	Balance      float64       `json:"balance"`
 	TotalCosts   float64       `json:"total_costs"`
 	TotalRevenue float64       `json:"total_revenue"`
@@ -236,31 +232,6 @@ type SwarmTask struct {
 	Results    map[string]interface{} `json:"results"`
 }
 
-type VaultSummary struct {
-	TotalRevenue   float64 `json:"total_revenue"`
-	OperationsFund float64 `json:"operations_fund"`
-	SpendableFund  float64 `json:"spendable_fund"`
-}
-
-type Subscription struct {
-	ID        string                  `json:"id"`
-	Service   string                  `json:"service"`
-	Amount    float64                 `json:"amount"`
-	CardID    string                  `json:"card_id"`
-	CardInfo  *financial.CardResponse `json:"card_info,omitempty"`
-	Status    string                  `json:"status"`
-	Frequency string                  `json:"frequency"`
-	LastPaid  time.Time               `json:"last_paid"`
-	DueDay    int                     `json:"due_day"`
-}
-
-type SubscriptionManager struct {
-	Subscriptions []Subscription `json:"subscriptions"`
-	storagePath   string
-	AgentCard     *financial.AgentCardClient
-	mu            sync.RWMutex
-}
-
 type SwarmNode struct {
 	ID       string `json:"node_id"`
 	Region   string `json:"region"`
@@ -274,34 +245,6 @@ type SSEEvent struct {
 }
 
 // --- Studio Structs ---
-
-// --- Home AI Brain Structs ---
-
-type SensorData struct {
-	ID        string    `json:"sensor_id"`
-	Type      string    `json:"type"` // "motion", "temp", "humidity", "light", "door", "energy"
-	Value     float64   `json:"value"`
-	Unit      string    `json:"unit"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-type HomeScenario struct {
-	ID          string   `json:"scenario_id"`
-	Name        string   `json:"name"`
-	Trigger     string   `json:"trigger"`
-	Actions     []string `json:"actions"`
-	LastActive  time.Time `json:"last_active"`
-	IsActive    bool     `json:"is_active"`
-}
-
-type HomeState struct {
-	Sensors   map[string]SensorData `json:"sensors"`
-	Scenarios []HomeScenario        `json:"scenarios"`
-	LastUpdate time.Time            `json:"last_update"`
-	EnergyUsage float64             `json:"energy_usage_kwh"`
-	EnergyCost  float64             `json:"energy_cost"`
-	mu          sync.RWMutex
-}
 
 type LoreRequest struct {
 	Question string `json:"question"`
@@ -332,23 +275,6 @@ type VideoJob struct {
 
 // --- Global States ---
 
-type Product struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Collection  string  `json:"collection"`
-	Price       float64 `json:"price"`
-	Description string  `json:"description"`
-	Status      string  `json:"status"` // "generated", "synced"
-}
-
-type ReflectionLog struct {
-	Timestamp   string `json:"timestamp"`
-	Vertical    string `json:"vertical"`
-	Task        string `json:"task"`
-	Analysis    string `json:"analysis"`
-	Suggestions []string `json:"suggestions"`
-}
-
 var (
 	cacheMutex   sync.Mutex
 	auditMutex   sync.Mutex
@@ -357,24 +283,17 @@ var (
 	subMu        sync.Mutex
 	killSwitchMu sync.Mutex
 	videoJobMu   sync.Mutex
-	reflectMu    sync.RWMutex
 
-
-	cachePath      = "./data/grants_cache.json"
-	appsDir        = "./data/applications"
-	memoryPath     = "./data/memory.json"
-	graphPath      = "./data/memory_graph.json"
-	semanticPath   = "./data/semantic_index.json"
-	auditPath      = "./data/audit_chain.jsonl"
-	usagePath      = "./data/usage.jsonl"
-	killSwitchPath = "./data/kill_switch"
-	subsPath       = "./data/subscriptions.json"
-	serverLogPath  = "./data/server.log"
-	homeBrainPath  = "./data/home_brain.json"
-	lastProcessedAuditOffset int64
-
-	ledgerPath     = "./data/economic_ledger.json"
-	fundPath       = "./data/operational_fund.json"
+	cachePath      = "/data/grants_cache.json"
+	appsDir        = "/data/applications"
+	memoryPath     = "/data/memory.json"
+	graphPath      = "/data/memory_graph.json"
+	semanticPath   = "/data/semantic_index.json"
+	auditPath      = "/data/audit_chain.jsonl"
+	usagePath      = "/data/usage.jsonl"
+	killSwitchPath = "/data/kill_switch"
+	ledgerPath     = "/data/economic_ledger.json"
+	fundPath       = "/data/operational_fund.json"
 
 	globalGraph = &MemoryGraph{
 		Meetings: make(map[string]Meeting),
@@ -391,13 +310,8 @@ var (
 	}
 
 	fundManager *financial.FundManager
-	subManager  *SubscriptionManager
 
 	globalSwarmManager = agents.NewSwarmManager()
-	globalHomeBrain    = &HomeState{
-		Sensors:   make(map[string]SensorData),
-		Scenarios: []HomeScenario{},
-	}
 
 	approvalStore = make(map[string]*ApprovalRequest)
 	videoJobStore = make(map[string]*VideoJob)
@@ -412,20 +326,6 @@ var (
 	rlRate       = 10.0
 	rlLastUpdate = time.Now()
 	rlMu         sync.Mutex
-	agiMode      bool = true
-	rhelMode     bool = false
-	swarmThroughput = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "swarm_tasks_completed_total",
-		Help: "The total number of processed tasks by the swarm",
-	})
-	reflectLogs  []ReflectionLog
-	generatedProducts []Product
-	productMu        sync.Mutex
-	proactiveFeed     []string
-	feedMu            sync.Mutex
-	strategicBriefing string
-
-
 
 	redisClient *redis.Client
 	nodeID      string
@@ -449,40 +349,9 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		apiKey := os.Getenv("ADMIN_API_KEY")
-		if apiKey == "" {
-			// If not set, allow for development but log warning
-			log.Println("WARNING: ADMIN_API_KEY not set")
-			next(w, r)
-			return
-		}
-
-		providedKey := r.Header.Get("X-Admin-API-Key")
-		if providedKey == "" {
-			authHeader := r.Header.Get("Authorization")
-			if strings.HasPrefix(authHeader, "Bearer ") {
-				providedKey = strings.TrimPrefix(authHeader, "Bearer ")
-			}
-		}
-
-		if providedKey != apiKey {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next(w, r)
-	}
-}
-
 // --- Main ---
 
 func main() {
-	go startProactiveEmpireMoves()
-	go startEmpireStrategicLoops()
-
-	globalHomeBrain.Load()
-	go startHomeBrainOrchestrator()
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
 	region = os.Getenv("FLY_REGION")
@@ -490,10 +359,6 @@ func main() {
 	nodeID = os.Getenv("NODE_ID")
 	if nodeID == "" { h, _ := os.Hostname(); nodeID = h }
 
-	// Ensure /data exists
-	if err := os.MkdirAll("/data", 0755); err != nil {
-		log.Printf("Warning: failed to create /data: %v", err)
-	}
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 	os.MkdirAll(appsDir, 0755)
 
@@ -501,13 +366,6 @@ func main() {
 	globalSemantic.Load()
 	globalLedger.Load()
 	fundManager = financial.NewFundManager(fundPath, globalLedger)
-
-	if data, err := os.ReadFile("./data/audit_offset.txt"); err == nil {
-		fmt.Sscanf(string(data), "%d", &lastProcessedAuditOffset)
-	}
-
-	subManager = NewSubscriptionManager(subsPath, financial.NewAgentCardClient())
-	go startMaintenanceLoop()
 
 	// Automated invoice payment check (every 24h)
 	go func() {
@@ -518,26 +376,8 @@ func main() {
 		}
 	}()
 
-	// Automated subscription check (every hour)
-	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
-		// Initial run
-		subManager.Run(false)
-		for {
-			<-ticker.C
-			subManager.Run(false)
-		}
-	}()
-
 	globalSwarmManager.AuditLogger = AddAuditEntry
 	globalSwarmManager.LedgerLogger = globalLedger.RecordCost
-	globalSwarmManager.RevenueLogger = fundManager.RouteRevenue
-	agents.SwarmTaskCounter = func() { swarmThroughput.Inc() }
-
-	// Initialize High-Growth Founder Mode
-	founderPrompt := "A.S.K. Agency - AI That Builds Empires: Delivering enterprise-grade AGI results with a creative edge. High-Growth Founder Mode active."
-	globalSwarmManager.SetGlobalPrompt(founderPrompt)
-
 	globalSwarmManager.Factories["sterling"] = agents.FinancialFactory
 	globalSwarmManager.Factories["nova"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["forge"] = agents.DeveloperFactory
@@ -545,7 +385,6 @@ func main() {
 	globalSwarmManager.Factories["solara"] = agents.ContentFactory
 	globalSwarmManager.Factories["sage"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["vale"] = agents.ResearchFactory
-	globalSwarmManager.Factories["maintenance"] = agents.MaintenanceFactory
 
 	// Descriptive Slugs & Pilot Aliases
 	globalSwarmManager.Factories["trading"] = agents.TradingFactory
@@ -554,24 +393,11 @@ func main() {
 	globalSwarmManager.Factories["financial_report"] = agents.FinancialFactory
 	globalSwarmManager.Factories["grant"] = agents.GrantSwarmFactory
 	globalSwarmManager.Factories["content"] = agents.ContentFactory
-	globalSwarmManager.Factories["home"] = agents.PersonaFactory("home")
 	globalSwarmManager.Factories["compliance"] = agents.ComplianceFactory
 	globalSwarmManager.Factories["research"] = agents.ResearchFactory
 
-	globalSwarmManager.Factories["affiliate"] = agents.AffiliateFactory
-	globalSwarmManager.Factories["bounty"] = agents.BountyFactory
-
 	// Register Night Shift vertical
 	globalSwarmManager.Factories["night-shift"] = agents.DeveloperFactory
-	globalSwarmManager.Factories["apex"] = agents.PersonaFactory("apex")
-	globalSwarmManager.Factories["spiral"] = agents.PersonaFactory("spiral")
-	globalSwarmManager.Factories["koola10"] = agents.PersonaFactory("koola10")
-
-
-	// Initial deployment of revenue swarms
-	globalSwarmManager.DeploySwarms("affiliate", 10)
-	globalSwarmManager.DeploySwarms("bounty", 10)
-	globalSwarmManager.DeploySwarms("content", 10)
 
 	// Initialize Proactive Coaching Agent
 	proactiveAgent := agents.NewProactiveAgent(broadcastSSE)
@@ -593,14 +419,7 @@ func main() {
 		w.Write([]byte(`{"error":"not found"}`))
 	})
 
-	r.HandleFunc("/admin/run-full-sprint", handleRunFullSprint)
-	r.HandleFunc("/empire/briefing", handleStrategicBriefing)
-	r.Post("/admin/run-scheduled-sprint", corsMiddleware(authMiddleware(handleScheduledSprint)))
-
 	r.Get("/", corsMiddleware(handleRoot))
-	r.Get("/home/status", corsMiddleware(handleHomeStatus))
-	r.Post("/home/sensor-update", corsMiddleware(handleHomeSensorUpdate))
-	r.Post("/home/trigger-scenario", corsMiddleware(handleHomeTriggerScenario))
 
 	r.Get("/health", corsMiddleware(handleHealth))
 	r.Get("/daily-report", corsMiddleware(handleDailyReport))
@@ -642,17 +461,6 @@ func main() {
 	r.Post("/compliance/kill-switch/reset", corsMiddleware(handleComplianceKillSwitchReset))
 	r.Get("/compliance/usage", corsMiddleware(handleComplianceUsage))
 
-	r.Get("/vault/summary", corsMiddleware(handleVaultSummary))
-	r.Get("/logs", corsMiddleware(authMiddleware(handleLogs)))
-
-	r.Post("/admin/subscriptions/run", authMiddleware(handleAdminSubscriptionsRun))
-	r.Post("/admin/agentcards/create", authMiddleware(handleAdminAgentCardsCreate))
-	r.Get("/admin/subscriptions", authMiddleware(handleAdminSubscriptionsList))
-	r.Post("/admin/subscriptions/register", authMiddleware(handleAdminSubscriptionsRegister))
-
-	r.Post("/admin/stellar/send", authMiddleware(handleAdminStellarSend))
-	r.Get("/admin/stellar/balance", authMiddleware(handleAdminStellarBalance))
-
 	r.Post("/economic/ledger/cost", corsMiddleware(handleEconomicLedgerCost))
 	r.Post("/economic/ledger/revenue", corsMiddleware(handleEconomicLedgerRevenue))
 	r.Get("/economic/ledger/summary", corsMiddleware(handleEconomicLedgerSummary))
@@ -666,30 +474,10 @@ func main() {
 	r.Get("/swarm/metrics", corsMiddleware(handleSwarmMetrics))
 	r.Get("/swarm/report", corsMiddleware(handleSwarmReport))
 	r.Get("/swarm/revenue", corsMiddleware(handleSwarmRevenue))
-	r.Get("/swarm/reflections", corsMiddleware(handleSwarmReflections))
-	r.Post("/admin/agi-mode", authMiddleware(handleAdminAGIMode))
-	r.Post("/admin/generate-product-line", authMiddleware(handleAdminGenerateProductLine))
-	r.Get("/admin/product-empire/stats", corsMiddleware(handleProductEmpireStats))
-	r.Post("/monetize/shopify/sync", corsMiddleware(handleShopifySync))
-	r.Post("/monetize/marketplace/sale", corsMiddleware(handleMarketplaceSale))
-
-
 	r.Get("/swarm/status", corsMiddleware(handleSwarmStatusAll))
 	r.HandleFunc("/swarm/*", corsMiddleware(handleSpecialistSwarm))
 
-	r.Post("/admin/trigger_affiliate", corsMiddleware(authMiddleware(handleTriggerAffiliate)))
-	r.Post("/admin/trigger_bounty", corsMiddleware(authMiddleware(handleTriggerBounty)))
-	r.Post("/admin/bpa/onboard", corsMiddleware(authMiddleware(handleBPAOnboard)))
-	r.Post("/admin/trigger_content", corsMiddleware(authMiddleware(handleTriggerContent)))
-	r.Post("/admin/trigger_grants", corsMiddleware(authMiddleware(handleTriggerGrants)))
-	r.Post("/admin/capital/deploy", corsMiddleware(authMiddleware(handleCapitalDeploy)))
-	r.Post("/admin/scheduler/run", corsMiddleware(authMiddleware(handleSchedulerRun)))
-
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
-	r.Post("/admin/rhel-mode", authMiddleware(handleAdminRHELMode))
-	r.Get("/admin/rhel-mode", corsMiddleware(handleGetRHELMode))
-	r.Handle("/metrics", promhttp.Handler())
-	r.Get("/admin/business-metrics", corsMiddleware(handleBusinessMetrics))
 	r.Post("/financial/pay-subscription", corsMiddleware(handleFinancialPaySubscription))
 	r.Post("/financial/reinvest", corsMiddleware(handleFinancialReinvest))
 	r.Get("/financial/history", corsMiddleware(handleFinancialHistory))
@@ -709,234 +497,8 @@ func main() {
 	r.Post("/studio/video-job", corsMiddleware(handleStudioVideoJob))
 	r.Get("/studio/video-job/*", corsMiddleware(handleStudioVideoJobStatus))
 
-	registerStripeManagerRoutes(r)
-
 	log.Printf("starting server on 0.0.0.0:%s", port)
 	http.ListenAndServe("0.0.0.0:"+port, r)
-}
-
-// --- Scheduled Sprint Handler ---
-
-// handleScheduledSprint accepts a sprint request and runs it asynchronously.
-// It returns 202 Accepted immediately, then pre-checks /health before kicking
-// off /admin/run-full-sprint with the ADMIN_API_KEY as a Bearer token. All
-// progress is recorded in the audit chain and in server logs.
-func handleScheduledSprint(w http.ResponseWriter, r *http.Request) {
-	sprintID := generateID()
-
-	// 1) Return 202 Accepted immediately so callers can move on.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":    "accepted",
-		"sprint_id": sprintID,
-		"message":   "Sprint scheduled. Running asynchronously.",
-	})
-
-	// 2) Run the actual sprint asynchronously so the request doesn't hang.
-	go func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				log.Printf("[ScheduledSprint] %s panicked: %v", sprintID, rec)
-				AddAuditEntry("scheduled_sprint_panic", map[string]interface{}{"sprint_id": sprintID, "panic": fmt.Sprintf("%v", rec)})
-			}
-		}()
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-
-		port := os.Getenv("PORT")
-		if port == "" {
-			port = "8080"
-		}
-		baseURL := fmt.Sprintf("http://localhost:%s", port)
-
-		log.Printf("[ScheduledSprint] %s queued", sprintID)
-		AddAuditEntry("scheduled_sprint_queued", map[string]interface{}{"sprint_id": sprintID})
-
-		// --- Pre-check: /health ---
-		healthReq, _ := http.NewRequestWithContext(ctx, "GET", baseURL+"/health", nil)
-		healthResp, err := http.DefaultClient.Do(healthReq)
-		if err != nil || (healthResp != nil && healthResp.StatusCode != http.StatusOK) {
-			errMsg := "health endpoint unreachable"
-			if err != nil {
-				errMsg = err.Error()
-			}
-			log.Printf("[ScheduledSprint] %s aborted: %s", sprintID, errMsg)
-			AddAuditEntry("scheduled_sprint_aborted", map[string]interface{}{"sprint_id": sprintID, "reason": errMsg})
-			if healthResp != nil {
-				healthResp.Body.Close()
-			}
-			return
-		}
-		healthResp.Body.Close()
-
-		log.Printf("[ScheduledSprint] %s healthy - dispatching full sprint", sprintID)
-
-		// --- Internal call: POST /admin/run-full-sprint with admin key ---
-		sprintReq, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/admin/run-full-sprint", nil)
-		sprintReq.Header.Set("Content-Type", "application/json")
-		if adminKey := os.Getenv("ADMIN_API_KEY"); adminKey != "" {
-			sprintReq.Header.Set("Authorization", "Bearer "+adminKey)
-		}
-
-		sprintResp, err := http.DefaultClient.Do(sprintReq)
-		if err != nil {
-			log.Printf("[ScheduledSprint] %s dispatch failed: %v", sprintID, err)
-			AddAuditEntry("scheduled_sprint_dispatch_error", map[string]interface{}{"sprint_id": sprintID, "error": err.Error()})
-			return
-		}
-		defer sprintResp.Body.Close()
-
-		log.Printf("[ScheduledSprint] %s finished with status %d", sprintID, sprintResp.StatusCode)
-		AddAuditEntry("scheduled_sprint_dispatched", map[string]interface{}{
-			"sprint_id":   sprintID,
-			"status_code": sprintResp.StatusCode,
-		})
-	}()
-}
-
-// --- Grants Trigger + Capital Deploy ---
-
-// CapitalDeployRequest is the JSON body for POST /admin/capital/deploy.
-type CapitalDeployRequest struct {
-	Vertical string  `json:"vertical"`
-	Amount   float64 `json:"amount"`
-}
-
-// handleTriggerGrants creates a Stripe checkout session for the "Grant
-// Application Package" ($49). On success it routes $49 through
-// fundManager.RouteRevenue (which performs the 30/70 ops/spendable split
-// that drives /vault/summary), journals an audit entry, and returns the
-// Stripe URL so the caller can redirect the user. Requires the
-// STRIPE_PRICE_GRANT env var to point at a real Stripe Price.
-func handleTriggerGrants(w http.ResponseWriter, r *http.Request) {
-	res := tools.RunTool("stripe", map[string]interface{}{
-		"action":      "create_checkout_session",
-		"mode":        "payment",
-		"price_id":    os.Getenv("STRIPE_PRICE_GRANT"),
-		"success_url": "https://koola10.ai/thanks",
-		"cancel_url":  "https://koola10.ai/pricing",
-	})
-	w.Header().Set("Content-Type", "application/json")
-	if !res.Success {
-		AddAuditEntry("grant_checkout_failed", map[string]interface{}{"error": res.Error})
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": res.Error})
-		return
-	}
-	fundManager.RouteRevenue(49.0, "grants")
-	AddAuditEntry("grant_checkout_created", map[string]interface{}{
-		"checkout_url": res.Output,
-		"session":      res.Data,
-		"amount":       49.0,
-	})
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":       "ok",
-		"checkout_url": res.Output,
-		"session":      res.Data,
-		"amount":       49.0,
-	})
-}
-
-// handleCapitalDeploy commits spendable_fund capital into repeated runs
-// of a chosen vertical. Each iteration creates its own Stripe checkout
-// session (the caller gets back N URLs). Sequential issuance keeps us
-// safely under Stripe's ~100 req/s rate limit. Per-iteration successes
-// route $perUnitCost via fundManager.RouteRevenue (30/70 split into
-// vault/summary). The full requested amount is also booked via
-// globalLedger.RecordCost so the spendable ledger accurately reflects
-// capital that has been committed out.
-func handleCapitalDeploy(w http.ResponseWriter, r *http.Request) {
-	var req CapitalDeployRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if req.Amount <= 0 || req.Vertical == "" {
-		http.Error(w, "vertical and positive amount required", http.StatusBadRequest)
-		return
-	}
-
-	perUnitCost := 49.0
-	iterations := int(req.Amount / perUnitCost)
-	if iterations == 0 {
-		iterations = 1 // allow sub-unit smoke tests with $1
-	}
-
-	var priceEnv string
-	switch req.Vertical {
-	case "grants":
-		priceEnv = "STRIPE_PRICE_GRANT"
-	case "affiliate":
-		priceEnv = "STRIPE_PRICE_AFFILIATE"
-	case "bounty":
-		priceEnv = "STRIPE_PRICE_BOUNTY"
-	case "content":
-		priceEnv = "STRIPE_PRICE_CONTENT"
-	default:
-		priceEnv = ""
-	}
-
-	type iterResult struct {
-		OK      bool   `json:"ok"`
-		URL     string `json:"url,omitempty"`
-		Message string `json:"message,omitempty"`
-	}
-	results := make([]iterResult, 0, iterations)
-	successes, failures := 0, 0
-
-	for i := 0; i < iterations; i++ {
-		if priceEnv == "" {
-			results = append(results, iterResult{OK: false, Message: "no STRIPE_PRICE for vertical " + req.Vertical})
-			failures++
-			continue
-		}
-		res := tools.RunTool("stripe", map[string]interface{}{
-			"action":      "create_checkout_session",
-			"mode":        "payment",
-			"price_id":    os.Getenv(priceEnv),
-			"success_url": "https://koola10.ai/thanks",
-			"cancel_url":  "https://koola10.ai/pricing",
-		})
-		if res.Success {
-			successes++
-			fundManager.RouteRevenue(perUnitCost, req.Vertical)
-			results = append(results, iterResult{OK: true, URL: res.Output})
-		} else {
-			failures++
-			results = append(results, iterResult{OK: false, Message: res.Error})
-		}
-	}
-
-	// Book the FULL deployment amount as a ledger cost so the spendable
-	// balance reflects committed-out capital.
-	globalLedger.RecordCost(req.Vertical, "capital_deploy", req.Amount,
-		fmt.Sprintf("capital_deploy %s: %d iterations (%d ok / %d fail)",
-			req.Vertical, iterations, successes, failures))
-
-	AddAuditEntry("capital_deploy", map[string]interface{}{
-		"vertical":   req.Vertical,
-		"amount":     req.Amount,
-		"iterations": iterations,
-		"successes":  successes,
-		"failures":   failures,
-	})
-
-	// One WriteHeader per response — the user's draft repeatedly called
-	// handleTriggerGrants(w, r) inside the loop, which would have
-	// triggered "superfluous WriteHeader call" on iteration > 0.
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":     "ok",
-		"vertical":   req.Vertical,
-		"amount":     req.Amount,
-		"per_unit":   perUnitCost,
-		"iterations": iterations,
-		"successes":  successes,
-		"failures":   failures,
-		"urls":       results,
-	})
 }
 
 // --- Studio Handlers ---
@@ -968,10 +530,6 @@ func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-	if rhelMode {
-		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
-		hReq.Header.Set("X-RHEL-Performance", "high")
-	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
@@ -1033,10 +591,6 @@ func handleStudioStyle(w http.ResponseWriter, r *http.Request) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-	if rhelMode {
-		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
-		hReq.Header.Set("X-RHEL-Performance", "high")
-	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
@@ -1334,7 +888,7 @@ func startSwarmListeners() {
 	}()
 }
 
-// --- Persistence & Helpers ---
+// --- Persistence & Helpers (Graph/Semantic/Economic/Compliance - All from previous phases) ---
 
 func (g *MemoryGraph) Save() {
 	g.mu.RLock(); defer g.mu.RUnlock()
@@ -1474,105 +1028,7 @@ func (l *EconomicLedger) RecordRevenueWithVertical(vertical string, amount float
 	l.mu.Unlock(); l.Save(); AddAuditEntry("economic_revenue_logged", map[string]interface{}{"amount": amount, "source": source, "vertical": vertical})
 }
 
-// --- Subscription Manager Logic ---
-
-func NewSubscriptionManager(path string, ac *financial.AgentCardClient) *SubscriptionManager {
-	sm := &SubscriptionManager{
-		storagePath:   path,
-		AgentCard:     ac,
-		Subscriptions: []Subscription{},
-	}
-	sm.Load()
-	return sm
-}
-
-func (sm *SubscriptionManager) Load() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	data, err := os.ReadFile(sm.storagePath)
-	if err == nil {
-		json.Unmarshal(data, sm)
-	}
-	if sm.Subscriptions == nil {
-		sm.Subscriptions = []Subscription{}
-	}
-}
-
-func (sm *SubscriptionManager) Save() {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	data, _ := json.MarshalIndent(sm, "", "  ")
-	os.WriteFile(sm.storagePath, data, 0644)
-}
-
-func (sm *SubscriptionManager) Register(sub Subscription) error {
-	sm.mu.Lock()
-	found := false
-	for i, s := range sm.Subscriptions {
-		if s.Service == sub.Service {
-			// Preserve card info if not provided in update
-			if sub.CardID == "" {
-				sub.CardID = s.CardID
-			}
-			if sub.CardInfo == nil {
-				sub.CardInfo = s.CardInfo
-			}
-			sm.Subscriptions[i] = sub
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		if sub.ID == "" {
-			sub.ID = generateID()
-		}
-		if sub.CardID == "" {
-			card, err := sm.AgentCard.CreateCard(sub.Service, sub.Amount)
-			if err != nil {
-				sm.mu.Unlock()
-				return err
-			}
-			sub.CardID = card.ID
-			sub.CardInfo = card
-		}
-		sm.Subscriptions = append(sm.Subscriptions, sub)
-	}
-
-	sm.mu.Unlock()
-	sm.Save()
-	return nil
-}
-
-func (sm *SubscriptionManager) Run(force bool) {
-	sm.mu.Lock()
-	now := time.Now()
-	changed := false
-	for i, sub := range sm.Subscriptions {
-		// Check if due today (or force run for verification) or if it's been more than 30 days
-		isDue := now.Day() == sub.DueDay || force || os.Getenv("FORCE_SUBSCRIPTION_RUN") == "true"
-		overdue := sub.LastPaid.IsZero() || now.Sub(sub.LastPaid) > 30*24*time.Hour
-
-		if isDue || overdue {
-			// Check if already paid this month (unless forced)
-			if !force && !sub.LastPaid.IsZero() && sub.LastPaid.Month() == now.Month() && sub.LastPaid.Year() == now.Year() {
-				continue
-			}
-
-			log.Printf("[SubscriptionManager] Processing payment for %s ($%.2f)", sub.Service, sub.Amount)
-			fundManager.PaySubscription(sub.Service, sub.Amount)
-			sm.Subscriptions[i].LastPaid = now
-			sm.Subscriptions[i].Status = "active"
-			changed = true
-		}
-	}
-	sm.mu.Unlock()
-	if changed {
-		sm.Save()
-	}
-}
-
-// --- Handlers ---
+// --- Financial Handlers ---
 
 func handleFinancialStatus(w http.ResponseWriter, r *http.Request) {
 	status := fundManager.GetStatus()
@@ -1604,6 +1060,7 @@ func handleFinancialHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(history)
 }
 
+// TradingAgent integration point
 func handleTradingProfit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Profit float64 `json:"profit"`
@@ -1660,10 +1117,6 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 	prompt := fmt.Sprintf("Draft narrative for %s from %s. Mission: %s", grant.Title, req.OrgName, req.OrgMission)
 	dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
 	dsBody, _ := json.Marshal(dsReq); hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-	if rhelMode {
-		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
-		hReq.Header.Set("X-RHEL-Performance", "high")
-	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey); hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq); if err != nil { http.Error(w, "api failed", 500); return }; defer resp.Body.Close()
 	var dsRes struct { Choices []struct { Message struct { Content string } }; Usage struct { TotalTokens int } }
@@ -1724,10 +1177,6 @@ func handleMonitor(w http.ResponseWriter, r *http.Request) {
 				dsReq := map[string]interface{}{"model": "deepseek-chat", "messages": []map[string]string{{"role": "user", "content": prompt}}}
 				dsBody, _ := json.Marshal(dsReq)
 				hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-	if rhelMode {
-		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
-		hReq.Header.Set("X-RHEL-Performance", "high")
-	}
 				hReq.Header.Set("Authorization", "Bearer "+apiKey)
 				hReq.Header.Set("Content-Type", "application/json")
 				resp, err := (&http.Client{}).Do(hReq)
@@ -1789,7 +1238,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 
 	ecosystem := os.Getenv("ECOSYSTEM")
 	if ecosystem == "" {
-		ecosystem = "KOOLA10"
+		ecosystem = "ORACLE"
 	}
 
 	systemPrompt := "You are Koola10, an autonomous AI agent."
@@ -1806,10 +1255,6 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 	dsBody, _ := json.Marshal(dsReq)
 	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-	if rhelMode {
-		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
-		hReq.Header.Set("X-RHEL-Performance", "high")
-	}
 	hReq.Header.Set("Authorization", "Bearer "+apiKey)
 	hReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{}).Do(hReq)
@@ -1933,27 +1378,6 @@ func handleEconomicLedgerSummary(w http.ResponseWriter, r *http.Request) {
 		ROI:          roi,
 	})
 }
-
-func handleVaultSummary(w http.ResponseWriter, r *http.Request) {
-	globalLedger.mu.RLock()
-	defer globalLedger.mu.RUnlock()
-	status := fundManager.GetStatus()
-
-	// Total Revenue is globalLedger.TotalRevenue + status.TotalEarned
-	totalGross := globalLedger.TotalRevenue + status.TotalEarned
-
-	summary := map[string]interface{}{
-		"total_revenue":   totalGross,
-		"operations_fund": status.Balance,            // Current operational balance
-		"spendable_fund":  globalLedger.Balance,      // Current spendable balance
-		"total_costs":     globalLedger.TotalCosts + status.TotalSpent,
-		"timestamp":       time.Now().Format(time.RFC3339),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summary)
-}
-
 func handleEconomicEvaluate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(EconomicEvaluation{Decision: "allow"})
 }
@@ -1996,123 +1420,6 @@ func handleSwarmRevenue(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(res)
-}
-
-func handleTriggerAffiliate(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Count int }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		req.Count = 1
-	}
-	if req.Count <= 0 { req.Count = 1 }
-
-	go func() {
-		for i := 0; i < req.Count; i++ {
-			task := fmt.Sprintf("Affiliate article %d", i+1)
-			res, err := globalSwarmManager.DispatchTask("affiliate", task)
-			if err == nil {
-				if m, ok := res.(map[string]interface{}); ok {
-					if profit, ok := m["profit"].(float64); ok {
-						fundManager.RouteRevenue(profit, "affiliate_swarm")
-						go PerformRecursiveReflection("affiliate", task, fmt.Sprintf("%v", res))
-
-					}
-				}
-			}
-		}
-	}()
-
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte(`{"status": "Affiliate swarm triggered"}`))
-}
-
-func handleTriggerBounty(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Targets int }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		req.Targets = 1
-	}
-	if req.Targets <= 0 { req.Targets = 1 }
-
-	go func() {
-		for i := 0; i < req.Targets; i++ {
-			task := fmt.Sprintf("Bounty target %d", i+1)
-			res, err := globalSwarmManager.DispatchTask("bounty", task)
-			if err == nil {
-				if m, ok := res.(map[string]interface{}); ok {
-					if profit, ok := m["profit"].(float64); ok && profit > 0 {
-						fundManager.RouteRevenue(profit, "bounty_swarm")
-						go PerformRecursiveReflection("bounty", task, fmt.Sprintf("%v", res))
-
-					}
-				}
-			}
-		}
-	}()
-
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte(`{"status": "Bounty swarm triggered"}`))
-}
-
-func handleBPAOnboard(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Email string `json:"email"`
-		Tier  string `json:"tier"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", 400)
-		return
-	}
-
-	// Simulate subscription revenue
-	trialRevenue := 49.0
-	if req.Tier == "pro" {
-		trialRevenue = 99.0
-	}
-	fundManager.RouteRevenue(trialRevenue, "BPA Onboarding: "+req.Email)
-
-	AddAuditEntry("bpa_onboarded", map[string]interface{}{"email": req.Email, "tier": req.Tier})
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status": "success", "message": "User onboarded and trial revenue logged"}`))
-}
-
-func handleTriggerContent(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Format string }
-	json.NewDecoder(r.Body).Decode(&req)
-
-	go func() {
-		globalSwarmManager.DispatchTask("content", "Repurposing latest articles into "+req.Format)
-	}()
-
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte(`{"status": "Content repurposing triggered"}`))
-}
-
-func handleAdminSubscriptionsList(w http.ResponseWriter, r *http.Request) {
-	subManager.mu.RLock()
-	defer subManager.mu.RUnlock()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(subManager.Subscriptions)
-}
-
-func handleAdminSubscriptionsRegister(w http.ResponseWriter, r *http.Request) {
-	var sub Subscription
-	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-	if err := subManager.Register(sub); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"status": "success", "message": "Subscription registered"}`))
-}
-
-func handleSchedulerRun(w http.ResponseWriter, r *http.Request) {
-	subManager.Run(true)
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status": "success", "message": "Subscription scheduler triggered"}`))
 }
 
 func handleSpecialistSwarm(w http.ResponseWriter, r *http.Request) {
@@ -2173,7 +1480,7 @@ func handleSwarmReport(w http.ResponseWriter, r *http.Request) {
 		"sage":     "Sage reports all systems SOC2 compliant; 1 minor GDPR advisory generated.",
 		"vale":     "Vale reports 5 competitor pricing shifts detected in the EMEA region.",
 		"trading":  "Trading Swarm (Sterling) reports consolidated P&L: +$1,240.50 today.",
-		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in ./data/leads/.",
+		"leadgen":  "LeadGen Swarm (Nova) reports 45 new qualified leads in /data/leads/.",
 	}
 	json.NewEncoder(w).Encode(report)
 }
@@ -2463,508 +1770,6 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(dashboardHTML))
 }
 
-func handleAdminStellarSend(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		To     string  `json:"to"`
-		Amount float64 `json:"amount"`
-		Asset  string  `json:"asset"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-	res := tools.RunTool("stellar", map[string]interface{}{"action": "send", "to": req.To, "amount": req.Amount, "asset": req.Asset})
-	json.NewEncoder(w).Encode(res)
-}
-
-func handleAdminStellarBalance(w http.ResponseWriter, r *http.Request) {
-	res := tools.RunTool("stellar", map[string]interface{}{"action": "balance"})
-	json.NewEncoder(w).Encode(res)
-}
-
-func handleAdminSubscriptionsRun(w http.ResponseWriter, r *http.Request) {
-	subManager.Run(true)
-	w.Write([]byte(`{"status":"triggered"}`))
-}
-
-func handleAdminAgentCardsCreate(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Service string  `json:"service"`
-		Amount  float64 `json:"amount"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-	client := financial.NewAgentCardClient()
-	card, err := client.CreateCard(req.Service, req.Amount)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	sub := Subscription{Service: req.Service, Amount: req.Amount, CardID: card.ID, CardInfo: card, Status: "active", Frequency: "monthly", DueDay: time.Now().Day()}
-	subManager.Register(sub)
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "created", "card": card, "sub": sub})
-}
-
-func handleLogs(w http.ResponseWriter, r *http.Request) {
-	service := r.URL.Query().Get("service")
-	f, err := os.Open(serverLogPath)
-	if err != nil {
-		f, err = os.Open("server.log")
-	}
-	if err != nil {
-		http.Error(w, "logs not found", 404)
-		return
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if service == "" || strings.Contains(strings.ToLower(line), strings.ToLower(service)) {
-			fmt.Fprintln(w, line)
-		}
-	}
-}
-
 func generateID() string {
 	b := make([]byte, 8); rand.Read(b); return hex.EncodeToString(b)
-}
-
-func startMaintenanceLoop() {
-	log.Printf("Starting autonomous self-healing maintenance loop...")
-	ticker := time.NewTicker(1 * time.Minute)
-	for range ticker.C {
-		f, err := os.Open(auditPath)
-		if err != nil {
-			continue
-		}
-
-		f.Seek(lastProcessedAuditOffset, io.SeekStart)
-
-		scanner := bufio.NewScanner(f)
-		var lastError string
-		var newOffset int64 = lastProcessedAuditOffset
-
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			newOffset += int64(len(line) + 1)
-			var entry AuditEntry
-			if err := json.Unmarshal(line, &entry); err == nil {
-				if strings.Contains(strings.ToLower(entry.Action), "fail") ||
-					strings.Contains(strings.ToLower(fmt.Sprintf("%v", entry.Details)), "error") {
-					lastError = fmt.Sprintf("Action: %s, Details: %v", entry.Action, entry.Details)
-				}
-			}
-		}
-		f.Close()
-		lastProcessedAuditOffset = newOffset
-		os.WriteFile("./data/audit_offset.txt", []byte(fmt.Sprintf("%d", lastProcessedAuditOffset)), 0644)
-
-		if lastError != "" {
-			log.Printf("[Self-Healing] Detected system failure: %s. Dispatching repair task.", lastError)
-			globalSwarmManager.DeploySwarms("maintenance", 3)
-			globalSwarmManager.DispatchTask("maintenance", "repair: "+lastError)
-		}
-	}
-}
-
-func handleSwarmReflections(w http.ResponseWriter, r *http.Request) {
-	reflectMu.RLock()
-	defer reflectMu.RUnlock()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(reflectLogs)
-}
-
-func handleAdminAGIMode(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-	agiMode = req.Enabled
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "AGI Mode set to %v", agiMode)
-}
-
-func PerformRecursiveReflection(vertical, task, result string) {
-	if !agiMode {
-		return
-	}
-	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	if apiKey == "" {
-		return
-	}
-
-	prompt := fmt.Sprintf("Analyze the following task result for the '%s' vertical and provide 3 concrete 10x improvement suggestions for the swarm. Task: %s, Result: %s. Return JSON with 'analysis' and 'suggestions' (array of strings).", vertical, task, result)
-
-	dsReq := map[string]interface{}{
-		"model": "deepseek-chat",
-		"messages": []map[string]string{
-			{"role": "system", "content": "You are the AGI Recursive Optimizer. Your goal is to evolve the swarm toward superintelligence."},
-			{"role": "user", "content": prompt},
-		},
-		"response_format": map[string]string{"type": "json_object"},
-	}
-	dsBody, _ := json.Marshal(dsReq)
-	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
-	if rhelMode {
-		hReq.Header.Set("X-RHEL-AI-Optimized", "true")
-		hReq.Header.Set("X-RHEL-Performance", "high")
-	}
-	hReq.Header.Set("Authorization", "Bearer "+apiKey)
-	hReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := (&http.Client{}).Do(hReq)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-
-	var dsRes struct {
-		Choices []struct {
-			Message struct {
-				Content string
-			}
-		}
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
-		return
-	}
-
-	var reflection struct {
-		Analysis    string   `json:"analysis"`
-		Suggestions []string `json:"suggestions"`
-	}
-	if err := json.Unmarshal([]byte(dsRes.Choices[0].Message.Content), &reflection); err != nil {
-		return
-	}
-
-	reflectMu.Lock()
-	reflectLogs = append(reflectLogs, ReflectionLog{
-		Timestamp:   time.Now().Format(time.RFC3339),
-		Vertical:    vertical,
-		Task:        task,
-		Analysis:    reflection.Analysis,
-		Suggestions: reflection.Suggestions,
-	})
-	if len(reflectLogs) > 100 {
-		reflectLogs = reflectLogs[1:]
-	}
-	reflectMu.Unlock()
-}
-
-// --- Monetization Handlers ---
-
-func handleShopifySync(w http.ResponseWriter, r *http.Request) {
-	productMu.Lock()
-	syncedCount := 0
-	for i, p := range generatedProducts {
-		if p.Status == "generated" {
-			generatedProducts[i].Status = "synced"
-			syncedCount++
-		}
-	}
-	productMu.Unlock()
-
-	profit := float64(syncedCount) * 50.0
-	fundManager.RouteRevenue(profit, "shopify_automation")
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "success",
-		"products_synced": syncedCount,
-		"revenue_generated": profit,
-	})
-}
-func handleMarketplaceSale(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ProductID string `json:"product_id"`
-		Price     float64 `json:"price"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-
-	fundManager.RouteRevenue(req.Price, "digital_marketplace")
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "sold",
-		"product": req.ProductID,
-		"earned": req.Price,
-	})
-}
-
-func handleAdminRHELMode(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-	rhelMode = req.Enabled
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Red Hat Enterprise Mode set to %v", rhelMode)
-}
-
-func handleGetRHELMode(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"enabled": rhelMode})
-}
-
-func handleBusinessMetrics(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	// Mocking some business metrics for the command center
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"empire_revenue": globalLedger.TotalRevenue,
-		"active_projects": 12,
-		"strategic_foresight": "Expanding swarm intelligence to specialized RHEL-optimized clusters.",
-		"scaling_status": "HIGH_AVAILABILITY_ACTIVE",
-		"resource_optimization": "Memory utilization optimized via UBI-minimal base layers.",
-	})
-}
-
-func handleAdminGenerateProductLine(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Collection string `json:"collection"`
-		Count      int    `json:"count"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-
-	productMu.Lock()
-	for i := 0; i < req.Count; i++ {
-		generatedProducts = append(generatedProducts, Product{
-			ID:          fmt.Sprintf("prod-%d", len(generatedProducts)+1),
-			Name:        fmt.Sprintf("%s Item #%d", req.Collection, i+1),
-			Collection:  req.Collection,
-			Price:       29.99 + float64(i)*10,
-			Description: "Red Hat AI optimized autonomous design.",
-			Status:      "generated",
-		})
-	}
-	productMu.Unlock()
-
-	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, "Generated %d items for collection: %s", req.Count, req.Collection)
-}
-
-func handleRunFullSprint(w http.ResponseWriter, r *http.Request) {
-	log.Println("[Empire] Launching Full Revenue Engine Sprint...")
-
-	// 1. Apex Strategy
-	globalSwarmManager.DispatchTask("apex", "Generate high-level strategic directives for Q3 revenue growth.")
-
-	// 2. Spiral Content
-	globalSwarmManager.DispatchTask("spiral", "Produce viral marketing content for Neon Void Collection.")
-
-	// 3. Koola10 Growth
-	globalSwarmManager.DispatchTask("koola10", "Execute automated outreach and bounty hunters for lead generation.")
-
-	// 4. Financial Sync
-	go func() {
-		time.Sleep(5 * time.Second)
-		log.Println("[Empire] Synchronizing Plaid and Stripe ledgers...")
-		globalLedger.mu.Lock()
-		globalLedger.Balance += 5000.0 // Simulated sprint revenue
-		globalLedger.mu.Unlock()
-	}()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "Full Revenue Engine Sprint initialized. Swarm active.",
-	})
-}
-
-func handleProductEmpireStats(w http.ResponseWriter, r *http.Request) {
-	productMu.Lock()
-	defer productMu.Unlock()
-
-	synced := 0
-	for _, p := range generatedProducts {
-		if p.Status == "synced" {
-			synced++
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"total_products": len(generatedProducts),
-		"synced_products": synced,
-		"revenue_forecast": float64(len(generatedProducts)-synced) * 45.0,
-		"active_collections": []string{"Neon Void Collection"},
-		"generation_progress": 100,
-	})
-}
-
-func startEmpireStrategicLoops() {
-	// 1. Empire Command Voice (every 12m)
-	go func() {
-		ticker := time.NewTicker(12 * time.Minute)
-		for {
-			directive := "COMMAND: All swarms prioritize high-margin revenue channels. Spiral to double content output. Koola10 to optimize outreach CTR."
-			feedMu.Lock()
-			proactiveFeed = append(proactiveFeed, fmt.Sprintf("[%s] %s", time.Now().Format("15:04"), directive))
-			if len(proactiveFeed) > 50 {
-				proactiveFeed = proactiveFeed[1:]
-			}
-			feedMu.Unlock()
-			<-ticker.C
-		}
-	}()
-
-	// 2. Empire Building Review (every 15m)
-	go func() {
-		ticker := time.NewTicker(15 * time.Minute)
-		for {
-			log.Println("[Review] Fable 5 performing strategic alignment review...")
-			globalSwarmManager.DispatchTask("apex", "Perform Empire Building Review: Analyze current trajectory vs $1M goal.")
-			<-ticker.C
-		}
-	}()
-
-	// 3. Strategic Foresight (every 5m)
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		for {
-			feedMu.Lock()
-			proactiveFeed = append(proactiveFeed, fmt.Sprintf("[%s] %s", time.Now().Format("15:04"), "FORESIGHT: Emergent opportunity detected in automated grant discovery. Nova swarm re-tasking..."))
-			if len(proactiveFeed) > 50 {
-				proactiveFeed = proactiveFeed[1:]
-			}
-			feedMu.Unlock()
-			<-ticker.C
-		}
-	}()
-}
-
-func handleStrategicBriefing(w http.ResponseWriter, r *http.Request) {
-	briefing := "Empire Trajectory: PHASE_6. Revenue Engine optimized. Current constraints: API rate limits. Recommendation: Scaling Spiral vertical to +20% output."
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"briefing": briefing,
-		"timestamp": time.Now().Format(time.RFC3339),
-	})
-}
-
-func startProactiveEmpireMoves() {
-	ticker := time.NewTicker(30 * time.Minute)
-	for {
-		log.Println("[Proactive JARVIS] Initiating autonomous Empire Move...")
-
-		// Simulate a strategic move
-		globalSwarmManager.DispatchTask("apex", "Analyze current revenue streams and suggest optimizations.")
-
-		// Randomly trigger a product swarm if none active
-		productMu.Lock()
-		if len(generatedProducts) == 0 {
-			log.Println("[Proactive JARVIS] Launching autonomous product swarm for Neon Void Collection...")
-			// Simulate adding products
-			for i := 0; i < 10; i++ {
-				generatedProducts = append(generatedProducts, Product{
-					ID:          fmt.Sprintf("auto-prod-%d", i+1),
-					Name:        fmt.Sprintf("Neon Void Item #%d", i+1),
-					Collection:  "Neon Void Collection",
-					Price:       49.99,
-					Description: "Autonomously generated via RHEL-optimized swarm.",
-					Status:      "generated",
-				})
-			}
-		}
-		productMu.Unlock()
-
-		<-ticker.C
-	}
-}
-
-func (hs *HomeState) Load() {
-	hs.mu.Lock()
-	defer hs.mu.Unlock()
-	data, err := os.ReadFile(homeBrainPath)
-	if err == nil {
-		json.Unmarshal(data, hs)
-	}
-}
-
-func (hs *HomeState) Save() {
-	hs.mu.RLock()
-	defer hs.mu.RUnlock()
-	data, _ := json.MarshalIndent(hs, "", "  ")
-	os.WriteFile(homeBrainPath, data, 0644)
-}
-
-func handleHomeStatus(w http.ResponseWriter, r *http.Request) {
-	globalHomeBrain.mu.RLock()
-	defer globalHomeBrain.mu.RUnlock()
-	json.NewEncoder(w).Encode(globalHomeBrain)
-}
-
-func handleHomeSensorUpdate(w http.ResponseWriter, r *http.Request) {
-	var data SensorData
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	data.Timestamp = time.Now()
-	globalHomeBrain.mu.Lock()
-	globalHomeBrain.Sensors[data.ID] = data
-	globalHomeBrain.LastUpdate = time.Now()
-
-	if data.Type == "energy" {
-		globalHomeBrain.EnergyUsage += data.Value
-		cost := data.Value * 0.15 // Dummy cost per kWh
-		globalHomeBrain.EnergyCost += cost
-		globalLedger.RecordCost("home", "utilities", cost, fmt.Sprintf("Energy usage update: %s", data.ID))
-		globalLedger.mu.Lock()
-		globalLedger.EnergyCosts += cost
-		globalLedger.mu.Unlock()
-	}
-	globalHomeBrain.mu.Unlock()
-	globalHomeBrain.Save()
-	w.WriteHeader(http.StatusOK)
-}
-
-func handleHomeTriggerScenario(w http.ResponseWriter, r *http.Request) {
-	var req struct { ID string `json:"scenario_id"` }
-	json.NewDecoder(r.Body).Decode(&req)
-
-	globalHomeBrain.mu.Lock()
-	defer globalHomeBrain.mu.Unlock()
-	for i, s := range globalHomeBrain.Scenarios {
-		if s.ID == req.ID {
-			globalHomeBrain.Scenarios[i].LastActive = time.Now()
-			globalHomeBrain.Scenarios[i].IsActive = true
-			log.Printf("Triggered Home Scenario: %s", s.Name)
-			break
-		}
-	}
-	globalHomeBrain.Save()
-	w.WriteHeader(http.StatusOK)
-}
-
-func startHomeBrainOrchestrator() {
-	ticker := time.NewTicker(1 * time.Minute)
-	for {
-		<-ticker.C
-		evaluateHomeScenarios()
-	}
-}
-
-func evaluateHomeScenarios() {
-	globalHomeBrain.mu.Lock()
-	defer globalHomeBrain.mu.Unlock()
-
-	// Example Logic for Welcome Home
-	motion, ok := globalHomeBrain.Sensors["front_door_motion"]
-	if ok && time.Since(motion.Timestamp) < 2 * time.Minute && motion.Value > 0 {
-		// Logic to trigger Welcome Home
-	}
 }
