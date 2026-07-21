@@ -843,10 +843,21 @@ type CapitalDeployRequest struct {
 // Stripe URL so the caller can redirect the user. Requires the
 // STRIPE_PRICE_GRANT env var to point at a real Stripe Price.
 func handleTriggerGrants(w http.ResponseWriter, r *http.Request) {
+	// Accept optional price_id in request body (overrides env var)
+	var bodyReq struct {
+		PriceID string `json:"price_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&bodyReq)
+
+	priceID := bodyReq.PriceID
+	if priceID == "" {
+		priceID = os.Getenv("STRIPE_PRICE_GRANT")
+	}
+
 	res := tools.RunTool("stripe", map[string]interface{}{
 		"action":      "create_checkout_session",
 		"mode":        "payment",
-		"price_id":    os.Getenv("STRIPE_PRICE_GRANT"),
+		"price_id":    priceID,
 		"success_url": "https://koola10.ai/thanks",
 		"cancel_url":  "https://koola10.ai/pricing",
 	})
