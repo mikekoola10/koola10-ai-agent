@@ -1,0 +1,203 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cyan: #00f0ff;
+  --color-purple: #8b00ff;
+  --color-acid: #39ff14;
+  --color-bg: #0a0a0a;
+  --color-card-bg: #0d0d0d;
+  --color-glass: rgba(13, 13, 13, 0.85);
+  --font-mono: 'Courier New', Courier, monospace;
+}
+
+body {
+  background-color: #0a0a0a;
+  color: #e0e0e0;
+}
+
+/* Scanline overlay */
+body::after {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background:
+    linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.2) 50%),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.03), rgba(139, 0, 255, 0.02), rgba(57, 255, 20, 0.03));
+  z-index: 100;
+  background-size: 100% 3px, 4px 100%;
+  pointer-events: none;
+}
+
+/* Animations */
+@keyframes glitch {
+  2%, 64% { transform: translate(2px, 0) skew(0deg); }
+  4%, 60% { transform: translate(-2px, 0) skew(0deg); }
+  62% { transform: translate(0, 0) skew(5deg); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 10px var(--tw-shadow-color, #00f0ff); }
+  50% { box-shadow: 0 0 30px var(--tw-shadow-color, #00f0ff), 0 0 60px var(--tw-shadow-color, #00f0ff); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Utility classes */
+.glitch-text {
+  animation: glitch 1.5s linear infinite;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out both;
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s ease-out both;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.3s ease-out both;
+}
+
+.blink-cursor::after {
+  content: '_';
+  animation: blink 1s step-end infinite;
+}
+
+/* Glass card */
+.glass-card {
+  background: rgba(13, 13, 13, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 240, 255, 0.15);
+  border-radius: 8px;
+}
+
+.glass-card:hover {
+  border-color: rgba(0, 240, 255, 0.4);
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.3);
+  border-color: #00f0ff !important;
+}
+
+/* Button styles */
+.btn-cyan {
+  background: transparent;
+  border: 1px solid #00f0ff;
+  color: #00f0ff;
+  transition: all 0.3s ease;
+}
+.btn-cyan:hover:not(:disabled) {
+  background: #00f0ff;
+  color: #0a0a0a;
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.5);
+}
+.btn-cyan:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-purple {
+  background: transparent;
+  border: 1px solid #8b00ff;
+  color: #8b00ff;
+  transition: all 0.3s ease;
+}
+.btn-purple:hover:not(:disabled) {
+  background: #8b00ff;
+  color: #fff;
+  box-shadow: 0 0 20px rgba(139, 0, 255, 0.5);
+}
+.btn-purple:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-acid {
+  background: transparent;
+  border: 1px solid #39ff14;
+  color: #39ff14;
+  transition: all 0.3s ease;
+}
+.btn-acid:hover:not(:disabled) {
+  background: #39ff14;
+  color: #0a0a0a;
+  box-shadow: 0 0 20px rgba(57, 255, 20, 0.5);
+}
+.btn-acid:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Loading shimmer */
+.skeleton {
+  background: linear-gradient(90deg, rgba(0,240,255,0.05) 0%, rgba(0,240,255,0.1) 50%, rgba(0,240,255,0.05) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0a0a0a; }
+::-webkit-scrollbar-thumb { background: #00f0ff33; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #00f0ff66; }
+
+/* Notification toast */
+.toast-enter {
+  animation: slideDown 0.3s ease-out;
+}
+
+/* Input styles */
+input {
+  background: rgba(0, 240, 255, 0.05);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  color: #e0e0e0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.3s;
+  font-family: 'Courier New', Courier, monospace;
+}
+input:focus {
+  border-color: #00f0ff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.15);
+}
+input::placeholder {
+  color: rgba(0, 240, 255, 0.3);
+}
