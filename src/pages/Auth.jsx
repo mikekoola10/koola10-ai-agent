@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { useToast } from '../components/Toast';
 
 export default function Auth({ mode = 'login', onNavigate, onAuth }) {
+  const { toast } = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -16,8 +18,6 @@ export default function Auth({ mode = 'login', onNavigate, onAuth }) {
     setError(null);
 
     try {
-      // For MVP, we use a simple session-based approach
-      // In production, this would call /auth/login or /auth/signup
       if (!email || !password) {
         throw new Error('Email and password are required');
       }
@@ -29,7 +29,6 @@ export default function Auth({ mode = 'login', onNavigate, onAuth }) {
       // Simulate auth delay
       await new Promise((resolve) => setTimeout(resolve, 800));
 
-      // Store session
       const user = {
         id: 'user_' + Date.now(),
         email,
@@ -43,13 +42,16 @@ export default function Auth({ mode = 'login', onNavigate, onAuth }) {
       localStorage.setItem('koola10_session', 'active');
 
       if (isLogin) {
+        toast.success(`Welcome back, ${user.name}!`);
         onAuth(user);
       } else {
         setSuccess('Account created! Redirecting...');
+        toast.success('Account created successfully! Welcome aboard.');
         setTimeout(() => onAuth(user), 1000);
       }
     } catch (err) {
       setError(err.message);
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }
@@ -174,10 +176,16 @@ export default function Auth({ mode = 'login', onNavigate, onAuth }) {
 
           {/* Social logins (placeholder) */}
           <div className="space-y-3">
-            <button className="w-full py-2.5 border border-cyan/20 text-cyan/60 rounded text-xs uppercase tracking-wider hover:bg-cyan/5 transition-all flex items-center justify-center gap-2">
+            <button
+              onClick={() => toast.info('Google OAuth coming soon — use email signup in the meantime')}
+              className="w-full py-2.5 border border-cyan/20 text-cyan/60 rounded text-xs uppercase tracking-wider hover:bg-cyan/5 transition-all flex items-center justify-center gap-2"
+            >
               <span>🔗</span> Continue with Google
             </button>
-            <button className="w-full py-2.5 border border-cyan/20 text-cyan/60 rounded text-xs uppercase tracking-wider hover:bg-cyan/5 transition-all flex items-center justify-center gap-2">
+            <button
+              onClick={() => toast.info('GitHub OAuth coming soon — use email signup in the meantime')}
+              className="w-full py-2.5 border border-cyan/20 text-cyan/60 rounded text-xs uppercase tracking-wider hover:bg-cyan/5 transition-all flex items-center justify-center gap-2"
+            >
               <span>⚡</span> Continue with GitHub
             </button>
           </div>

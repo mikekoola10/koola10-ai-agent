@@ -27,6 +27,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"koola10/agents"
+	"koola10/cronjob"
 	"koola10/financial"
 	"koola10/tools"
 
@@ -471,6 +472,13 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // --- Main ---
 
 func main() {
+	// Initialize Stripe SDK key for direct product/price creation
+	if k := os.Getenv("STRIPE_API_KEY"); k != "" {
+		stripe.Key = k
+	} else if k := os.Getenv("STRIPE_SECRET_KEY"); k != "" {
+		stripe.Key = k
+	}
+
 	go startProactiveEmpireMoves()
 	go startEmpireStrategicLoops()
 
@@ -674,6 +682,15 @@ func main() {
 	r.Post("/admin/capital/deploy", corsMiddleware(authMiddleware(handleCapitalDeploy)))
 	r.Post("/admin/scheduler/run", corsMiddleware(authMiddleware(handleSchedulerRun)))
 
+	// Cron-job.org Integration
+	r.Get("/admin/cron/status", corsMiddleware(authMiddleware(cronjob.HandleStatus)))
+	r.Get("/admin/cron/jobs", corsMiddleware(authMiddleware(cronjob.HandleListJobs)))
+	r.Post("/admin/cron/jobs", corsMiddleware(authMiddleware(cronjob.HandleCreateJob)))
+	r.Patch("/admin/cron/jobs", corsMiddleware(authMiddleware(cronjob.HandleUpdateJob)))
+	r.Delete("/admin/cron/jobs", corsMiddleware(authMiddleware(cronjob.HandleDeleteJob)))
+	r.Get("/admin/cron/history", corsMiddleware(authMiddleware(cronjob.HandleJobHistory)))
+	r.Post("/admin/cron/setup", corsMiddleware(authMiddleware(cronjob.HandleSetupDefaults)))
+
 	r.Get("/financial/status", corsMiddleware(handleFinancialStatus))
 	r.Post("/admin/rhel-mode", authMiddleware(handleAdminRHELMode))
 	r.Get("/admin/rhel-mode", corsMiddleware(handleGetRHELMode))
@@ -686,6 +703,9 @@ func main() {
 
 	r.Post("/tools/execute", corsMiddleware(tools.HandleExecute))
 
+	// Blog generation endpoint
+	r.Post("/blog/generate", corsMiddleware(handleBlogGenerate))
+
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
 	r.Post("/studio/episode", corsMiddleware(handleStudioEpisode))
@@ -695,6 +715,17 @@ func main() {
 
 	// Stripe Manager: create a product + price
 	r.Post("/admin/stripe/products", corsMiddleware(authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Ensure Stripe SDK key is set for direct product/price creation
+		if k := os.Getenv("STRIPE_API_KEY"); k != "" {
+			stripe.Key = k
+		} else if k := os.Getenv("STRIPE_SECRET_KEY"); k != "" {
+			stripe.Key = k
+		}
+		if stripe.Key == "" {
+			http.Error(w, "STRIPE_API_KEY not configured", http.StatusServiceUnavailable)
+			return
+		}
+
 		var req struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
@@ -983,6 +1014,79 @@ func handleCapitalDeploy(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Studio Handlers ---
+
+// handleBlogGenerate creates a blog post using DeepSeek
+func handleBlogGenerate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Topic string `json:"topic"`
+		Style string `json:"style"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.Topic == "" {
+		req.Topic = "AI revenue generation strategies"
+	}
+
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "DEEPSEEK_API_KEY not configured"})
+		return
+	}
+
+	systemPrompt := "You are an expert blogger writing about AI revenue generation. Write a 500-word SEO-optimized blog post. Return JSON with: title, excerpt (2 sentences), category, content (full HTML article), tags (array of 5 strings), meta_description (150 chars)."
+
+	dsReq := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": "Write a blog post about: " + req.Topic},
+		},
+		"response_format": map[string]string{"type": "json_object"},
+	}
+	dsBody, _ := json.Marshal(dsReq)
+	hReq, _ := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(dsBody))
+	hReq.Header.Set("Authorization", "Bearer "+apiKey)
+	hReq.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(hReq)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	var dsRes struct {
+		Choices []struct {
+			Message struct {
+				Content string
+			}
+		}
+		Usage struct {
+			TotalTokens int
+		}
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&dsRes); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "parse failed"})
+		return
+	}
+
+	LogUsage(dsRes.Usage.TotalTokens)
+	globalLedger.RecordCost("", "blog_generation", float64(dsRes.Usage.TotalTokens)*0.000002, "Blog post generation")
+
+	var blogPost map[string]interface{}
+	json.Unmarshal([]byte(dsRes.Choices[0].Message.Content), &blogPost)
+	blogPost["slug"] = fmt.Sprintf("blog-%d", time.Now().Unix())
+	blogPost["date"] = time.Now().Format("January 2, 2006")
+	blogPost["readTime"] = "5 min"
+	blogPost["color"] = "#00f0ff"
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(blogPost)
+}
 
 func handleStudioLore(w http.ResponseWriter, r *http.Request) {
 	var req LoreRequest

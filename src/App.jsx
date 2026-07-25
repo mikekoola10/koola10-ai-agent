@@ -6,15 +6,17 @@ import SystemHealth from './components/SystemHealth';
 import MemoryPanel from './components/MemoryPanel';
 import SubscriptionsPanel from './components/SubscriptionsPanel';
 import NavGrid from './components/NavGrid';
+import CronManager from './components/CronManager';
 import Landing from './pages/Landing';
 import Auth from './pages/Auth';
 import DeveloperPortal from './pages/DeveloperPortal';
 import ServicesPortal from './pages/ServicesPortal';
+import Blog from './pages/Blog';
+import { ToastProvider } from './components/Toast';
 
 // Simple client-side router
 function useRouter() {
   const [page, setPage] = useState(() => {
-    // Check localStorage for last page, default to landing
     return localStorage.getItem('koola10_page') || 'landing';
   });
   const [params, setParams] = useState({});
@@ -28,13 +30,12 @@ function useRouter() {
   return { page, params, navigate };
 }
 
-export default function App() {
+function AppInner() {
   const { page, params, navigate } = useRouter();
   const [user, setUser] = useState(null);
   const [time, setTime] = useState(new Date().toLocaleTimeString('en-US', { hour12: false }));
   const ledgerRefreshRef = useRef(null);
 
-  // ── Check auth on mount ──────────────────────────────
   useEffect(() => {
     const stored = localStorage.getItem('koola10_user');
     const session = localStorage.getItem('koola10_session');
@@ -43,7 +44,6 @@ export default function App() {
     }
   }, []);
 
-  // ── Clock ticker ────────────────────────────────────────
   useEffect(() => {
     const id = setInterval(() => {
       setTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
@@ -51,7 +51,6 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // ── Auth handler ─────────────────────────────────────────
   const handleAuth = (userData) => {
     setUser(userData);
     navigate('dashboard');
@@ -64,48 +63,40 @@ export default function App() {
     navigate('landing');
   };
 
-  // ── Refresh ledger after revenue engine actions ─────────
   const handleRevenueAction = () => {
     setTimeout(() => {
       if (ledgerRefreshRef.current) ledgerRefreshRef.current();
     }, 2000);
   };
 
-  // ── Route rendering ──────────────────────────────────────
   const renderPage = () => {
     switch (page) {
       case 'landing':
         return <Landing onNavigate={navigate} />;
-
       case 'login':
         return <Auth mode="login" onNavigate={navigate} onAuth={handleAuth} />;
-
       case 'signup':
         return <Auth mode="signup" onNavigate={navigate} onAuth={handleAuth} />;
-
       case 'developers':
         return <DeveloperPortal onNavigate={navigate} />;
-
       case 'services':
         return <ServicesPortal onNavigate={navigate} />;
-
+      case 'blog':
+        return <Blog />;
       case 'dashboard':
         if (!user) {
           return <Auth mode="login" onNavigate={navigate} onAuth={handleAuth} />;
         }
         return renderDashboard();
-
       default:
         return <Landing onNavigate={navigate} />;
     }
   };
 
-  // ── Admin Dashboard ──────────────────────────────────────
   const renderDashboard = () => (
     <>
       <MatrixRain />
       <div className="relative z-10 min-h-screen font-mono">
-        {/* ── Fixed Header ────────────────────────────── */}
         <header className="sticky top-0 z-20 glass-card border-b border-cyan/10 rounded-none mx-0">
           <div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -133,9 +124,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* ── Dashboard Body ──────────────────────────── */}
         <main className="max-w-6xl mx-auto px-4 py-6 space-y-5">
-          {/* Quick nav to other portals */}
           <div className="flex gap-3 flex-wrap">
             <button
               onClick={() => navigate('landing')}
@@ -157,21 +146,15 @@ export default function App() {
             </button>
           </div>
 
-          {/* Section: Health + Ledger */}
           <div className="animate-fade-in">
             <SystemHealth />
           </div>
-
           <div className="animate-fade-in" style={{ animationDelay: '0.1s' }}>
             <LedgerDashboard onRefresh={ledgerRefreshRef} />
           </div>
-
-          {/* Section: Revenue Engine */}
           <div className="animate-fade-in" style={{ animationDelay: '0.2s' }}>
             <RevenueEngine onAction={handleRevenueAction} />
           </div>
-
-          {/* Section: Memory + Subscriptions side by side on large screens */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="animate-fade-in" style={{ animationDelay: '0.3s' }}>
               <MemoryPanel />
@@ -180,13 +163,13 @@ export default function App() {
               <SubscriptionsPanel />
             </div>
           </div>
-
-          {/* Section: Navigation */}
+          <div className="animate-fade-in" style={{ animationDelay: '0.4s' }}>
+            <CronManager />
+          </div>
           <div className="animate-fade-in" style={{ animationDelay: '0.45s' }}>
             <NavGrid />
           </div>
 
-          {/* ── Footer ─────────────────────────────────── */}
           <footer className="text-center py-8 text-[10px] md:text-xs text-cyan/30 tracking-widest">
             [ SWARM: APEX | SPIRAL | KOOLA10 ]&nbsp;&nbsp;
             [ ENCRYPTION: AES-256 ]&nbsp;&nbsp;
@@ -199,4 +182,12 @@ export default function App() {
   );
 
   return renderPage();
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <AppInner />
+    </ToastProvider>
+  );
 }

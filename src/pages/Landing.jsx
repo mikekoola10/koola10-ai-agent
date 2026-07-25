@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiUrl, authHeaders } from '../api';
+import { useToast } from '../components/Toast';
 
 const FEATURES = [
   {
@@ -48,6 +49,7 @@ const PRICING_TIERS = [
     price: 29,
     period: '/mo',
     color: '#00f0ff',
+    priceIdKey: 'STARTER',
     features: [
       '5 AI Agent Runs / Day',
       'Basic Revenue Dashboard',
@@ -63,6 +65,7 @@ const PRICING_TIERS = [
     price: 79,
     period: '/mo',
     color: '#8b00ff',
+    priceIdKey: 'PRO',
     features: [
       '50 AI Agent Runs / Day',
       'Full Command Center',
@@ -79,6 +82,7 @@ const PRICING_TIERS = [
     price: 199,
     period: '/mo',
     color: '#39ff14',
+    priceIdKey: 'ENTERPRISE',
     features: [
       'Unlimited Agent Runs',
       'White-Label Dashboard',
@@ -94,30 +98,82 @@ const PRICING_TIERS = [
 
 const PRODUCTS = [
   {
-    title: 'Grant Application Package',
+    title: 'AI Agent Starter Kit',
+    price: 29,
+    color: '#00f0ff',
+    priceId: 'price_1TxEyNC826DfrBa2NUekEqQA',
+    description: 'Your first AI agent in 10 minutes. Includes setup guide, 5 ready-to-run agent configs, and a quickstart video tutorial.',
+    features: ['Quickstart Guide', '5 Agent Configs', 'Video Tutorial', '1-Hour Setup'],
+  },
+  {
+    title: 'Grant Proposal Templates',
+    price: 39,
+    color: '#39ff14',
+    priceId: 'price_1TxEyiC826DfrBa2vKwkOgz5',
+    description: '50 professionally written grant proposal templates for federal, state, and private foundations.',
+    features: ['50 Proposal Templates', 'Federal & State Grants', 'AI Fill-in Sections', 'Copy-Paste Ready'],
+  },
+  {
+    title: 'Koola10 Template Vault',
     price: 49,
     color: '#00f0ff',
-    description: 'AI-powered grants.gov application drafting and submission support.',
-    features: ['Automated Grant Matching', 'AI Application Writer', 'Deadline Tracker', 'Submission Assistant'],
+    priceId: 'price_1TxEFJC826DfrBa2tZWKlh5C',
+    description: '50+ ready-to-use templates for AI agent prompts, grant applications, content calendars, email sequences, and revenue dashboards.',
+    features: ['50+ Agent Prompt Templates', 'Grant Application Templates', 'Content Calendar Kit', 'Revenue Dashboard Configs'],
   },
   {
-    title: 'Revenue Blueprint Kit',
-    price: 97,
+    title: 'Content Calendar System',
+    price: 59,
     color: '#8b00ff',
-    description: 'Complete framework for building autonomous revenue streams with AI agents.',
-    features: ['Step-by-Step Guide', 'Agent Configuration Templates', 'Revenue Templates', 'Community Access'],
+    priceId: 'price_1TxEyiC826DfrBa2ZAjr2tY8',
+    description: '12-month AI-powered content calendar with 365 post ideas, optimal posting times, and cross-platform scheduling.',
+    features: ['365 Post Ideas', 'Optimal Posting Times', 'Hashtag Research', 'Cross-Platform Templates'],
   },
   {
-    title: 'Agent Swarm Starter Pack',
+    title: 'Revenue Dashboard Configs',
+    price: 69,
+    color: '#ffd93d',
+    priceId: 'price_1TxEyjC826DfrBa2YcD8yauo',
+    description: '5 ready-to-deploy cyberpunk revenue dashboards for Stripe, PayPal, and manual sales tracking.',
+    features: ['5 Dashboard Templates', 'Real-Time Charts', 'Goal Tracking', 'Alert System'],
+  },
+  {
+    title: 'AI Agent Blueprint Pack',
+    price: 79,
+    color: '#8b00ff',
+    priceId: 'price_1TxEFJC826DfrBa2IsMDj7n2',
+    description: 'Step-by-step blueprints for deploying autonomous AI agents that generate revenue 24/7.',
+    features: ['12 Agent Configurations', 'Revenue Engine Setup', 'ROI Calculator', 'Deployment Checklist'],
+  },
+  {
+    title: 'Agent Training Dataset',
+    price: 99,
+    color: '#39ff14',
+    priceId: 'price_1TxEyjC826DfrBa2MAO50VGO',
+    description: 'Curated dataset of 10,000+ prompt-response pairs for training AI agents on affiliate marketing, grant writing, and content.',
+    features: ['10K+ Prompt Pairs', 'Affiliate Marketing', 'Grant Writing', 'Content Generation'],
+  },
+  {
+    title: 'Revenue Automation Course',
     price: 149,
     color: '#39ff14',
-    description: 'Pre-configured agent swarm for immediate revenue generation.',
-    features: ['10 Agent Templates', 'Revenue Engine Config', 'Dashboard Customization', '1-Hour Setup Call'],
+    priceId: 'price_1TxEFJC826DfrBa2JVKgLGVM',
+    description: 'Complete video course: Build a $1K/day revenue engine with AI agents. 8 modules covering every vertical.',
+    features: ['8 Video Modules', 'Affiliate Marketing', 'Grant Writing Mastery', 'Content Generation'],
+  },
+  {
+    title: 'Full Stack AI Blueprint',
+    price: 199,
+    color: '#ff6b6b',
+    priceId: 'price_1TxEyjC826DfrBa2dSl1ccYH',
+    description: 'Complete system architecture for building an AI revenue engine. 24 agent configs, webhook flows, and deployment scripts.',
+    features: ['24 Agent Configs', 'Webhook Flows', 'Database Schemas', 'Deployment Scripts'],
   },
   {
     title: 'Enterprise Agent Training',
     price: 499,
     color: '#ffd93d',
+    priceId: null,
     description: 'Custom AI agent training for your specific business vertical.',
     features: ['Custom Agent Development', 'Industry-Specific Training', 'Performance Optimization', '30-Day Support'],
   },
@@ -130,6 +186,7 @@ const HERO_LINES = [
 ];
 
 export default function Landing({ onNavigate }) {
+  const { toast } = useToast();
   const [email, setEmail] = useState('');
   const [subscribed, setSubscribed] = useState(false);
   const [scrollY, setScrollY] = useState(0);
@@ -155,7 +212,6 @@ export default function Landing({ onNavigate }) {
     }
   }, [heroLine, heroChar, heroDone]);
 
-  // Cursor blink
   useEffect(() => {
     const t = setInterval(() => setHeroBlink((b) => !b), 530);
     return () => clearInterval(t);
@@ -167,35 +223,75 @@ export default function Landing({ onNavigate }) {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // ── Stripe checkout handler ──────────────────────────
-  const handleCheckout = useCallback(async (productTitle, price) => {
-    setCheckoutLoading(productTitle);
+  // ── Stripe subscription checkout ─────────────────────
+  const handleSubscribeCheckout = useCallback(async (tier) => {
+    if (tier.name === 'ENTERPRISE') {
+      toast.info('Contact sales@koola10.ai for Enterprise pricing');
+      return;
+    }
+    setCheckoutLoading(tier.name);
+    const loadingId = toast.loading(`Creating ${tier.name} checkout...`);
     try {
       const res = await fetch(apiUrl('koola10', '/admin/trigger_grants'), {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ price_id: null }),
+        body: JSON.stringify({
+          price_id: null,
+          mode: 'subscription',
+          plan: tier.name.toLowerCase(),
+          success_url: window.location.origin,
+          cancel_url: window.location.origin,
+        }),
       });
       const data = await res.json();
       if (data.checkout_url) {
-        window.open(data.checkout_url, '_blank');
+        toast.updateToast(loadingId, `${tier.name} checkout ready — redirecting...`, { type: 'success', duration: 3000 });
+        setTimeout(() => window.open(data.checkout_url, '_blank'), 500);
+      } else if (data.error) {
+        toast.updateToast(loadingId, `Checkout failed: ${data.error}`, { type: 'error', duration: 5000 });
       } else {
-        alert('Checkout unavailable. Please try again or contact support.');
+        toast.updateToast(loadingId, 'Checkout unavailable — backend may not support subscriptions yet. Contact support.', { type: 'warning', duration: 6000 });
       }
     } catch (err) {
-      alert('Network error. Please try again.');
+      toast.updateToast(loadingId, `Network error: ${err.message}`, { type: 'error', duration: 5000 });
     } finally {
       setCheckoutLoading(null);
     }
-  }, []);
+  }, [toast]);
 
-  const handleSubscribe = (e) => {
+  // ── Product one-time checkout ────────────────────────
+  const handleProductCheckout = useCallback(async (product) => {
+    setCheckoutLoading(product.title);
+    const loadingId = toast.loading(`Creating checkout for ${product.title}...`);
+    try {
+      const res = await fetch(apiUrl('koola10', '/admin/trigger_grants'), {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ price_id: product.priceId }),
+      });
+      const data = await res.json();
+      if (data.checkout_url) {
+        toast.updateToast(loadingId, `${product.title} checkout ready — redirecting...`, { type: 'success', duration: 3000 });
+        setTimeout(() => window.open(data.checkout_url, '_blank'), 500);
+      } else {
+        toast.updateToast(loadingId, 'Checkout unavailable. Please try again or contact support.', { type: 'error', duration: 5000 });
+      }
+    } catch (err) {
+      toast.updateToast(loadingId, `Network error: ${err.message}`, { type: 'error', duration: 5000 });
+    } finally {
+      setCheckoutLoading(null);
+    }
+  }, [toast]);
+
+  // ── Email waitlist ───────────────────────────────────
+  const handleSubscribe = useCallback((e) => {
     e.preventDefault();
     if (email.trim()) {
       setSubscribed(true);
       setEmail('');
+      toast.success('Welcome to the waitlist! Check your email for next steps.');
     }
-  };
+  }, [email, toast]);
 
   return (
     <div className="relative min-h-screen font-mono">
@@ -223,6 +319,12 @@ export default function Landing({ onNavigate }) {
                 {item}
               </button>
             ))}
+            <button
+              onClick={() => onNavigate('blog')}
+              className="text-xs uppercase tracking-wider text-cyan/60 hover:text-cyan transition-colors"
+            >
+              Blog
+            </button>}
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -243,7 +345,6 @@ export default function Landing({ onNavigate }) {
 
       {/* ── Hero Section ────────────────────────────── */}
       <section className="relative min-h-screen flex items-center justify-center px-4 pt-20">
-        {/* Animated background grid */}
         <div
           className="absolute inset-0 opacity-20"
           style={{
@@ -255,12 +356,10 @@ export default function Landing({ onNavigate }) {
         />
 
         <div className="relative z-10 text-center max-w-5xl mx-auto">
-          {/* Badge */}
           <div className="inline-block mb-6 px-4 py-1.5 border border-acid/30 rounded-full">
             <span className="text-acid text-xs uppercase tracking-widest">● v2.0 — Now Live</span>
           </div>
 
-          {/* Main headline with typing animation */}
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight">
             {HERO_LINES.map((line, i) => {
               const colorClass = i === 0 ? 'text-cyan' : i === 1 ? 'text-purple' : 'text-acid';
@@ -279,13 +378,11 @@ export default function Landing({ onNavigate }) {
             }, [])}
           </h1>
 
-          {/* Subheadline */}
           <p className="text-lg md:text-xl text-cyan/60 max-w-3xl mx-auto mb-8 leading-relaxed">
             Deploy AI agents that work 24/7 — generating revenue through affiliate marketing,
             bounty hunting, content creation, and grant applications. <span className="text-acid">No code required.</span>
           </p>
 
-          {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12">
             <button
               onClick={() => onNavigate('signup')}
@@ -301,7 +398,6 @@ export default function Landing({ onNavigate }) {
             </button>
           </div>
 
-          {/* Stats */}
           <div className="grid grid-cols-3 gap-8 max-w-2xl mx-auto">
             <div>
               <div className="text-3xl font-bold text-cyan">$1,905</div>
@@ -318,7 +414,6 @@ export default function Landing({ onNavigate }) {
           </div>
         </div>
 
-        {/* Scroll indicator */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 animate-bounce">
           <span className="text-cyan/30 text-xs">▼ SCROLL</span>
         </div>
@@ -365,7 +460,6 @@ export default function Landing({ onNavigate }) {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Path 1: SaaS */}
             <div className="glass-card p-8 border-l-4 border-l-cyan hover:shadow-[0_0_30px_rgba(0,240,255,0.1)] transition-all">
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-3xl">💎</span>
@@ -392,7 +486,6 @@ export default function Landing({ onNavigate }) {
               </button>
             </div>
 
-            {/* Path 2: Digital Products */}
             <div className="glass-card p-8 border-l-4 border-l-purple hover:shadow-[0_0_30px_rgba(139,0,255,0.1)] transition-all">
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-3xl">📦</span>
@@ -419,7 +512,6 @@ export default function Landing({ onNavigate }) {
               </button>
             </div>
 
-            {/* Path 3: API Access */}
             <div className="glass-card p-8 border-l-4 border-l-acid hover:shadow-[0_0_30px_rgba(57,255,20,0.1)] transition-all">
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-3xl">🔌</span>
@@ -446,7 +538,6 @@ export default function Landing({ onNavigate }) {
               </button>
             </div>
 
-            {/* Path 4: Service Automation */}
             <div className="glass-card p-8 border-l-4 border-l-[#ffd93d] hover:shadow-[0_0_30px_rgba(255,217,61,0.1)] transition-all">
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-3xl">🎯</span>
@@ -531,23 +622,35 @@ export default function Landing({ onNavigate }) {
                 </ul>
 
                 <button
-                  onClick={() => onNavigate('signup', { plan: tier.name })}
-                  className="w-full py-3 text-xs font-bold uppercase tracking-wider rounded-lg border transition-all"
+                  onClick={() => handleSubscribeCheckout(tier)}
+                  disabled={checkoutLoading === tier.name}
+                  className="w-full py-3 text-xs font-bold uppercase tracking-wider rounded-lg border transition-all disabled:opacity-50"
                   style={{
                     borderColor: tier.color,
                     color: tier.color,
                     background: tier.popular ? `${tier.color}11` : 'transparent',
                   }}
                   onMouseEnter={(e) => {
-                    e.target.style.background = tier.color;
-                    e.target.style.color = '#0a0a0a';
+                    if (checkoutLoading !== tier.name) {
+                      e.target.style.background = tier.color;
+                      e.target.style.color = '#0a0a0a';
+                    }
                   }}
                   onMouseLeave={(e) => {
-                    e.target.style.background = tier.popular ? `${tier.color}11` : 'transparent';
-                    e.target.style.color = tier.color;
+                    if (checkoutLoading !== tier.name) {
+                      e.target.style.background = tier.popular ? `${tier.color}11` : 'transparent';
+                      e.target.style.color = tier.color;
+                    }
                   }}
                 >
-                  {tier.cta}
+                  {checkoutLoading === tier.name ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="animate-spin inline-block w-3 h-3 border border-current border-t-transparent rounded-full" />
+                      Redirecting...
+                    </span>
+                  ) : (
+                    tier.cta
+                  )}
                 </button>
               </div>
             ))}
@@ -593,7 +696,7 @@ export default function Landing({ onNavigate }) {
                   ))}
                 </ul>
                 <button
-                  onClick={() => handleCheckout(product.title, product.price)}
+                  onClick={() => handleProductCheckout(product)}
                   disabled={checkoutLoading === product.title}
                   className="w-full py-2 text-xs font-bold uppercase tracking-wider rounded border transition-all disabled:opacity-50"
                   style={{ borderColor: `${product.color}55`, color: product.color }}
@@ -651,7 +754,6 @@ export default function Landing({ onNavigate }) {
               </button>
             </div>
 
-            {/* Code preview */}
             <div className="glass-card p-6 border-acid/20">
               <div className="flex items-center gap-2 mb-4">
                 <span className="w-2 h-2 rounded-full bg-red-500" />
@@ -739,7 +841,9 @@ print(f"Revenue: ${revenue.json()['total_revenue']}")
                   ))}
                 </ul>
                 <button
-                  onClick={() => onNavigate('signup')}
+                  onClick={() => {
+                    toast.info(`${service.title} — contact sales@koola10.ai to get started`);
+                  }}
                   className="w-full py-3 text-xs font-bold uppercase tracking-wider rounded-lg border transition-all"
                   style={{ borderColor: service.color, color: service.color }}
                   onMouseEnter={(e) => {
@@ -884,7 +988,6 @@ print(f"Revenue: ${revenue.json()['total_revenue']}")
         </div>
       </footer>
 
-      {/* ── Grid animation keyframes ────────────────── */}
       <style>{`
         @keyframes gridMove {
           0% { transform: translate(0, 0); }
