@@ -1,0 +1,75 @@
+name: Trigger Render Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for this deploy'
+        required: false
+        default: 'manual dispatch from GitHub Actions'
+
+jobs:
+  render-deploy:
+    name: Tell Render to redeploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify secret exists
+        id: check
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::error::RENDER_DEPLOY_HOOK is not set on this repo."
+            echo "Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "hook_set=true" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger deploy hook
+        if: steps.check.outputs.hook_set == 'true'
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          echo "Triggering Render deploy hook…"
+          # Render deploy hooks respond with a tiny JSON. We silence output
+          # body, just want a 2xx response.
+          http_status=$(curl -s -o /tmp/render-response.json -w '%{http_code}' \
+                            -X POST -H 'Content-Type: application/json' \
+                            "$HOOK")
+          echo "Render HTTP status: $http_status"
+          echo "Body: $(cat /tmp/render-response.json)"
+          if [ "$http_status" -lt 200 ] || [ "$http_status" -ge 300 ]; then
+            echo "::error::Render deploy hook returned $http_status"
+            exit 1
+          fi
+
+      - name: Wait & poll Render build status
+        if: steps.check.outputs.hook_set == 'true'
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          # Optional second pass: poll Render's /v1/services/<id>/deploys endpoint
+          # so we know when the live URL is back with new code.
+          if [ -z "$RENDER_API_KEY" ] || [ -z "$RENDER_SERVICE_ID" ]; then
+            echo "RENDER_API_KEY / RENDER_SERVICE_ID not set — skipping status poll."
+            echo "Manually visit https://dashboard.render.com to confirm the deploy."
+            exit 0
+          fi
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 15
+            deploy=$(curl -fsS \
+                        -H "Authorization: Bearer $RENDER_API_KEY" \
+                        "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=1")
+            status=$(echo "$deploy" | python3 -c 'import sys, json; d=json.load(sys.stdin); print(d[0]["status"])')
+            echo "Attempt $attempt: status=$status"
+            case "$status" in
+              live)
+                echo "Deploy live 🎉"
+                exit 0 ;;
+              build_failed|canceled|deploy_failed)
+                echo "::error::Deploy $status"
+                exit 1 ;;
+            esac
+          done
+          echo "::warning::Deploy is still pending after 2.5 min. Check dashboard."
