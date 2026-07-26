@@ -249,13 +249,15 @@ func (c *Client) CreateSprintJob(frequency string, timezone string) (int, error)
 	schedule := buildSchedule(frequency, timezone)
 
 	job := DetailedJob{
-		Enabled:  true,
-		Title:    "Koola10 Revenue Sprint",
-		URL:      baseURL + "/admin/run-scheduled-sprint",
-		SaveResponses: true,
-		Schedule: schedule,
-		RequestMethod: 1, // POST
-		RequestTimeout: 300,
+		Job: Job{
+			Enabled:         true,
+			Title:           "Koola10 Revenue Sprint",
+			URL:             baseURL + "/admin/run-scheduled-sprint",
+			SaveResponses:   true,
+			Schedule:        schedule,
+			RequestMethod:   1, // POST
+			RequestTimeout:  300,
+		},
 		Notification: JobNotificationSettings{
 			OnFailure:       true,
 			OnFailureCount:  1,
@@ -282,13 +284,15 @@ func (c *Client) CreateHealthCheckJob(timezone string) (int, error) {
 	}
 
 	job := DetailedJob{
-		Enabled:  true,
-		Title:    "Koola10 Health Check",
-		URL:      baseURL + "/health",
-		SaveResponses: true,
-		Schedule: buildSchedule("every-10-min", timezone),
-		RequestMethod: 0, // GET
-		RequestTimeout: 30,
+		Job: Job{
+			Enabled:         true,
+			Title:           "Koola10 Health Check",
+			URL:             baseURL + "/health",
+			SaveResponses:   true,
+			Schedule:        buildSchedule("every-10-min", timezone),
+			RequestMethod:   0, // GET
+			RequestTimeout:  30,
+		},
 		Notification: JobNotificationSettings{
 			OnFailure:      true,
 			OnFailureCount: 3,

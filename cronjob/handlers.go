@@ -132,13 +132,15 @@ func HandleCreateJob(w http.ResponseWriter, r *http.Request) {
 
 	schedule := buildSchedule(req.Frequency, req.Timezone)
 	job := DetailedJob{
-		Enabled:         true,
-		Title:           req.Title,
-		URL:             req.URL,
-		SaveResponses:   true,
-		Schedule:        schedule,
-		RequestMethod:   methodInt,
-		RequestTimeout:  300,
+		Job: Job{
+			Enabled:         true,
+			Title:           req.Title,
+			URL:             req.URL,
+			SaveResponses:   true,
+			Schedule:        schedule,
+			RequestMethod:   methodInt,
+			RequestTimeout:  300,
+		},
 		Auth:            JobAuth{},
 		Notification: JobNotificationSettings{
 			OnFailure:       true,
@@ -326,13 +328,15 @@ func HandleSetupDefaults(w http.ResponseWriter, r *http.Request) {
 		baseURL = "https://koola10-ai-agent.onrender.com"
 	}
 	vaultJob := DetailedJob{
-		Enabled:         true,
-		Title:           "Koola10 Daily Vault Report",
-		URL:             baseURL + "/vault/summary",
-		SaveResponses:   true,
-		Schedule:        buildSchedule("daily", "America/New_York"),
-		RequestMethod:   0, // GET
-		RequestTimeout:  30,
+		Job: Job{
+			Enabled:         true,
+			Title:           "Koola10 Daily Vault Report",
+			URL:             baseURL + "/vault/summary",
+			SaveResponses:   true,
+			Schedule:        buildSchedule("daily", "America/New_York"),
+			RequestMethod:   0, // GET
+			RequestTimeout:  30,
+		},
 		Notification: JobNotificationSettings{
 			OnFailure:       true,
 			OnFailureCount:  1,
