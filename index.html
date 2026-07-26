@@ -60,9 +60,20 @@
       ]
     }
     </script>
-</head>
-<body>
+</head>  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-</body>
+    <!-- Analytics tracking pixel -->
+    <script>
+      (function() {
+        var p = window.location.pathname + window.location.hash;
+        var ref = document.referrer || '';
+        fetch('/admin/analytics/track', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event: 'pageview', page: p, referrer: ref })
+        }).catch(function(){});
+      })();
+    </script>
+  </body>
 </html>

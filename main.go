@@ -498,6 +498,11 @@ func main() {
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 	os.MkdirAll(appsDir, 0755)
 
+	// Load email subscribers
+	if data, err := os.ReadFile(emailFilePath); err == nil {
+		json.Unmarshal(data, &emailSubscribers)
+	}
+
 	globalGraph.Load()
 	globalSemantic.Load()
 	globalLedger.Load()
@@ -705,6 +710,12 @@ func main() {
 
 	// Blog generation endpoint
 	r.Post("/blog/generate", corsMiddleware(handleBlogGenerate))
+	r.Post("/admin/email/signup", corsMiddleware(handleEmailSignup))
+	r.Post("/admin/content/syndicate", corsMiddleware(handleContentSyndicate))
+	r.Post("/admin/affiliate/create", corsMiddleware(handleCreateAffiliate))
+	r.Get("/admin/affiliate/stats", corsMiddleware(handleAffiliateStats))
+	r.Post("/admin/analytics/track", corsMiddleware(handleAnalyticsTrack))
+	r.Get("/admin/analytics/dashboard", corsMiddleware(handleAnalyticsDashboard))
 
 	r.Post("/studio/lore", corsMiddleware(handleStudioLore))
 	r.Post("/studio/style", corsMiddleware(handleStudioStyle))
@@ -1014,6 +1025,273 @@ func handleCapitalDeploy(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Studio Handlers ---
+
+// ── Email Capture ────────────────────────────────────────
+var (
+	emailSubscribers   []EmailSubscriber
+	emailMu            sync.Mutex
+	emailFilePath      = "./data/emails.json"
+)
+
+type EmailSubscriber struct {
+	Email     string `json:"email"`
+	Source    string `json:"source"`
+	Referrer  string `json:"referrer"`
+	CreatedAt string `json:"created_at"`
+	Status    string `json:"status"` // "active", "unsubscribed"
+}
+
+func handleEmailSignup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Source   string `json:"source"`
+		Referrer string `json:"referrer"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	if req.Email == "" || !strings.Contains(req.Email, "@") {
+		http.Error(w, `{"error":"valid email required"}`, http.StatusBadRequest)
+		return
+	}
+
+	emailMu.Lock()
+	defer emailMu.Unlock()
+
+	// Check if already subscribed
+	for _, sub := range emailSubscribers {
+		if sub.Email == req.Email {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"message": "already_subscribed"})
+			return
+		}
+	}
+
+	sub := EmailSubscriber{
+		Email:     req.Email,
+		Source:    req.Source,
+		Referrer:  req.Referrer,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Status:    "active",
+	}
+	emailSubscribers = append(emailSubscribers, sub)
+
+	// Persist to disk
+	data, _ := json.Marshal(emailSubscribers)
+	os.WriteFile(emailFilePath, data, 0644)
+
+	// Log the signup
+	log.Printf("[EmailCapture] New subscriber: %s (source: %s)", req.Email, req.Source)
+	AddAuditEntry("email_signup", map[string]interface{}{
+		"email":   req.Email,
+		"source":  req.Source,
+		"time":    sub.CreatedAt,
+	})
+
+	// Track lead in revenue ledger
+	globalLedger.RecordCost("leadgen", "email_signup", 0.01, fmt.Sprintf("Email signup: %s", req.Email))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "subscribed", "email": req.Email})
+}
+
+// ── Content Syndication ─────────────────────────────────
+type SyndicationRequest struct {
+	Platform string `json:"platform"` // "medium", "devto", "hashnode"
+	Title    string `json:"title"`
+	Content  string `json:"content"`
+	Tags     string `json:"tags"`
+}
+
+func handleContentSyndicate(w http.ResponseWriter, r *http.Request) {
+	var req SyndicationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Store syndication job
+	log.Printf("[ContentSyndication] Queuing %s post: %s", req.Platform, req.Title)
+
+	// Return the syndication URLs based on platform
+	var syndicateURL string
+	switch req.Platform {
+	case "medium":
+		syndicateURL = "https://medium.com/new-story"
+	case "devto":
+		syndicateURL = "https://dev.to/new"
+	case "hashnode":
+		syndicateURL = "https://hashnode.com/create"
+	default:
+		syndicateURL = "https://medium.com/new-story"
+	}
+
+	AddAuditEntry("content_syndication", map[string]interface{}{
+		"platform": req.Platform,
+		"title":    req.Title,
+		"time":     time.Now().UTC().Format(time.RFC3339),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "queued",
+		"platform":      req.Platform,
+		"title":         req.Title,
+		"syndicate_url": syndicateURL,
+		"message":       fmt.Sprintf("Post queued for %s. Visit %s to publish.", req.Platform, syndicateURL),
+	})
+}
+
+// ── Affiliate System ─────────────────────────────────────
+type Affiliate struct {
+	Code        string             `json:"code"`
+	Email       string             `json:"email"`
+	Name        string             `json:"name"`
+	Commission  float64            `json:"commission"` // percentage
+	Referrals   int                `json:"referrals"`
+	Conversions int                `json:"conversions"`
+	Revenue     float64            `json:"revenue"`
+	Earned      float64            `json:"earned"`
+	CreatedAt   string             `json:"created_at"`
+}
+
+var (
+	affiliates    []Affiliate
+	affiliateMu   sync.Mutex
+	affiliatePath = "./data/affiliates.json"
+)
+
+func init() {
+	// Load existing affiliates
+	if data, err := os.ReadFile(affiliatePath); err == nil {
+		json.Unmarshal(data, &affiliates)
+	}
+}
+
+func handleCreateAffiliate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+		Name  string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Generate unique affiliate code
+	code := "K10-" + strings.ToUpper(req.Name[:min(4, len(req.Name))]) + fmt.Sprintf("%04d", len(affiliates)+1)
+
+	affiliateMu.Lock()
+	aff := Affiliate{
+		Code:       code,
+		Email:      req.Email,
+		Name:       req.Name,
+		Commission: 15.0, // 15% default
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	affiliates = append(affiliates, aff)
+	data, _ := json.Marshal(affiliates)
+	os.WriteFile(affiliatePath, data, 0644)
+	affiliateMu.Unlock()
+
+	log.Printf("[Affiliate] Created: %s (%s) — %s", aff.Name, aff.Email, aff.Code)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(aff)
+}
+
+func handleAffiliateStats(w http.ResponseWriter, r *http.Request) {
+	affiliateMu.Lock()
+	defer affiliateMu.Unlock()
+
+	totalReferrals := 0
+	totalRevenue := 0.0
+	totalPayout := 0.0
+	for _, a := range affiliates {
+		totalReferrals += a.Referrals
+		totalRevenue += a.Revenue
+		totalPayout += a.Earned
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_affiliates": len(affiliates),
+		"total_referrals":  totalReferrals,
+		"total_revenue":    totalRevenue,
+		"total_payout":     totalPayout,
+		"affiliates":       affiliates,
+	})
+}
+
+// ── Analytics ────────────────────────────────────────────
+type AnalyticsEvent struct {
+	Event     string `json:"event"`
+	Page      string `json:"page"`
+	Referrer  string `json:"referrer"`
+	UserAgent string `json:"user_agent"`
+	IP        string `json:"ip"`
+	Timestamp string `json:"timestamp"`
+}
+
+var (
+	analyticsEvents []AnalyticsEvent
+	analyticsMu     sync.Mutex
+	analyticsPath   = "./data/analytics.jsonl"
+)
+
+func handleAnalyticsTrack(w http.ResponseWriter, r *http.Request) {
+	var event AnalyticsEvent
+	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		event.Event = "pageview"
+	}
+
+	event.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	event.IP = r.RemoteAddr
+	event.UserAgent = r.UserAgent()
+
+	analyticsMu.Lock()
+	analyticsEvents = append(analyticsEvents, event)
+	// Write to JSONL file
+	line, _ := json.Marshal(event)
+	f, _ := os.OpenFile(analyticsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if f != nil {
+		f.Write(line)
+		f.Write([]byte("\n"))
+		f.Close()
+	}
+	analyticsMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "tracked"})
+}
+
+func handleAnalyticsDashboard(w http.ResponseWriter, r *http.Request) {
+	analyticsMu.Lock()
+	defer analyticsMu.Unlock()
+
+	pageviews := 0
+	signups := 0
+	pageCounts := make(map[string]int)
+	for _, e := range analyticsEvents {
+		if e.Event == "pageview" {
+			pageviews++
+			pageCounts[e.Page]++
+		}
+		if e.Event == "signup" {
+			signups++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_pageviews": pageviews,
+		"total_signups":   signups,
+		"pages":           pageCounts,
+		"events":          analyticsEvents[len(analyticsEvents)-min(100, len(analyticsEvents)):],
+	})
+}
 
 // handleBlogGenerate creates a blog post using DeepSeek
 func handleBlogGenerate(w http.ResponseWriter, r *http.Request) {

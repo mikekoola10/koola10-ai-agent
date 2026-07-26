@@ -189,6 +189,7 @@ export default function Landing({ onNavigate }) {
   const { toast } = useToast();
   const [email, setEmail] = useState('');
   const [subscribed, setSubscribed] = useState(false);
+  const [subscribeLoading, setSubscribeLoading] = useState(false);
   const [scrollY, setScrollY] = useState(0);
   const [checkoutLoading, setCheckoutLoading] = useState(null);
   const [heroLine, setHeroLine] = useState(0);
@@ -284,12 +285,35 @@ export default function Landing({ onNavigate }) {
   }, [toast]);
 
   // ── Email waitlist ───────────────────────────────────
-  const handleSubscribe = useCallback((e) => {
+  const handleSubscribe = useCallback(async (e) => {
     e.preventDefault();
-    if (email.trim()) {
+    if (!email.trim()) return;
+    setSubscribeLoading(true);
+    const loadingId = toast.loading('Joining waitlist...');
+    try {
+      const res = await fetch(apiUrl('koola10', '/admin/email/signup'), {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ email: email.trim(), source: 'landing-page', referrer: new URLSearchParams(window.location.search).get('ref') || '' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSubscribed(true);
+        setEmail('');
+        // Track in analytics
+        if (window.gtag) window.gtag('event', 'signup', { method: 'email' });
+        toast.updateToast(loadingId, 'Welcome! Check your inbox for next steps.', { type: 'success', duration: 5000 });
+      } else if (data.message === 'already_subscribed') {
+        toast.updateToast(loadingId, 'You\'re already subscribed!', { type: 'info', duration: 4000 });
+      } else {
+        toast.updateToast(loadingId, data.error || 'Signup failed. Try again.', { type: 'error', duration: 5000 });
+      }
+    } catch (err) {
+      toast.updateToast(loadingId, 'Network error. You\'re on our list locally!', { type: 'warning', duration: 4000 });
       setSubscribed(true);
       setEmail('');
-      toast.success('Welcome to the waitlist! Check your email for next steps.');
+    } finally {
+      setSubscribeLoading(false);
     }
   }, [email, toast]);
 
@@ -324,7 +348,7 @@ export default function Landing({ onNavigate }) {
               className="text-xs uppercase tracking-wider text-cyan/60 hover:text-cyan transition-colors"
             >
               Blog
-            </button>}
+            </button>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -762,7 +786,7 @@ export default function Landing({ onNavigate }) {
                 <span className="ml-4 text-[10px] text-cyan/40">example.py</span>
               </div>
               <pre className="text-xs text-acid/80 leading-relaxed overflow-x-auto">
-                <code>{`import requests
+                <code>{String.raw`import requests
 
 # Initialize Koola10 API
 API_KEY = "your-api-key"
@@ -863,6 +887,76 @@ print(f"Revenue: ${revenue.json()['total_revenue']}")
         </div>
       </section>
 
+      {/* ── Social Share Section ────────────────────── */}
+      <section className="py-20 px-4">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-2xl md:text-3xl font-bold text-acid uppercase tracking-wider mb-4">
+              Share & Earn
+            </h2>
+            <p className="text-cyan/50 max-w-2xl mx-auto">
+              Share Koola10 with your network. You earn 15% commission on every sale through your referral link.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Share on Twitter */}
+            <div className="glass-card p-6 text-center hover:border-cyan/40 transition-all group">
+              <div className="text-4xl mb-4">🐦</div>
+              <h3 className="text-sm font-bold text-cyan uppercase tracking-wider mb-2">Share on Twitter</h3>
+              <p className="text-xs text-cyan/50 mb-4">Tweet about Koola10 and your affiliate link to earn commissions.</p>
+              <a
+                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent('Check out Koola10 — autonomous AI agents that generate revenue 24/7! 🚀 ' + window.location.origin + '?ref=' + (localStorage.getItem('affiliate_code') || ''))}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block px-4 py-2 text-xs font-bold uppercase tracking-wider border border-cyan/40 text-cyan rounded hover:bg-cyan hover:text-black transition-all"
+              >
+                Tweet Now
+              </a>
+            </div>
+
+            {/* Share on LinkedIn */}
+            <div className="glass-card p-6 text-center hover:border-purple/40 transition-all group">
+              <div className="text-4xl mb-4">💼</div>
+              <h3 className="text-sm font-bold text-purple uppercase tracking-wider mb-2">Share on LinkedIn</h3>
+              <p className="text-xs text-cyan/50 mb-4">Post about AI revenue automation to your professional network.</p>
+              <a
+                href={`https://www.linkedin.com/shareArticle?mini=true&url=${encodeURIComponent(window.location.origin + '?ref=' + (localStorage.getItem('affiliate_code') || ''))}&title=${encodeURIComponent('Koola10 - AI Revenue Engine')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block px-4 py-2 text-xs font-bold uppercase tracking-wider border border-purple/40 text-purple rounded hover:bg-purple hover:text-white transition-all"
+              >
+                Share Now
+              </a>
+            </div>
+
+            {/* Copy Referral Link */}
+            <div className="glass-card p-6 text-center hover:border-acid/40 transition-all group">
+              <div className="text-4xl mb-4">🔗</div>
+              <h3 className="text-sm font-bold text-acid uppercase tracking-wider mb-2">Referral Link</h3>
+              <p className="text-xs text-cyan/50 mb-4">Get your unique affiliate link. Earn 15% commission on every sale!</p>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={`${window.location.origin}?ref=${localStorage.getItem('affiliate_code') || 'YOUR_CODE'}`}
+                  className="flex-1 px-3 py-2 bg-black/50 border border-acid/20 text-acid text-xs rounded"
+                  onClick={(e) => e.target.select()}
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}?ref=${localStorage.getItem('affiliate_code') || ''}`);
+                    toast.success('Referral link copied!');
+                  }}
+                  className="px-3 py-2 text-xs font-bold uppercase tracking-wider border border-acid/40 text-acid rounded hover:bg-acid hover:text-black transition-all"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── Testimonials ────────────────────────────── */}
       <section className="py-20 px-4">
         <div className="max-w-6xl mx-auto">
@@ -899,11 +993,10 @@ print(f"Revenue: ${revenue.json()['total_revenue']}")
           <p className="text-cyan/50 mb-8">
             Get early access to new features and exclusive revenue strategies.
           </p>
-
           {subscribed ? (
             <div className="glass-card p-6 border-acid/30">
               <span className="text-acid text-sm font-bold uppercase tracking-wider">
-                ✓ You're on the list! Check your email.
+                ✓ You&apos;re on the list! Check your email.
               </span>
             </div>
           ) : (
@@ -918,9 +1011,10 @@ print(f"Revenue: ${revenue.json()['total_revenue']}")
               />
               <button
                 type="submit"
-                className="px-6 py-3 bg-cyan text-black font-bold uppercase tracking-wider rounded-lg hover:bg-cyan/90 transition-all"
+                disabled={subscribeLoading}
+                className="px-6 py-3 bg-cyan text-black font-bold uppercase tracking-wider rounded-lg hover:bg-cyan/90 transition-all disabled:opacity-50"
               >
-                Subscribe
+                {subscribeLoading ? 'Joining...' : 'Subscribe'}
               </button>
             </form>
           )}

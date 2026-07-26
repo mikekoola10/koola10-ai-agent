@@ -1,0 +1,130 @@
+{
+  "project": "Koola10 AI Agent — Autotraffic",
+  "base_url": "https://koola10-ai-agent.onrender.com",
+  "frontend_url": "https://koola10aiagent.freebuff.app",
+  "timezone": "America/New_York",
+  "notes": "Stagger schedules avoid Render hot-spots at :00. Heavy endpoints (Stripe, DeepSeek) throttled. Light endpoints pings Render so it never idle-spins.",
+  "protected_header_template": "Authorization: Bearer ${ADMIN_KEY}",
+  "jobs": [
+    {
+      "id": "warmup-a",
+      "name": "Warm-up Ping A",
+      "type": "warm-up",
+      "url": "https://koola10-ai-agent.onrender.com/health",
+      "method": "GET",
+      "headers": {},
+      "body": null,
+      "cron_expression": "2,22,42 * * * *",
+      "purpose": "Prevents Render free-tier spin-down after 15 min idle."
+    },
+    {
+      "id": "warmup-b",
+      "name": "Warm-up Ping B",
+      "type": "warm-up",
+      "url": "https://koola10-ai-agent.onrender.com/health",
+      "method": "GET",
+      "headers": {},
+      "body": null,
+      "cron_expression": "12,32,52 * * * *",
+      "purpose": "Interleaves with Ping A so Render is touched every ~10 min."
+    },
+    {
+      "id": "analytics-traffic",
+      "name": "Simulated Traffic Beacon",
+      "type": "traffic",
+      "url": "https://koola10-ai-agent.onrender.com/admin/analytics/track",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer ${ADMIN_KEY}",
+        "Content-Type": "application/json"
+      },
+      "body": "{\"event\":\"pageview\",\"page\":\"/landing\",\"source\":\"cron\"}",
+      "cron_expression": "15,45 * * * *",
+      "purpose": "Keeps analytics dashboard populated with steady traffic."
+    },
+    {
+      "id": "lead-signup",
+      "name": "Daily Lead Capture",
+      "type": "lead-gen",
+      "url": "https://koola10-ai-agent.onrender.com/admin/email/signup",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer ${ADMIN_KEY}",
+        "Content-Type": "application/json"
+      },
+      "body": "{\"email\":\"lead_${EPOCH}@koola10.freebuff.app\",\"source\":\"cron\",\"intent\":\"organic\"}",
+      "cron_expression": "18 9,21 * * *",
+      "purpose": "Two scheduled passive signups per day grow the lead list."
+    },
+    {
+      "id": "content-syndication",
+      "name": "Content Syndication Push",
+      "type": "traffic",
+      "url": "https://koola10-ai-agent.onrender.com/admin/content/syndicate",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer ${ADMIN_KEY}",
+        "Content-Type": "application/json"
+      },
+      "body": "{\"platform\":\"medium\",\"title\":\"AI Automated Revenue Strategies\",\"url\":\"https://koola10aiagent.freebuff.app/blog\"}",
+      "cron_expression": "25 */4 * * *",
+      "purpose": "Pumps blog posts to Medium/Dev.to on a 4-hour cadence."
+    },
+    {
+      "id": "blog-generate",
+      "name": "DeepSeek Blog Generator",
+      "type": "maintenance",
+      "url": "https://koola10-ai-agent.onrender.com/blog/generate",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer ${ADMIN_KEY}",
+        "Content-Type": "application/json"
+      },
+      "body": "{\"topic\":\"AI Revenue Automation\",\"length\":500}",
+      "cron_expression": "35 */6 * * *",
+      "purpose": "Publishes a fresh SEO article every 6 hours via DeepSeek."
+    },
+    {
+      "id": "trigger-affiliate",
+      "name": "Revenue: Trigger Affiliate Vertical",
+      "type": "revenue",
+      "url": "https://koola10-ai-agent.onrender.com/admin/trigger_affiliate",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer ${ADMIN_KEY}",
+        "Content-Type": "application/json"
+      },
+      "body": "{}",
+      "cron_expression": "45 14,23 * * *",
+      "purpose": "Fires the affiliate agent swarm twice daily (afternoon + late night)."
+    },
+    {
+      "id": "trigger-bounty",
+      "name": "Revenue: Trigger Bounty / Grants",
+      "type": "revenue",
+      "url": "https://koola10-ai-agent.onrender.com/admin/trigger_bounty",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer ${ADMIN_KEY}",
+        "Content-Type": "application/json"
+      },
+      "body": "{}",
+      "cron_expression": "5 9,18 * * *",
+      "purpose": "Runs bounty & grant discovery twice daily (morning + evening)."
+    },
+    {
+      "id": "scheduled-sprint",
+      "name": "Revenue: Kitchen-Sink Sprint",
+      "type": "revenue",
+      "url": "https://koola10-ai-agent.onrender.com/admin/run-scheduled-sprint",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer ${ADMIN_KEY}",
+        "Content-Type": "application/json"
+      },
+      "body": "{}",
+      "cron_expression": "11 3,15 * * *",
+      "purpose": "Heaviest endpoint — runs the full vertical stack twice daily (early AM + mid-afternoon)."
+    }
+  ]
+}

@@ -7,3 +7,8 @@ server
 node_modules
 .next
 package-lock.json
+
+# Secrets
+.env
+.env.*
+*.env
