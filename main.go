@@ -443,17 +443,29 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// authMiddleware enforces the admin key but accepts BOTH the canonical env name
+// (ADMIN_API_KEY) and the legacy Render name (ADMIN_KEY). It also accepts the
+// key under three header shapes so existing clients don't break:
+//   - X-Admin-API-Key: <key>
+//   - X-Admin-Key:     <key>
+//   - Authorization: Bearer <key>
+// If neither env var is set, requests pass with a warning (dev mode).
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		apiKey := os.Getenv("ADMIN_API_KEY")
 		if apiKey == "" {
-			// If not set, allow for development but log warning
-			log.Println("WARNING: ADMIN_API_KEY not set")
+			apiKey = os.Getenv("ADMIN_KEY")
+		}
+		if apiKey == "" {
+			log.Println("WARNING: ADMIN_API_KEY (nor ADMIN_KEY fallback) not set; allowing request")
 			next(w, r)
 			return
 		}
 
 		providedKey := r.Header.Get("X-Admin-API-Key")
+		if providedKey == "" {
+			providedKey = r.Header.Get("X-Admin-Key")
+		}
 		if providedKey == "" {
 			authHeader := r.Header.Get("Authorization")
 			if strings.HasPrefix(authHeader, "Bearer ") {
@@ -851,6 +863,8 @@ func handleScheduledSprint(w http.ResponseWriter, r *http.Request) {
 		sprintReq, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/admin/run-full-sprint", nil)
 		sprintReq.Header.Set("Content-Type", "application/json")
 		if adminKey := os.Getenv("ADMIN_API_KEY"); adminKey != "" {
+			sprintReq.Header.Set("Authorization", "Bearer "+adminKey)
+		} else if adminKey := os.Getenv("ADMIN_KEY"); adminKey != "" {
 			sprintReq.Header.Set("Authorization", "Bearer "+adminKey)
 		}
 
