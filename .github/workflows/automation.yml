@@ -40,16 +40,16 @@ jobs:
           LINKEDIN_TOKEN: ${{ secrets.LINKEDIN_TOKEN }}
           LINKEDIN_PERSON_ID: ${{ secrets.LINKEDIN_PERSON_ID }}
 
-      - name: Run bounty scan
+      - name: Run bounty scan + generate PRs
         run: |
-          python3 cron-jobs/automation/bounty_scanner.py --min-bounty 500 --json > bounty_results.json
+          python3 cron-jobs/automation/bounty_scanner.py --min-bounty 200 --unassigned --generate-pr --json > bounty_results.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Commit report
+      - name: Commit reports
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add report.md bounty_results.json
+          git add report.md bounty_results.json /tmp/koola10-bounties/
           git diff --staged --quiet || git commit -m "📊 Automation report $(date +'%Y-%m-%d %H:%M UTC')"
           git push
