@@ -24,7 +24,7 @@ SCANNERS = {
     "bounty": {
         "name": "Bounty Scanner",
         "class": BountyScanner,
-        "kwargs": {"min_bounty": 200},
+        "kwargs": {"min_bounty": 200, "unassigned_only": True},
     },
     "competitor": {
         "name": "Competitor Monitor",
@@ -169,6 +169,14 @@ def main():
                         help="Specific scanners to run (default: all)")
     parser.add_argument("--report", type=str, nargs="?", const="",
                         help="Generate markdown report (optional path)")
+    parser.add_argument("--claim", action="store_true",
+                        help="Auto-claim top unclaimed bounty")
+    parser.add_argument("--generate-pr", action="store_true",
+                        help="Generate PR description for top bounty")
+    parser.add_argument("--scaffold", action="store_true",
+                        help="Generate starter code for top bounty")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Show what would be done without doing it")
     parser.add_argument("--json", action="store_true",
                         help="Output as JSON")
     args = parser.parse_args()
@@ -182,6 +190,44 @@ def main():
     if args.report is not None:
         filepath = args.report if args.report else None
         orch.generate_report(filepath)
+
+    # Auto-claim / PR generation / scaffold
+    if (args.claim or args.generate_pr or args.scaffold) and "bounty" in (args.scanners or list(SCANNERS.keys())):
+        from bounty_scanner import BountyClaimer, PRGenerator, SolutionScaffolder
+        from pathlib import Path
+
+        bounty_data = orch.results.get("bounty", {}).get("data", [])
+        unclaimed = [b for b in bounty_data if not b.get("assignee") and b.get("amount", 0) >= 200]
+
+        if not unclaimed:
+            print("\n  ⚠️  No unclaimed bounties to act on.")
+        else:
+            target = unclaimed[0]
+            amt = f"${target['amount']:,.0f}" if target.get('amount') else 'TBD'
+            print(f"\n  🎯 Target: {target['repo']}#{target['number']} ({amt})")
+
+            if args.generate_pr:
+                from bounty_scanner import PRGenerator, WORK_DIR
+                pr_desc = PRGenerator.generate(target)
+                pr_file = WORK_DIR / f"pr-{target['number']}.md"
+                WORK_DIR.mkdir(parents=True, exist_ok=True)
+                pr_file.write_text(pr_desc)
+                print(f"  📄 PR description saved to: {pr_file}")
+                print(f"\n{pr_desc}")
+
+            if args.claim:
+                from bounty_scanner import BountyClaimer, WORK_DIR
+                claimer = BountyClaimer(dry_run=args.dry_run)
+                claimer.claim_issue(target)
+                if args.scaffold:
+                    claimer.setup_repo(target)
+                    SolutionScaffolder.scaffold(target, WORK_DIR / str(target["number"]))
+
+            if args.scaffold and not args.claim:
+                from bounty_scanner import SolutionScaffolder, WORK_DIR
+                scaffold_dir = WORK_DIR / str(target["number"])
+                SolutionScaffolder.scaffold(target, scaffold_dir)
+                print(f"  📂 Scaffolded in: {scaffold_dir}")
 
 
 if __name__ == "__main__":
