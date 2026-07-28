@@ -805,7 +805,7 @@ revenue = requests.get(
     headers={"Authorization": f"Bearer {API_KEY}"}
 )
 
-print(f"Revenue: ${revenue.json()['total_revenue']}")
+print(f"Revenue: \${revenue.json()['total_revenue']}")
 # Revenue: $1,905.54`}</code>
               </pre>
             </div>

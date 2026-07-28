@@ -12,3 +12,4 @@ package-lock.json
 .env
 .env.*
 *.env
+.git-backup/
