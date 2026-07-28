@@ -1,0 +1,55 @@
+name: Koola10 Automation
+
+on:
+  schedule:
+    # Run 4 times daily: 00:00, 06:00, 12:00, 18:00 UTC
+    - cron: '0 0 * * *'
+    - cron: '0 6 * * *'
+    - cron: '0 12 * * *'
+    - cron: '0 18 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  automation:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          # Add any future dependencies here
+
+      - name: Run full automation scan
+        run: |
+          python3 cron-jobs/automation/orchestrator.py --report report.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MEDIUM_TOKEN: ${{ secrets.MEDIUM_TOKEN }}
+          DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
+          LINKEDIN_TOKEN: ${{ secrets.LINKEDIN_TOKEN }}
+          LINKEDIN_PERSON_ID: ${{ secrets.LINKEDIN_PERSON_ID }}
+
+      - name: Run bounty scan
+        run: |
+          python3 cron-jobs/automation/bounty_scanner.py --min-bounty 500 --json > bounty_results.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit report
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add report.md bounty_results.json
+          git diff --staged --quiet || git commit -m "📊 Automation report $(date +'%Y-%m-%d %H:%M UTC')"
+          git push

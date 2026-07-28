@@ -1,0 +1,52 @@
+{
+  "https://vercel.com/pricing": {
+    "hash": "e644ee69875c8d91c0a88bdf709aa505",
+    "length": 1232288,
+    "last_check": "2026-07-28T20:06:37.623136+00:00"
+  },
+  "https://www.netlify.com/pricing/": {
+    "hash": "92b46e43c9fd3a63d2b0f9312f24136f",
+    "length": 227673,
+    "last_check": "2026-07-28T20:06:38.254979+00:00"
+  },
+  "https://railway.com/pricing": {
+    "hash": "aea2d9944b6d447e7a82fc9cb7639279",
+    "length": 473428,
+    "last_check": "2026-07-28T20:06:38.769204+00:00"
+  },
+  "https://fly.io/docs/about/pricing/": {
+    "hash": "56da89aa0dfa169c822378ae106d6a0c",
+    "length": 608325,
+    "last_check": "2026-07-28T20:06:39.344560+00:00"
+  },
+  "https://render.com/pricing": {
+    "hash": "480f08bd0590c7d0eddbc8df1ad994bd",
+    "length": 642907,
+    "last_check": "2026-07-28T20:06:40.186900+00:00"
+  },
+  "https://supabase.com/pricing": {
+    "hash": "89ad344132a7a7ca9e0ead17c31102f1",
+    "length": 366433,
+    "last_check": "2026-07-28T20:06:40.778134+00:00"
+  },
+  "https://planetscale.com/pricing": {
+    "hash": "6e528674eb2ef4bd47663674d9d66a86",
+    "length": 99005,
+    "last_check": "2026-07-28T20:06:41.500885+00:00"
+  },
+  "https://firebase.google.com/pricing": {
+    "hash": "373b2d436793d1dc9913e3415dacaf53",
+    "length": 699477,
+    "last_check": "2026-07-28T20:06:42.520899+00:00"
+  },
+  "https://pages.cloudflare.com/": {
+    "hash": "db24deb201cfb589e6553b0044da3148",
+    "length": 107024,
+    "last_check": "2026-07-28T20:06:43.063043+00:00"
+  },
+  "https://replit.com/pricing": {
+    "hash": "ea21bb130daf0fd67cd5b897969b9b14",
+    "length": 269302,
+    "last_check": "2026-07-28T20:06:43.824727+00:00"
+  }
+}
