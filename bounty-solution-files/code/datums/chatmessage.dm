@@ -207,9 +207,8 @@
 	// Override color if a static RS effect color is active
 	if(rs_effect)
 		var/rs_color = rs_effect.get_color_string()
-	if(rs_color)
+		if(rs_color)
 			tgt_color = rs_color
-
 
 	// Approximate text height
 	var/complete_text = "<span style='color: [tgt_color]'><span class='center [extra_classes.Join(" ")]'>[owner.apply_message_emphasis(text)]</span></span>"

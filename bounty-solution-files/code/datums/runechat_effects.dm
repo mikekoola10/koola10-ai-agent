@@ -18,7 +18,8 @@
  *
  * Handles parsing effect tags from messages and applying
  * visual effects to chat message images.
- *//datum/runechat_effect
+ */
+/datum/runechat_effect
 	/// The effect type constant
 	var/effect_type = RSEFFECT_NONE
 	/// The effect name for parsing (e.g. "red", "rainbow")
@@ -73,7 +74,7 @@ GLOBAL_LIST_INIT(runechat_effect_map, list(
 		var/effect_name = effect_regex.group[1]
 		var/effect_path = GLOB.runechat_effect_map[effect_name]
 		if(effect_path)
-			var/cleaned_text = copytext_char(message, effect_regex.index + length(effect_regex.match) + 1)
+			var/cleaned_text = copytext_char(message, effect_regex.next)
 			return list("text" = cleaned_text, "effect" = new effect_path)
 	return list("text" = message, "effect" = null)
 
@@ -137,7 +138,7 @@ GLOBAL_LIST_INIT(runechat_effect_map, list(
 	// Flash between two colors using BYOND animate
 	var/flash_count = min(lifespan / RSEFFECT_FLASH_SPEED, RSEFFECT_MAX_LOOPS)
 	var/loop_time = lifespan / flash_count
-	animate(message_image, color = flash_color1, time = loop_time / 2, flags = ANIMATION_REPEAT)
+	animate(message_image, color = flash_color1, time = loop_time / 2, loop = -1)
 	animate(color = flash_color2, time = loop_time / 2)
 
 /datum/runechat_effect/flash/flash1
