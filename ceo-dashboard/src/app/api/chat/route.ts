@@ -1,11 +1,11 @@
 /**
  * POST /api/chat
  * Vercel AI SDK streaming chat endpoint backing the Nova Assistant widget.
- * Requires a signed-in user (session cookie) and an OpenAI API key.
+ * Requires a signed-in user (session cookie) and a DeepSeek API key.
  */
 
 import { NextResponse } from "next/server";
-import { createOpenAI } from "@ai-sdk/openai";
+import { createDeepSeek } from "@ai-sdk/deepseek";
 import {
   convertToModelMessages,
   createUIMessageStreamResponse,
@@ -17,10 +17,10 @@ import { createClient } from "@/lib/supabase/server";
 
 export const maxDuration = 30;
 
-function getOpenAIKey() {
+function getDeepSeekKey() {
   return (
-    process.env.OPENAI_API_KEY ||
-    process.env.MIKEKOOLA10ORG_OPENAI_API_KEY ||
+    process.env.DEEPSEEK_API_KEY ||
+    process.env.MIKEKOOLA10ORG_DEEPSEEK_API_KEY ||
     ""
   );
 }
@@ -41,12 +41,12 @@ Rules:
 - Keep answers tight unless the operator asks for depth.`;
 
 export async function POST(req: Request) {
-  const apiKey = getOpenAIKey();
+  const apiKey = getDeepSeekKey();
   if (!apiKey) {
     return NextResponse.json(
       {
         error:
-          "AI is not configured. Add OPENAI_API_KEY (or MIKEKOOLA10ORG_OPENAI_API_KEY) to the project keys.",
+          "AI is not configured. Add DEEPSEEK_API_KEY (or MIKEKOOLA10ORG_DEEPSEEK_API_KEY) to the project keys.",
       },
       { status: 500 },
     );
@@ -67,9 +67,9 @@ export async function POST(req: Request) {
 
   const { messages }: { messages: UIMessage[] } = await req.json();
 
-  const openai = createOpenAI({ apiKey });
+  const deepseek = createDeepSeek({ apiKey });
   const result = streamText({
-    model: openai("gpt-4o-mini"),
+    model: deepseek("deepseek-chat"),
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(messages),
   });
