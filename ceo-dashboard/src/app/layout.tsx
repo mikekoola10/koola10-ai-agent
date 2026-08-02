@@ -1,16 +1,21 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "./providers";
 
-const geistSans = Geist({
+// Self-hosted Geist (latin variable subsets) so the production build has zero
+// network dependency on Google Fonts — next/font/google fetches at build time
+// and can intermittently fail on Vercel's build machines.
+const geistSans = localFont({
+  src: "./fonts/GeistSans.woff2",
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  weight: "100 900",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/GeistMono.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: "100 900",
 });
 
 export const metadata: Metadata = {
