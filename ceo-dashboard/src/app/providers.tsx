@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 type AuthState = {
   user: User | null;
@@ -47,11 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const supabase = useMemo(() => createClient(), []);
-  const authConfigured = Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-      process.env.MIKEKOOLA10ORG_SUPABASE_URL ||
-      process.env.SUPABASE_URL,
-  );
+  const authConfigured = isSupabaseConfigured();
 
   const refreshProStatus = useCallback(async () => {
     if (!user) {
