@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nova — Autonomous AI Agent</title>
+<style>
+  :root {
+    --bg: #0a0a0c;
+    --panel: #111115;
+    --panel-2: #17171c;
+    --card: #141419;
+    --border: rgba(255, 255, 255, 0.07);
+    --border-2: rgba(255, 255, 255, 0.13);
+    --text: #f4f4f7;
+    --muted: #9a9aa5;
+    --faint: #686873;
+    --accent: #7c6cff;
+    --accent-2: #b388ff;
+    --cyan: #46e0c8;
+    --amber: #f5b04c;
+    --red: #ff6b6b;
+    --green: #4ade80;
+    --radius: 14px;
+    --radius-lg: 22px;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+    --serif: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  [hidden] { display: none !important; }
+  button { font-family: inherit; cursor: pointer; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  #app { display: flex; height: 100vh; }
+
+  /* ---------- Sidebar ---------- */
+  #sidebar {
+    width: 264px; flex: none; background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    padding: 16px 12px 10px; gap: 2px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 4px 8px 14px; }
+  .logo {
+    width: 30px; height: 30px; border-radius: 9px; font-size: 16px;
+    background: linear-gradient(135deg, var(--accent), #9d6bff);
+    display: grid; place-items: center;
+    box-shadow: 0 4px 16px rgba(124,108,255,.45);
+  }
+  .brand b { font-size: 16px; letter-spacing: -.2px; }
+  .brand span { color: var(--faint); font-size: 11px; font-weight: 500; margin-top: 3px; }
+
+  .btn-new {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; padding: 11px; margin-bottom: 8px;
+    border: none; border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent), #9d6bff);
+    color: #fff; font-size: 14px; font-weight: 600;
+    transition: filter .15s, transform .1s;
+  }
+  .btn-new:hover { filter: brightness(1.12); }
+  .btn-new:active { transform: scale(.98); }
+  .btn-new svg { width: 15px; height: 15px; }
+
+  .nav-item {
+    display: flex; align-items: center; gap: 11px;
+    width: 100%; padding: 9px 10px;
+    background: transparent; border: none; border-radius: 10px;
+    color: var(--muted); font-size: 13.5px; text-align: left;
+    transition: background .12s, color .12s;
+  }
+  .nav-item:hover { background: var(--panel-2); color: var(--text); }
+  .nav-item.active { background: var(--panel-2); color: var(--text); }
+  .nav-item svg { width: 16px; height: 16px; flex: none; opacity: .85; }
+
+  .side-section { margin-top: 14px; display: flex; flex-direction: column; gap: 2px; }
+  .side-section.grow { flex: 1; min-height: 0; }
+  .side-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 10px 6px;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--faint);
+  }
+  .side-head button { background: none; border: none; color: var(--faint); font-size: 14px; line-height: 1; }
+  .side-head button:hover { color: var(--text); }
+  .side-row {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 8px 10px; background: transparent; border: none; border-radius: 10px;
+    color: var(--muted); font-size: 13px; text-align: left;
+  }
+  .side-row:hover { background: var(--panel-2); color: var(--text); }
+
+  #task-list { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
+  .task-item {
+    display: flex; align-items: center; gap: 9px; width: 100%;
+    padding: 8px 10px; background: transparent; border: none; border-left: 2px solid transparent;
+    border-radius: 8px; color: var(--muted); font-size: 12.5px; text-align: left;
+    transition: background .12s;
+  }
+  .task-item:hover { background: var(--panel-2); }
+  .task-item.active { border-left-color: var(--accent); background: var(--panel-2); color: var(--text); }
+  .task-item .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); }
+  .dot.running { background: var(--amber); box-shadow: 0 0 8px var(--amber); animation: pulse 1.2s ease-in-out infinite; }
+  .dot.done { background: var(--green); }
+  .dot.error { background: var(--red); }
+  @keyframes pulse { 50% { opacity: .4; } }
+
+  .side-foot { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .connectors { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 8px 10px; }
+  .conn-chip {
+    font-size: 10.5px; padding: 3px 8px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--faint); background: var(--panel-2);
+  }
+  .conn-chip.on { color: #c9ffe9; border-color: rgba(70,224,200,.35); background: rgba(70,224,200,.07); }
+  .profile { display: flex; align-items: center; gap: 10px; padding: 8px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; flex: none;
+    background: linear-gradient(135deg, #6d5cff, #ff6bc7);
+    display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  }
+  .profile .name { font-size: 12.5px; font-weight: 600; }
+  .profile .role { font-size: 11px; color: var(--faint); }
+  .profile button { margin-left: auto; background: none; border: none; color: var(--faint); font-size: 15px; }
+  .profile button:hover { color: var(--text); }
+
+  /* ---------- Main ---------- */
+  #main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 13px 22px; border-bottom: 1px solid var(--border); flex: none;
+  }
+  .pill {
+    font-size: 12px; padding: 5px 12px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--muted); background: var(--panel);
+  }
+  .pill.brain { color: #e9e6ff; border-color: rgba(124,108,255,.4); background: rgba(124,108,255,.08); }
+  .pill.mock { color: var(--amber); border-color: rgba(245,176,76,.35); background: rgba(245,176,76,.07); }
+  .spacer { flex: 1; }
+  .icon-btn {
+    width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--muted); font-size: 15px; display: grid; place-items: center;
+    transition: color .12s, border-color .12s;
+  }
+  .icon-btn:hover { color: var(--text); border-color: var(--border-2); }
+
+  /* ---------- Hero ---------- */
+  #hero-view {
+    flex: 1; overflow-y: auto;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: 40px 24px;
+  }
+  h1 {
+    font-family: var(--serif); font-size: 46px; font-weight: 500;
+    letter-spacing: -.5px; text-align: center;
+  }
+  .sub { color: var(--muted); font-size: 15px; text-align: center; max-width: 460px; line-height: 1.5; }
+
+  .input-shell {
+    width: min(680px, 100%); margin-top: 8px;
+    background: var(--card);
+    border: 1px solid var(--border-2); border-radius: var(--radius-lg);
+    box-shadow: 0 18px 50px rgba(0,0,0,.45);
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .input-shell:focus-within {
+    border-color: rgba(124,108,255,.6);
+    box-shadow: 0 18px 60px rgba(0,0,0,.5), 0 0 0 4px rgba(124,108,255,.13);
+  }
+  .input-row { display: flex; align-items: flex-end; gap: 8px; padding: 14px 14px 8px; }
+  textarea {
+    flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+    color: var(--text); font: inherit; font-size: 15px; line-height: 1.55;
+    resize: none; max-height: 170px; padding: 6px 2px;
+  }
+  textarea::placeholder { color: var(--faint); }
+  .circle-btn {
+    width: 34px; height: 34px; border-radius: 50%; flex: none;
+    border: 1px solid var(--border-2); background: var(--panel-2);
+    color: var(--muted); font-size: 17px; line-height: 1;
+    transition: color .12s, border-color .12s;
+  }
+  .circle-btn:hover { color: var(--text); border-color: var(--border-2); }
+  select {
+    flex: none; background: var(--panel-2); border: 1px solid var(--border-2);
+    border-radius: 10px; color: var(--text); font-size: 12px; padding: 7px 8px; outline: none;
+  }
+  .send-btn {
+    width: 38px; height: 38px; border-radius: 12px; border: none; flex: none;
+    background: linear-gradient(135deg, var(--accent), #9d6bff); color: #fff;
+    display: grid; place-items: center; font-size: 15px;
+    transition: filter .15s, transform .1s, opacity .15s;
+  }
+  .send-btn:hover:not(:disabled) { filter: brightness(1.12); }
+  .send-btn:active:not(:disabled) { transform: scale(.94); }
+  .send-btn:disabled { opacity: .4; cursor: default; }
+  .send-btn svg { width: 16px; height: 16px; }
+  .input-tools { display: flex; align-items: center; gap: 6px; padding: 0 16px 12px; }
+  .mini-chip { font-size: 11px; color: var(--faint); border: 1px solid var(--border); padding: 2px 9px; border-radius: 999px; }
+
+  .pills { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
+  .pill-btn {
+    display: flex; align-items: center; gap: 7px;
+    padding: 8px 14px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--muted); font-size: 12.5px;
+    transition: border-color .15s, color .15s, transform .1s;
+  }
+  .pill-btn:hover { color: var(--text); border-color: rgba(124,108,255,.5); transform: translateY(-1px); }
+  .pill-btn svg { width: 14px; height: 14px; }
+
+  .feature-card {
+    margin-top: 14px; width: min(680px, 100%);
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    padding: 20px 22px; border-radius: var(--radius-lg);
+    background: linear-gradient(180deg, rgba(124,108,255,.12), transparent 65%), var(--card);
+    border: 1px solid var(--border); overflow: hidden; position: relative;
+  }
+  .feature-card h3 { font-size: 15px; font-weight: 650; max-width: 340px; line-height: 1.35; }
+  .feature-card p { color: var(--muted); font-size: 13px; margin-top: 5px; max-width: 340px; }
+  .orbit { position: relative; width: 118px; height: 118px; flex: none; }
+  .orbit .ring { position: absolute; inset: 0; animation: spin 30s linear infinite; }
+  .orbit .o {
+    position: absolute; left: 50%; top: 50%;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--panel-2); border: 1px solid var(--border-2);
+    display: grid; place-items: center; font-size: 14px;
+    transform: rotate(var(--a)) translateX(48px) rotate(calc(-1 * var(--a)));
+  }
+  .orbit .core {
+    position: absolute; inset: 40px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--accent-2), var(--accent) 75%);
+    box-shadow: 0 0 26px rgba(124,108,255,.6);
+    display: grid; place-items: center; font-size: 15px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------- Task view ---------- */
+  #task-view { flex: 1; overflow-y: auto; padding: 26px 30px 60px; }
+  .task-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+  .task-head h2 { font-size: 21px; font-weight: 650; line-height: 1.35; max-width: 72%; }
+  .task-meta { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  }
+  .status-badge.queued { color: var(--muted); background: var(--panel-2); }
+  .status-badge.running { color: var(--amber); background: rgba(245,176,76,.1); }
+  .status-badge.done { color: var(--green); background: rgba(74,222,128,.1); }
+  .status-badge.error { color: var(--red); background: rgba(255,107,107,.1); }
+
+  #task-steps { display: flex; flex-direction: column; gap: 9px; margin-top: 22px; }
+  .step { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px 16px; }
+  .step-head { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  .step-num {
+    flex: none; font-size: 11px; font-weight: 700; color: #e9e6ff;
+    background: rgba(124,108,255,.16); border: 1px solid rgba(124,108,255,.35);
+    padding: 2px 9px; border-radius: 999px;
+  }
+  .step-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .tool-chip { font-size: 10.5px; color: var(--cyan); background: rgba(70,224,200,.07); border: 1px solid rgba(70,224,200,.22); padding: 2px 8px; border-radius: 999px; }
+  .tool-row { display: flex; gap: 9px; align-items: baseline; padding: 9px 0 0 8px; font-size: 12.5px; color: var(--muted); }
+  .tool-name { color: var(--cyan); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; white-space: nowrap; flex: none; }
+  .tool-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+  #task-report { margin-top: 20px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px 24px; }
+  #task-report h2 { font-size: 15px; margin: 16px 0 6px; }
+  #task-report h3 { font-size: 14px; margin: 14px 0 5px; }
+  #task-report p { font-size: 14px; line-height: 1.75; color: #d9d9e0; margin: 6px 0; }
+  #task-report li { margin: 3px 0 3px 22px; font-size: 14px; line-height: 1.65; color: #d9d9e0; }
+  #task-report pre { background: #0d0d11; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.6; color: #c9e9e0; margin: 8px 0; }
+  #task-report code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .empty-state { color: var(--faint); font-size: 13px; text-align: center; padding: 40px 0; }
+
+  /* ---------- Toast ---------- */
+  .toast {
+    position: fixed; bottom: 22px; right: 22px; z-index: 60;
+    background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 12px;
+    padding: 12px 16px; font-size: 13px; max-width: 340px;
+    box-shadow: 0 14px 44px rgba(0,0,0,.55);
+    animation: toast-in .2s ease;
+  }
+  .toast.error { border-color: rgba(255,107,107,.4); color: #ffc9c9; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+  @media (max-width: 760px) {
+    #sidebar { width: 66px; padding: 12px 8px; }
+    .brand b, .brand span, .nav-item span, .side-head, .side-row span, .task-item .t, .profile .name, .profile .role, .connectors { display: none; }
+    .btn-new { font-size: 0; padding: 11px 0; }
+    .nav-item { justify-content: center; padding: 10px 0; }
+    .task-item { justify-content: center; padding: 8px 0; }
+    h1 { font-size: 32px; }
+    .feature-card { flex-direction: column; text-align: center; }
+    .orbit { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ============ Sidebar ============ -->
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="logo">⚡</div>
+      <div><b>Nova</b> <span>v0.4</span></div>
+    </div>
+
+    <button class="btn-new" id="new-task-btn" title="New task">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      <span>New task</span>
+    </button>
+
+    <nav>
+      <button class="nav-item active" data-view="agent">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4m0 0h4M12 4H8"/><circle cx="12" cy="14" r="2"/></svg>
+        <span>Agent</span>
+      </button>
+      <button class="nav-item" data-view="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+        <span>Search</span>
+      </button>
+      <button class="nav-item" data-view="plugins">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m13.5-6.5-2 2m-7 7-2 2m11 0-2-2m-7-7-2-2"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>Plugins</span>
+      </button>
+      <button class="nav-item" data-view="scheduled">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <span>Scheduled</span>
+      </button>
+      <button class="nav-item" data-view="library">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13Z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>
+        <span>Library</span>
+      </button>
+    </nav>
+
+    <div class="side-section">
+      <div class="side-head">Projects <button title="New project">+</button></div>
+      <button class="side-row">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        <span>New project</span>
+      </button>
+    </div>
+
+    <div class="side-section grow">
+      <div class="side-head">Tasks</div>
+      <div id="task-list"></div>
+    </div>
+
+    <div class="side-foot">
+      <div class="connectors" id="connectors"></div>
+      <div class="profile">
+        <div class="avatar">K</div>
+        <div><div class="name">koola10</div><div class="role">Agent workspace</div></div>
+        <button title="Settings">⚙</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ Main ============ -->
+  <main id="main">
+    <div class="topbar">
+      <span class="pill brain" id="brain-pill">DeepSeek · deepseek-chat</span>
+      <span class="pill mock" id="mock-pill" hidden>🎭 mock mode — no API key</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" id="settings-btn" title="Settings">⚙</button>
+    </div>
+
+    <!-- Hero -->
+    <section id="hero-view">
+      <h1>What can Nova do for you?</h1>
+      <p class="sub">Assign a task — Nova plans, uses its tools, iterates, and delivers a finished result.</p>
+
+      <div class="input-shell">
+        <div class="input-row">
+          <button class="circle-btn" id="attach-btn" title="Attach">+</button>
+          <textarea id="task-input" rows="1" placeholder="Assign a task or type / for more"></textarea>
+          <select id="provider-select" title="Model provider">
+            <option value="deepseek">DeepSeek</option>
+            <option value="anthropic">Claude (Anthropic)</option>
+            <option value="openai">GPT (OpenAI)</option>
+          </select>
+          <button class="send-btn" id="send-btn" title="Run task" disabled>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 11.5 21 3l-8.5 18-2.2-7.3L3 11.5Zm8 4 8.3-9.6L11.7 14l-.7.5.7-.5Z"/></svg>
+          </button>
+        </div>
+        <div class="input-tools">
+          <span class="mini-chip" id="tools-chip">🧰 loading tools…</span>
+          <span class="mini-chip">⚙ max 25 steps</span>
+        </div>
+      </div>
+
+      <div class="pills" id="pills"></div>
+
+      <div class="feature-card">
+        <div>
+          <h3>Your autonomous agent for business</h3>
+          <p>GitHub, Stripe, Clawdbot, browser &amp; computer use — one brain, nine tools.</p>
+        </div>
+        <div class="orbit">
+          <div class="ring">
+            <span class="o" style="--a:0deg">🐙</span>
+            <span class="o" style="--a:72deg">💳</span>
+            <span class="o" style="--a:144deg">🤖</span>
+            <span class="o" style="--a:216deg">🌐</span>
+            <span class="o" style="--a:288deg">🖥️</span>
+          </div>
+          <div class="core">⚡</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Task view -->
+    <section id="task-view" hidden>
+      <div class="task-head">
+        <div>
+          <h2 id="task-title"></h2>
+          <div class="task-meta">
+            <span class="status-badge queued" id="task-status">queued</span>
+            <span id="task-provider"></span>
+            <span id="task-timer"></span>
+            <span id="task-stats"></span>
+          </div>
+        </div>
+        <button class="btn-new" id="back-btn" style="width:auto;padding:9px 16px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          New task
+        </button>
+      </div>
+      <div id="task-steps"><div class="empty-state" id="steps-empty">Task queued — Nova is warming up…</div></div>
+      <div id="task-report" hidden></div>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+/* ------------------------------------------------------------------ */
+/* Nova UI — vanilla JS client (no frameworks, no build step)          */
+/* ------------------------------------------------------------------ */
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtDur = (ms) => { if (!ms && ms !== 0) return ""; if (ms < 1000) return ms + "ms"; const s = ms / 1000; if (s < 60) return s.toFixed(1) + "s"; return Math.floor(s / 60) + "m " + Math.round(s % 60) + "s"; };
+const fmtClock = (ts) => { const d = new Date(ts); return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); };
+
+const state = { health: null, tasks: [], activeId: null, pollTimer: null, timerTimer: null, taskStart: null };
+
+async function jget(url) { const r = await fetch(url); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return r.json(); }
+async function jpost(url, body) { const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return r.json(); }
+
+function toast(msg, isError = false) {
+  const t = document.createElement("div");
+  t.className = "toast" + (isError ? " error" : "");
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3600);
+}
+
+/* ---------------- Health + connectors ---------------- */
+async function loadHealth() {
+  try {
+    state.health = await jget("/api/health");
+    $("#brain-pill").textContent = (state.health.provider[0].toUpperCase() + state.health.provider.slice(1)) + " · " + state.health.model;
+    $("#mock-pill").hidden = !state.health.mock;
+    $("#tools-chip").textContent = "🧰 " + state.health.tools + " tools";
+    const c = state.health.connectors;
+    const labels = [["🐙", "GitHub", c.github], ["💳", "Stripe", c.stripe], ["🤖", "Clawdbot", c.clawdbot], ["🌐", "Browser", c.browser], ["🖥️", "Computer", c.computer]];
+    $("#connectors").innerHTML = labels.map(([e, n, on]) => `<span class="conn-chip${on ? " on" : ""}">${e} ${n}</span>`).join("");
+  } catch { /* health endpoint is best-effort */ }
+}
+
+/* ---------------- Sidebar task list ---------------- */
+function renderTaskList() {
+  const box = $("#task-list");
+  if (!state.tasks.length) { box.innerHTML = `<div class="empty-state" style="padding:16px 0">No tasks yet</div>`; return; }
+  box.innerHTML = state.tasks.map((t) => `
+    <button class="task-item${t.id === state.activeId ? " active" : ""}" data-id="${esc(t.id)}" title="${esc(t.task)}">
+      <span class="dot ${t.status}"></span>
+      <span class="t">${esc(t.task.length > 34 ? t.task.slice(0, 34) + "…" : t.task)}</span>
+    </button>`).join("");
+  box.querySelectorAll(".task-item").forEach((btn) => btn.addEventListener("click", () => openTask(btn.dataset.id)));
+}
+
+async function loadTasks() {
+  try { state.tasks = await jget("/api/tasks"); } catch { return; }
+  renderTaskList();
+}
+
+/* ---------------- Task view ---------------- */
+function statusBadge(s) {
+  const label = s === "running" ? "running…" : s;
+  return `<span class="status-badge ${s}">${s === "running" ? "● " : ""}${label}</span>`;
+}
+
+function renderTaskView(t) {
+  $("#task-title").textContent = t.task;
+  $("#task-status").outerHTML = statusBadge(t.status);
+  $("#task-provider").textContent = `${t.provider[0].toUpperCase() + t.provider.slice(1)}${t.mock ? " (mock)" : ""}`;
+  $("#task-stats").textContent = t.status === "done" ? `· ${t.steps} steps · ${t.toolCalls} tool calls · ${fmtDur(t.durationMs)}` : "";
+
+  const stepsBox = $("#task-steps");
+  $("#steps-empty").hidden = t.steps.length > 0;
+  if (t.steps.length) {
+    stepsBox.innerHTML = t.steps.map((st) => `
+      <div class="step">
+        <div class="step-head">
+          <span class="step-num">STEP ${st.step}</span>
+          <span>${esc(st.toolNames.join(", "))}</span>
+          <span class="step-tools">${st.tools.map((tc) => `<span class="tool-chip">${esc(tc.name)}</span>`).join("")}</span>
+        </div>
+        ${st.tools.map((tc) => `<div class="tool-row"><span class="tool-name">${esc(tc.name)}</span><span class="tool-preview">${esc(tc.preview)}</span></div>`).join("")}
+      </div>`).join("");
+  }
+
+  const rep = $("#task-report");
+  if (t.status === "done" && t.report) {
+    rep.hidden = false;
+    rep.innerHTML = `<h2>Final report</h2>` + mdRender(t.report);
+  } else if (t.status === "error") {
+    rep.hidden = false;
+    rep.innerHTML = `<h2>Task failed</h2><p style="color:#ffc9c9">${esc(t.error || "unknown error")}</p>`;
+  } else {
+    rep.hidden = true;
+  }
+}
+
+function mdRender(text) {
+  const lines = String(text).split(/\r?\n/);
+  let html = "", inCode = false, inList = false;
+  const closeList = () => { if (inList) { html += "</ul>"; inList = false; } };
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    if (line.trim().startsWith("```")) {
+      closeList(); inCode = !inCode; html += inCode ? "<pre>" : "</pre>"; continue;
+    }
+    if (inCode) { html += esc(line) + "\n"; continue; }
+    if (/^#{1,3}\s/.test(line)) {
+      closeList();
+      const lvl = Math.min(line.match(/^#+/)[0].length + 1, 3);
+      html += `<h${lvl}>${esc(line.replace(/^#+\s*/, ""))}</h${lvl}>`;
+    } else if (/^\s*[-*]\s/.test(line) || /^\s*\d+\.\s/.test(line)) {
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += `<li>${esc(line.replace(/^\s*([-*]|\d+\.)\s*/, ""))}</li>`;
+    } else if (line.trim() === "") {
+      closeList();
+    } else {
+      closeList();
+      html += `<p>${esc(line)}</p>`;
+    }
+  }
+  closeList();
+  if (inCode) html += "</pre>";
+  return html;
+}
+
+/* ---------------- Polling ---------------- */
+async function pollTask() {
+  const id = state.activeId;
+  if (!id) return;
+  let t;
+  try { t = await jget("/api/tasks/" + id); } catch { return; }
+  if (t.status === "running" || t.status === "queued") {
+    const elapsed = Date.now() - (state.taskStart || t.createdAt);
+    $("#task-timer").textContent = "· " + fmtDur(elapsed);
+    $("#task-timer").style.color = "var(--amber)";
+  } else {
+    $("#task-timer").textContent = "· finished in " + fmtDur(t.durationMs);
+    $("#task-timer").style.color = "";
+    stopPolling();
+  }
+  renderTaskView(t);
+  // keep sidebar dot in sync
+  const item = state.tasks.find((x) => x.id === id);
+  if (item) { item.status = t.status; item.steps = t.steps.length; item.toolCalls = t.toolCalls; renderTaskList(); }
+}
+
+function startPolling() {
+  stopPolling();
+  state.pollTimer = setInterval(pollTask, 1000);
+}
+function stopPolling() {
+  if (state.pollTimer) clearInterval(state.pollTimer);
+  if (state.timerTimer) clearInterval(state.timerTimer);
+  state.pollTimer = state.timerTimer = null;
+}
+
+function openTask(id) {
+  state.activeId = id;
+  state.taskStart = null;
+  $("#hero-view").hidden = true;
+  $("#task-view").hidden = false;
+  renderTaskList();
+  loadTasks(); // ensure sidebar has it
+  startPolling();
+  pollTask();
+}
+
+function showHero() {
+  stopPolling();
+  state.activeId = null;
+  $("#task-view").hidden = true;
+  $("#hero-view").hidden = false;
+  loadTasks();
+}
+
+/* ---------------- Submit ---------------- */
+async function submitTask() {
+  const input = $("#task-input");
+  const task = input.value.trim();
+  if (!task) return;
+  const provider = $("#provider-select").value;
+  const send = $("#send-btn");
+  send.disabled = true;
+  try {
+    const created = await jpost("/api/tasks", { task, provider });
+    input.value = "";
+    input.style.height = "auto";
+    openTask(created.id);
+  } catch (err) {
+    toast(err.message, true);
+    send.disabled = false;
+  }
+}
+
+/* ---------------- Pills / samples ---------------- */
+const SAMPLES = [
+  { icon: "🖼️", label: "Create slides", task: "Create a pitch-deck outline for an AI agent startup: 8 slides with speaker notes, saved to output/slides.md" },
+  { icon: "🌐", label: "Build website", task: "Build a simple one-page landing site for the Nova agent in output/site/ using plain HTML/CSS/JS (no framework), plus a README" },
+  { icon: "💻", label: "Develop desktop apps", task: "Research the top 3 ways to turn a web app into a desktop app (Electron, Tauri, Neutralino). Compare them in output/desktop-compare.md" },
+  { icon: "🎨", label: "Design", task: "Design a color palette and typography system for a cyberpunk-themed SaaS dashboard. Save it to output/design-system.md" },
+  { icon: "🔎", label: "Research & report", task: "Research the top 5 AI agent frameworks of 2026 and compare them (cost, capabilities, ecosystem) in a report at output/frameworks.md" },
+  { icon: "➕", label: "More", task: "" },
+];
+function renderPills() {
+  $("#pills").innerHTML = SAMPLES.map((s) => `<button class="pill-btn" data-task="${esc(s.task)}">${s.icon} ${s.label}</button>`).join("");
+  $("#pills").querySelectorAll(".pill-btn").forEach((btn) => btn.addEventListener("click", () => {
+    const task = btn.dataset.task;
+    if (!task) { toast("More sample tasks coming soon — type your own above!"); return; }
+    $("#task-input").value = task;
+    $("#task-input").focus();
+    $("#send-btn").disabled = false;
+    autoGrow();
+  }));
+}
+
+/* ---------------- Wire up ---------------- */
+function autoGrow() {
+  const el = $("#task-input");
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 170) + "px";
+}
+
+function init() {
+  renderPills();
+  const input = $("#task-input");
+  input.addEventListener("input", () => { autoGrow(); $("#send-btn").disabled = !input.value.trim(); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitTask(); } });
+  $("#send-btn").addEventListener("click", submitTask);
+  $("#new-task-btn").addEventListener("click", showHero);
+  $("#back-btn").addEventListener("click", showHero);
+  $("#provider-select").addEventListener("change", (e) => {
+    const names = { deepseek: "DeepSeek", anthropic: "Claude", openai: "GPT" };
+    toast(`Provider: ${names[e.target.value]} (needs its API key in .env to run for real)`);
+  });
+  document.querySelectorAll(".nav-item").forEach((btn) => btn.addEventListener("click", () => {
+    document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    if (btn.dataset.view !== "agent") toast("Coming soon — this view ships in a later build.");
+  }));
+  $("#settings-btn").addEventListener("click", () => toast("Settings live in .env — see README and env.example."));
+  $("#attach-btn").addEventListener("click", () => toast("File attach is coming soon."));
+
+  loadHealth();
+  loadTasks();
+  setInterval(loadTasks, 6000);
+}
+
+init();
+</script>
+</body>
+</html>

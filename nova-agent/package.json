@@ -1,0 +1,57 @@
+{
+  "name": "koola10-nova-agent",
+  "version": "0.4.0",
+  "description": "Nova — a Manus-style autonomous AI agent. Give it an open-ended task; it plans, uses tools (shell, files, web), iterates, and delivers a finished result. Ships with a Manus-style web UI (nova-ui).",
+  "type": "module",
+  "license": "MIT",
+  "author": "mikekoola10",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mikekoola10/koola10-nova-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mikekoola10/koola10-nova-agent/issues"
+  },
+  "homepage": "https://github.com/mikekoola10/koola10-nova-agent#readme",
+  "main": "dist/index.js",
+  "bin": {
+    "nova": "./dist/index.js",
+    "nova-ui": "./dist/server.js"
+  },
+  "files": [
+    "dist",
+    "web",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "ui": "node dist/server.js",
+    "dev:ui": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx src/index.ts --mock \"explore the current directory and write a summary report\"",
+    "tools:browser": "npx playwright install chromium",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "autonomous",
+    "manus",
+    "deepseek",
+    "cli",
+    "tools",
+    "llm"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "playwright": "^1.49.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
