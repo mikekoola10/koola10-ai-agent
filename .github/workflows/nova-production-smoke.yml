@@ -1,0 +1,61 @@
+name: Nova production smoke test
+
+# Runs the Playwright end-to-end verification of the deployed Nova static
+# showcase site (https://koola10aiagent.freebuff.app/) after every push.
+# The job fails if the static demo flow breaks — title, hero, static-mode
+# banner, sample pills, the scripted agent-loop demo, the final report, the
+# connectors grid, and zero console errors are all asserted in
+# nova-agent/verify-live-site.cjs.
+#
+# Point it at a different deployed URL with the NOVA_PROD_URL variable.
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: nova-prod-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Live-site verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Nova deps (playwright)
+        working-directory: nova-agent
+        # npm install (not npm ci): the lockfile is gitignored.
+        run: npm install --no-audit --no-fund
+
+      - name: Ensure Playwright Chromium (fallback browser)
+        working-directory: nova-agent
+        run: npx playwright install chromium
+
+      - name: Verify live production site
+        working-directory: nova-agent
+        env:
+          NOVA_PROD_URL: https://koola10aiagent.freebuff.app/
+        run: node verify-live-site.cjs
+
+      - name: Upload verification screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-prod-verification
+          path: |
+            /tmp/nova-prod-task.png
+            /tmp/nova-prod-connectors.png
+          if-no-files-found: ignore
+          retention-days: 7
