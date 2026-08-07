@@ -1,0 +1,9 @@
+node_modules/
+dist/
+output/
+vault/
+jobs/*.local.json
+.env
+.env.local
+*.log
+.DS_Store

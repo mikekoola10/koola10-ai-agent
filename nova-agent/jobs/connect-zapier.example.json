@@ -1,0 +1,5 @@
+{
+  "name": "connect-zapier-webhook",
+  "description": "Collect a Zapier Catch Hook URL, store it in the encrypted vault, verify the connection, and email a confirmation.",
+  "task": "Complete the Zapier webhook setup end to end:\n1. Check the vault (vault tool, action list) for an entry named ZAPIER_WEBHOOK_URL.\n2. If it is missing, ask the user for the Zapier Catch Hook URL, then store it with the vault tool (action set, name=ZAPIER_WEBHOOK_URL).\n3. Verify the connection with the zapier tool (action ping) and report the HTTP status.\n4. If verification succeeded, trigger a confirmation email via the zapier tool (action trigger, payload { event: 'nova_connected', provider: 'zapier', status: 'ok' }).\n5. Summarize what was connected, where the credential is stored, and how to update it."
+}
