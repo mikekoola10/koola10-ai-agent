@@ -24,3 +24,46 @@ services:
         sync: false
       - key: ADMIN_API_KEY
         sync: false
+
+  # Real Nova agent (Node) — the live agent UI + API with all connectors.
+  # Freebuff hosting is static-only, so the agent server runs here on Render.
+  # Create it via Render dashboard -> New -> Blueprint (uses this repo/blueprint),
+  # then set the sync:false secrets in the service env (same values as Freebuff Keys).
+  - type: web
+    name: nova
+    runtime: node
+    repo: https://github.com/mikekoola10/koola10-ai-agent
+    branch: main
+    rootDir: nova-agent
+    buildCommand: npm install && npm run build
+    startCommand: node dist/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: COMPOSIO_API_KEY
+        sync: false
+      - key: COMPOSIO_USER_ID
+        value: nova-user
+      - key: ZAPIER_WEBHOOK_URL
+        sync: false
+      - key: N8N_WEBHOOK_URL
+        sync: false
+      - key: MAKE_WEBHOOK_URL
+        sync: false
+      - key: HUGGINGFACE_TOKEN
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: NOVA_CONNECTOR_CHECK_HOURS
+        value: "12"
+      - key: NOVA_DAILY_REPORT
+        value: "1"
+      - key: NOVA_DAILY_REPORT_TIME
+        value: "09:00"
+      - key: NOVA_REPORT_PROVIDER
+        value: zapier

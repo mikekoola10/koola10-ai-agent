@@ -7,10 +7,11 @@
     "doc": "docs"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "node nova-agent/dist/server.js",
     "build": "node scripts/build-nova-static.mjs",
     "build:dashboard": "vite build",
-    "preview": "vite preview"
+    "preview": "node nova-agent/dist/server.js",
+    "nova:ui": "node nova-agent/dist/server.js"
   },
   "repository": {
     "type": "git",
