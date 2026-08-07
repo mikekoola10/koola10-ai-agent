@@ -1,6 +1,7 @@
 services:
   - type: web
     name: koola10
+    plan: free
     runtime: docker
     repo: https://github.com/mikekoola10/koola10-ai-agent
     branch: main
@@ -31,6 +32,7 @@ services:
   # then set the sync:false secrets in the service env (same values as Freebuff Keys).
   - type: web
     name: nova
+    plan: free
     runtime: node
     repo: https://github.com/mikekoola10/koola10-ai-agent
     branch: main
