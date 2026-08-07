@@ -726,8 +726,8 @@ function demoRun(task) {
   $("#task-timer").textContent = "· " + fmtDur(0);
   $("#task-timer").style.color = "var(--amber)";
   const stepsBox = $("#task-steps");
-  stepsBox.innerHTML = "";
   $("#steps-empty").hidden = true;
+  stepsBox.innerHTML = "";
   $("#task-report").hidden = true;
   const t0 = Date.now();
   let i = 0;
@@ -785,7 +785,7 @@ async function loadTasks() {
 /* ---------------- Task view ---------------- */
 function statusBadge(s) {
   const label = s === "running" ? "running…" : s;
-  return `<span class="status-badge ${s}">${s === "running" ? "● " : ""}${label}</span>`;
+  return `<span class="status-badge ${s}" id="task-status">${s === "running" ? "● " : ""}${label}</span>`;
 }
 
 function renderTaskView(t) {
