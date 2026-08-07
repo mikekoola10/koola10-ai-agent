@@ -3,7 +3,7 @@
   "base_url": "https://koola10-ai-agent.onrender.com",
   "frontend_url": "https://koola10aiagent.freebuff.app",
   "timezone": "America/New_York",
-  "notes": "Stagger schedules avoid Render hot-spots at :00. Heavy endpoints (Stripe, DeepSeek) throttled. Light endpoints pings Render so it never idle-spins.",
+  "notes": "Stagger schedules avoid Render hot-spots at :00. Heavy endpoints (Stripe, DeepSeek) throttled. Light endpoints pings Render so it never idle-spins. The Nova static monitor (every 10 min, onFailure email alert) is the free uptime smoke test for the deployed frontend.",
   "protected_header_template": "Authorization: Bearer ${ADMIN_KEY}",
   "jobs": [
     {
@@ -125,6 +125,28 @@
       "body": "{}",
       "cron_expression": "11 3,15 * * *",
       "purpose": "Heaviest endpoint — runs the full vertical stack twice daily (early AM + mid-afternoon)."
+    },
+    {
+      "id": "nova-static-monitor",
+      "name": "Nova Production Smoke Monitor",
+      "type": "monitor",
+      "url": "https://koola10aiagent.freebuff.app/",
+      "method": "GET",
+      "headers": {},
+      "body": null,
+      "cron_expression": "7,17,27,37,47,57 * * * *",
+      "purpose": "Free uptime smoke test for the deployed Nova static UI. GETs the live site every 10 min (staggered, never on :00); setup.py enables onFailure email alerts so a non-200 page notifies you immediately."
+    },
+    {
+      "id": "render-backend-monitor",
+      "name": "Render Backend Health Monitor",
+      "type": "monitor",
+      "url": "https://koola10-ai-agent.onrender.com/health",
+      "method": "GET",
+      "headers": {},
+      "body": null,
+      "cron_expression": "9,19,29,39,49,59 * * * *",
+      "purpose": "Free uptime monitor for the Go backend (expects {\"status\":\"ok\"}). GETs /health every 10 min, offset from the Nova monitor so UI + API are checked every 5 min combined; onFailure email alert catches cold-start failures or an unhealthy backend. Also acts as an extra keep-alive between the warm-up pings."
     }
   ]
 }
