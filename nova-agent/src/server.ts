@@ -8,11 +8,13 @@
  *   POST /api/tasks          { task, provider? } -> { id, status }
  *   GET  /api/tasks          -> summaries, newest first
  *   GET  /api/tasks/:id      -> full task (steps, report, error, timings)
- *   GET  /api/health         -> runtime info (provider, model, mock, connectors)
+ *   GET  /api/health         -> runtime info (provider, model, mock, connectors, bounty sweep)
  *   GET  /api/connectors/verify   -> live ping of every configured connector
  *   GET  /api/connectors/status   -> last scheduled connector self-check
  *   GET  /api/scheduled/status    -> daily report + self-check schedule status
  *   POST /api/scheduled/report    -> send the Nova daily report email now
+ *   POST /api/sweep          -> launch the standing bounty sweep now (draft-only)
+ *   GET  /api/sweep/status   -> sweep schedule, scope (full vs limited) + last run
  *   GET  /api/vault               -> vault entry names (never values)
  *   POST /api/vault               -> { name, value } store an encrypted entry
  *   DELETE /api/vault/:name       -> remove an entry
@@ -178,6 +180,138 @@ function startDailyReporter(config: NovaConfig, tasks: Map<string, TaskRecord>) 
   return { active, provider, time: timeRaw, enabled, status, runNow, stop: () => timers.forEach((t) => clearTimeout(t)) };
 }
 
+/* ------------------------------------------------------------------ */
+/* Bounty sweep — standing order + scheduler                           */
+/* ------------------------------------------------------------------ */
+
+/** The canonical bounty sweep prompt, kept next to the server in prompts/. */
+function readSweepPrompt(): string {
+  try {
+    return readFileSync(new URL("../prompts/bounty-sweep.md", import.meta.url), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+/** Task text used for both the scheduled and manual sweep triggers. */
+export const SWEEP_TASK = (): string =>
+  "Read prompts/bounty-sweep.md (relative to the nova-agent project root) and execute the bounty sweep exactly as instructed. Reply with the path of the written review deck.";
+
+/** Current HH:MM in a fixed timezone (e.g. America/New_York). */
+function tzTime(tz: string, d: Date): { hh: string; mm: string } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: tz,
+  }).formatToParts(d);
+  const get = (type: string): string => parts.find((p) => p.type === type)?.value ?? "";
+  let hh = get("hour");
+  if (hh === "24") hh = "00";
+  return { hh, mm: get("minute") };
+}
+
+interface SweepStatus {
+  enabled: boolean;
+  times: string[];
+  tz: string;
+  promptAvailable: boolean;
+  fullScan: boolean;
+  repos: number;
+  lastRunAt: number;
+  lastOk: boolean | null;
+  lastDetail: string | null;
+  nextRunAt: number;
+}
+
+/**
+ * Scheduled bounty sweep. Fires the standing sweep at the configured local
+ * times (America/New_York by default) so the two-a-day automated run works
+ * without cron-job.org. Nova stays READ-ONLY against GitHub: it scans, ranks
+ * and drafts a human-review deck — it never posts or submits (see the prompt).
+ * Configure with NOVA_SWEEP_TIMES ("HH:MM,HH:MM", default "07:40,19:40"; set
+ * to "0" or empty to disable) and NOVA_SWEEP_TZ (default America/New_York).
+ */
+function startSweepScheduler(
+  config: NovaConfig,
+  launch: (task: string, provider: string, automated?: boolean) => TaskRecord,
+): { status(): SweepStatus; stop(): void } {
+  const raw = process.env.NOVA_SWEEP_TIMES;
+  const times = (raw === undefined || raw.trim() === "" || raw.trim() === "0"
+    ? "07:40,19:40"
+    : raw
+  )
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const enabled = times.length > 0;
+  const tz = process.env.NOVA_SWEEP_TZ || "America/New_York";
+  const prompt = readSweepPrompt();
+  const fullScan = config.githubToken !== "";
+  const repos = fullScan ? 28 : 10;
+
+  let lastRunAt = 0;
+  let lastOk: boolean | null = null;
+  let lastDetail: string | null = null;
+  let lastFiredKey = "";
+  let nextRunAt = 0;
+
+  const nextFire = (): number => {
+    const now = Date.now();
+    for (let i = 0; i < 60 * 26; i++) {
+      const { hh, mm } = tzTime(tz, new Date(now + i * 60_000));
+      if (times.includes(`${hh}:${mm}`)) return now + i * 60_000;
+    }
+    return 0;
+  };
+
+  const fire = (): void => {
+    if (!prompt) {
+      lastOk = false;
+      lastDetail = "prompts/bounty-sweep.md not found on this server";
+      return;
+    }
+    const { hh, mm } = tzTime(tz, new Date());
+    lastFiredKey = `${hh}:${mm}`;
+    lastRunAt = Date.now();
+    const rec = launch(SWEEP_TASK(), config.provider, true);
+    lastOk = true;
+    lastDetail = `task ${rec.id} launched (${repos}-repo ${fullScan ? "full" : "limited"} scan)`;
+  };
+
+  const tick = (): void => {
+    if (!enabled || !prompt) return;
+    const { hh, mm } = tzTime(tz, new Date());
+    const key = `${hh}:${mm}`;
+    if (times.includes(key) && key !== lastFiredKey) fire();
+    nextRunAt = nextFire();
+  };
+
+  const timers: Array<ReturnType<typeof setInterval>> = [];
+  if (enabled) {
+    nextRunAt = nextFire();
+    const timer = setInterval(tick, 60_000);
+    timers.push(timer);
+    if (typeof timer.unref === "function") timer.unref();
+  }
+
+  return {
+    status: (): SweepStatus => ({
+      enabled,
+      times,
+      tz,
+      promptAvailable: prompt !== "",
+      fullScan,
+      repos,
+      lastRunAt,
+      lastOk,
+      lastDetail,
+      nextRunAt,
+    }),
+    stop: () => timers.forEach((t) => clearInterval(t)),
+  };
+}
+
 interface TaskStep {
   step: number;
   toolNames: string[];
@@ -198,11 +332,14 @@ interface TaskRecord {
   error?: string;
   report?: string;
   durationMs?: number;
+  /** True when the task was launched by an automated trigger (bounty sweep scheduler / cron). */
+  automated?: boolean;
 }
 
 interface NovaServer extends Server {
   connectorMonitor?: ReturnType<typeof startConnectorMonitor>;
   dailyReporter?: ReturnType<typeof startDailyReporter>;
+  sweepScheduler?: ReturnType<typeof startSweepScheduler>;
 }
 
 /** Starts the Nova UI server on 0.0.0.0. Returns the http.Server (already listening). */
@@ -274,9 +411,10 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
     updatedAt: t.updatedAt,
     steps: t.steps.length,
     toolCalls: t.toolCalls,
+    automated: t.automated === true,
   });
 
-  const launchTask = (task: string, provider: string): TaskRecord => {
+  const launchTask = (task: string, provider: string, automated = false): TaskRecord => {
     // Re-resolve config for the requested provider so the UI's provider picker
     // really switches brains (reads the right key/model from env).
     const runConfig = provider === config.provider ? { ...config } : loadConfig({ cwd: config.cwd, provider: provider as NovaConfig["provider"] });
@@ -293,6 +431,7 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
       updatedAt: Date.now(),
       steps: [],
       toolCalls: 0,
+      automated,
     };
     tasks.set(rec.id, rec);
 
@@ -335,6 +474,7 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
 
       if (req.method === "GET" && pathname === "/api/health") {
         const tools = buildToolDefinitions();
+        const sweepStatus = sweep.status();
         sendJson(res, 200, {
           ok: true,
           version: VERSION,
@@ -359,6 +499,11 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
             lastOk: monitor.status().ok,
             checkIntervalHours: monitor.status().intervalHours,
           },
+          bounty: {
+            fullScan: config.githubToken !== "",
+            repos: config.githubToken !== "" ? 28 : 10,
+            sweep: sweepStatus,
+          },
           dailyReport: reporter.status(),
         });
         return;
@@ -375,7 +520,7 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
       }
 
       if (req.method === "GET" && pathname === "/api/scheduled/status") {
-        sendJson(res, 200, { dailyReport: reporter.status(), connectorCheck: monitor.status() });
+        sendJson(res, 200, { dailyReport: reporter.status(), connectorCheck: monitor.status(), sweep: sweep.status() });
         return;
       }
 
@@ -386,6 +531,34 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           /* ignore malformed body */
         }
         sendJson(res, 200, await reporter.runNow());
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/sweep/status") {
+        sendJson(res, 200, sweep.status());
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/sweep") {
+        try {
+          await readBody(req); // drain any body; not used
+        } catch {
+          /* ignore malformed body */
+        }
+        const prompt = readSweepPrompt();
+        if (!prompt) {
+          sendJson(res, 500, { error: "prompts/bounty-sweep.md not found on this server" });
+          return;
+        }
+        const rec = launchTask(SWEEP_TASK(), config.provider, true);
+        const fullScan = config.githubToken !== "";
+        sendJson(res, 201, {
+          id: rec.id,
+          status: rec.status,
+          fullScan,
+          repos: fullScan ? 28 : 10,
+          note: "Nova drafts only — a human reviews the deck before anything is posted.",
+        });
         return;
       }
 
@@ -492,8 +665,10 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
 
   const monitor = startConnectorMonitor(config);
   const reporter = startDailyReporter(config, tasks);
+  const sweep = startSweepScheduler(config, (task, provider, automated) => launchTask(task, provider, automated));
   server.connectorMonitor = monitor;
   server.dailyReporter = reporter;
+  server.sweepScheduler = sweep;
   return server;
 }
 
@@ -514,12 +689,14 @@ function main(): void {
   console.log(`⚡ Nova UI v${VERSION}`);
   console.log(`   brain:    ${cfg.provider}/${cfg.model}${autoMock ? "  (no API key — mock mode)" : ""}`);
   console.log(`   url:      http://0.0.0.0:${shown}`);
-  console.log(`   api:      GET /api/health · GET /api/tasks · POST /api/tasks · GET /api/connectors/verify · GET /api/scheduled/status`);
+  console.log(`   api:      GET /api/health · GET /api/tasks · POST /api/tasks · POST /api/sweep · GET /api/sweep/status · GET /api/connectors/verify · GET /api/scheduled/status`);
 
   const monitorStatus = server.connectorMonitor ? server.connectorMonitor.status() : null;
   console.log(`   monitor:  connector self-check every ${monitorStatus && monitorStatus.intervalHours > 0 ? `${monitorStatus.intervalHours}h` : "disabled"} (NOVA_CONNECTOR_CHECK_HOURS)`);
   const reportStatus = server.dailyReporter ? server.dailyReporter.status() : null;
   console.log(`   report:   daily Nova report ${reportStatus && reportStatus.active ? `→ ${reportStatus.provider} at ${reportStatus.time}` : "disabled (no webhook target)"} (NOVA_DAILY_REPORT / NOVA_DAILY_REPORT_TIME)`);
+  const sweepStatus = server.sweepScheduler ? server.sweepScheduler.status() : null;
+  console.log(`   sweep:    bounty sweep ${sweepStatus && sweepStatus.enabled ? `scheduled ${sweepStatus.times.join(", ")} ${sweepStatus.tz} · ${sweepStatus.repos}-repo ${sweepStatus.fullScan ? "FULL" : "limited"} scan` : "disabled"} (NOVA_SWEEP_TIMES / GITHUB_TOKEN)`);
   const vaultStatus = vaultInfo();
   console.log(`   vault:    ${vaultStatus.count} encrypted entr${vaultStatus.count === 1 ? "y" : "ies"} (${vaultStatus.dir}${vaultStatus.usingEnvKey ? " · NOVA_VAULT_KEY" : ""})`);
   console.log(`   ctrl-c to stop`);

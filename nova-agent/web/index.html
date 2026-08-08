@@ -209,6 +209,28 @@
   .mini-chip { font-size: 11px; color: var(--faint); border: 1px solid var(--border); padding: 2px 9px; border-radius: 999px; }
 
   .pills { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
+  .sweep-bar { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; margin-top: 10px; }
+  .sweep-scope {
+    font-size: 11px; color: var(--amber); border: 1px solid rgba(245,176,76,.3);
+    background: rgba(245,176,76,.06); padding: 4px 12px; border-radius: 999px;
+  }
+  .sweep-scope.full { color: var(--green); border-color: rgba(74,222,128,.35); background: rgba(74,222,128,.07); }
+  .sweep-btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 14px; border-radius: 999px;
+    background: linear-gradient(135deg, rgba(124,108,255,.18), rgba(157,107,255,.12));
+    border: 1px solid rgba(124,108,255,.5); color: #e9e6ff; font-size: 12.5px; font-weight: 600;
+    transition: filter .15s, transform .1s;
+  }
+  .sweep-btn:hover:not(:disabled) { filter: brightness(1.15); }
+  .sweep-btn:active:not(:disabled) { transform: scale(.97); }
+  .sweep-btn:disabled { opacity: .5; cursor: default; }
+  .review-banner {
+    margin-top: 16px; padding: 12px 16px; border-radius: 12px;
+    border: 1px solid rgba(245,176,76,.4); background: rgba(245,176,76,.08);
+    color: #ffd9a0; font-size: 12.5px; line-height: 1.55;
+  }
+  .review-banner b { color: var(--amber); }
   .pill-btn {
     display: flex; align-items: center; gap: 7px;
     padding: 8px 14px; border-radius: 999px;
@@ -473,6 +495,44 @@
 
       <div class="pills" id="pills"></div>
 
+      <div class="sweep-bar" id="sweep-bar" hidden>
+        <span class="sweep-scope" id="sweep-scope"></span>
+        <span class="mini-chip" id="sweep-next"></span>
+        <button class="sweep-btn" id="sweep-btn" title="Run the standing bounty sweep now — Nova scans, ranks and drafts a human-review deck. It never posts or submits anything.">🎯 Run bounty sweep</button>
+      </div>
+      <script>
+      /* Sweep button wiring — deferred until after the main script has parsed so
+         its helpers (STATIC, SAMPLES, toast, jpost, openTask, refreshSweepStatus,
+         autoGrow) are all initialized. Also keeps the sweep status line fresh. */
+      setTimeout(() => {
+        const btn = document.getElementById("sweep-btn");
+        if (!btn) return;
+        btn.addEventListener("click", async () => {
+          if (typeof STATIC !== "undefined" && STATIC) {
+            const pill = SAMPLES.find((s) => s.label === "Bounty hunt");
+            if (pill) { document.getElementById("task-input").value = pill.task; document.getElementById("task-input").focus(); document.getElementById("send-btn").disabled = false; autoGrow(); }
+            toast("Live sweep needs the Nova server — queued the sweep task in the input below.");
+            return;
+          }
+          const old = btn.innerHTML;
+          btn.disabled = true;
+          btn.textContent = "🎯 Launching sweep…";
+          try {
+            const created = await jpost("/api/sweep", {});
+            openTask(created.id);
+            toast(created.fullScan ? "Bounty sweep started — full 28-repo scan 🎯" : "Bounty sweep started — limited 10-repo scan. Add GITHUB_TOKEN for the full sweep.");
+            refreshSweepStatus();
+          } catch (err) {
+            toast("Sweep failed to start: " + err.message, true);
+          } finally {
+            btn.disabled = false;
+            btn.innerHTML = old;
+          }
+        });
+        setInterval(refreshSweepStatus, 30000);
+      }, 0);
+      </script>
+
       <div class="feature-card">
         <div>
           <h3>Your autonomous agent for business</h3>
@@ -514,6 +574,7 @@
           </button>
         </div>
       </div>
+      <div id="task-banner"></div>
       <div id="task-steps"><div class="empty-state" id="steps-empty">Task queued — Nova is warming up…</div></div>
       <div id="task-report" hidden></div>
     </section>
@@ -623,7 +684,29 @@ async function loadHealth() {
     const c = state.health.connectors;
     const labels = [["🐙", "GitHub", c.github], ["💳", "Stripe", c.stripe], ["🤖", "Clawdbot", c.clawdbot], ["🧩", "Composio", c.composio], ["⚡", "Zapier", c.zapier], ["🔀", "n8n", c.n8n], ["🛠️", "Make", c.make], ["🤗", "Hugging Face", c.huggingface], ["🌐", "Browser", c.browser], ["🖥️", "Computer", c.computer]];
     $("#connectors").innerHTML = labels.map(([e, n, on]) => `<span class="conn-chip${on ? " on" : ""}">${e} ${n}</span>`).join("");
+    const b = state.health.bounty;
+    if (b && b.sweep) {
+      const scope = $("#sweep-scope");
+      scope.classList.toggle("full", !!b.fullScan);
+      scope.textContent = b.fullScan
+        ? `🎯 Bounty sweep: FULL ${b.repos}-repo scan · GitHub token active`
+        : `🎯 Bounty sweep: LIMITED ${b.repos}-repo scan — add GITHUB_TOKEN (env or vault) for the full sweep`;
+      $("#sweep-bar").hidden = false;
+      refreshSweepStatus();
+    }
   } catch { enableStaticMode(); }
+}
+
+/* ---------------- Bounty sweep ---------------- */
+async function refreshSweepStatus() {
+  let s;
+  try { s = await jget("/api/sweep/status"); } catch { return; }
+  if (!s || !s.enabled) { $("#sweep-next").textContent = s ? "auto-sweep disabled" : ""; return; }
+  const next = s.nextRunAt ? "next " + fmtClock(s.nextRunAt) : "";
+  const last = s.lastRunAt
+    ? "· last " + fmtClock(s.lastRunAt) + (s.lastOk === false ? " failed" : "")
+    : "· not run yet";
+  $("#sweep-next").textContent = `auto ${s.times.join(", ")} ${s.tz} · ${next} ${last}`.replace(/\s+/g, " ").trim();
 }
 
 /* ---------------- Static showcase mode ---------------- */
@@ -821,6 +904,10 @@ function renderTaskView(t) {
   state.activeTask = t;
   const copyBtn = $("#copy-btn");
   copyBtn.disabled = !(t.status === "done" || t.status === "error");
+  const isSweep = /bounty/i.test(t.task || "") || t.automated === true;
+  $("#task-banner").innerHTML = isSweep
+    ? `<div class="review-banner">🛡️ <b>HUMAN REVIEW REQUIRED — draft only.</b> Nova never posts comments, opens issues/PRs, or submits anything. Review the deck, edit the draft, and submit manually.</div>`
+    : "";
   $("#task-title").textContent = t.task;
   $("#task-status").outerHTML = statusBadge(t.status);
   $("#task-provider").textContent = `${t.provider[0].toUpperCase() + t.provider.slice(1)}${t.mock ? " (mock)" : ""}`;

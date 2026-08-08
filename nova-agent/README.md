@@ -294,6 +294,30 @@ JSON to it (`MAKE_WEBHOOK_URL`). Free tier: 1,000 ops/month, 2 active
 scenarios. Choose Make over Zapier if you prefer its pricing or builder;
 Nova's `make` tool works the same as `zapier` and `n8n`.
 
+## Bounty sweep automation
+
+Nova runs a standing **bounty sweep** (see `prompts/bounty-sweep.md`): it scans
+GitHub for open, winnable bounties — 5 dedicated bounty programs plus 23
+high-value AI repos — ranks them by (value × likelihood of winning), and writes
+a human-review deck to `web/artifacts/bounties/bounty-report-<date>.md`.
+
+**Nova is READ-ONLY against GitHub by design:** it never posts comments, opens
+issues/PRs, or submits anything. Every sweep produces drafts for a human to
+review and approve first (the UI shows a “HUMAN REVIEW REQUIRED — draft only”
+banner on sweep tasks).
+
+- **Manual run:** the UI’s **Run bounty sweep** button or `POST /api/sweep`.
+- **Automated run:** Nova self-schedules the sweep via `NOVA_SWEEP_TIMES`
+  (comma-separated `HH:MM` in `NOVA_SWEEP_TZ`, default `07:40,19:40`
+  America/New_York). Set it to `0` or empty to disable.
+- **Status:** `GET /api/sweep/status` (schedule, next run, last run, scope) and
+  `GET /api/health` → `bounty`.
+- **Full vs limited scan:** with `GITHUB_TOKEN` set (env or vault) Nova runs the
+  full 28-repo scan at 5,000 req/hr. Without it, the sweep runs a 10-repo
+  limited scan at anonymous rate limits — the UI shows which mode is active.
+- **Cron backup:** `cron-jobs/cron-jobs.json` job #10 POSTs to `/api/sweep`
+  twice daily as an external trigger/keep-alive.
+
 ## Verification (build)
 
 ```bash

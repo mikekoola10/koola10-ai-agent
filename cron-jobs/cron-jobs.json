@@ -152,14 +152,14 @@
       "id": "nova-bounty-sweep",
       "name": "Nova Bounty Sweep (AI)",
       "type": "revenue",
-      "url": "https://nova-rftk.onrender.com/api/tasks",
+      "url": "https://nova-rftk.onrender.com/api/sweep",
       "method": "POST",
       "headers": {
         "Content-Type": "application/json"
       },
       "body": "{\"task\":\"Read prompts/bounty-sweep.md (relative to the nova-agent project root) and execute the bounty sweep exactly as instructed. Reply with the path of the written review deck.\",\"provider\":\"deepseek\"}",
       "cron_expression": "40 7,19 * * *",
-      "purpose": "Automated bounty sweep: wakes the Nova agent twice daily (07:40/19:40 ET), which scans dedicated bounty programs + AI repos, ranks winnable bounties, and writes a human-review deck to web/artifacts/bounties/. Nova drafts only — it never submits; a human approves before any action. Also keeps the Render free instance warm."
+      "purpose": "Automated bounty sweep: POSTs to Nova's /api/sweep endpoint twice daily (07:40/19:40 ET), which scans dedicated bounty programs + AI repos, ranks winnable bounties, and writes a human-review deck to web/artifacts/bounties/. Nova drafts only — it never submits; a human approves before any action. Also keeps the Render free instance warm."
     }
   ]
 }

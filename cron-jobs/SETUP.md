@@ -42,7 +42,7 @@ Content-Type: application/json
 | 7 | revenue | `45 14,23 * * *` | POST /admin/trigger_affiliate | Stripe vertical |
 | 8 | revenue | `5 9,18 * * *` | POST /admin/trigger_bounty | Grant / bounty |
 | 9 | revenue | `11 3,15 * * *` | POST /admin/run-scheduled-sprint | Full sprint |
-| 10 | revenue | `40 7,19 * * *` | POST https://nova-rftk.onrender.com/api/tasks | Nova AI bounty sweep (body = bounty-sweep prompt) |
+| 10 | revenue | `40 7,19 * * *` | POST https://nova-rftk.onrender.com/api/sweep | Nova AI bounty sweep (server loads the standing order) |
 
 ## Setup — Manual (UI)
 
@@ -91,13 +91,21 @@ You should see the analytics history grow and the email signup tally tick up.
 ## Nova AI Bounty Sweep (job #10)
 
 Unlike the rows above, this job targets **Nova** (`nova-rftk.onrender.com`), not the
-Go backend. It POSTs the bounty-sweep standing order to `POST /api/tasks`;
-Nova scans dedicated bounty programs + AI repos, ranks winnable bounties, and
-writes a human-review deck to `web/artifacts/bounties/bounty-report-<date>.md`
-(browsable at `/artifacts/bounties/...`). Nova **drafts only — it never submits**;
-a human reviews and approves before anything is posted. No auth header needed.
-The sweep runs unauthenticated (10 GitHub req/min) until `GITHUB_TOKEN` is added
-to the nova service env on Render, then the full 28-repo scan unlocks.
+Go backend. It POSTs to `POST /api/sweep`; Nova loads the standing order from
+`prompts/bounty-sweep.md`, scans dedicated bounty programs + AI repos, ranks
+winnable bounties, and writes a human-review deck to
+`web/artifacts/bounties/bounty-report-<date>.md` (browsable at
+`/artifacts/bounties/...`). Nova **drafts only — it never submits**; a human
+reviews and approves before anything is posted. No auth header needed.
+
+Nova also **self-schedules** the same sweep in-process via `NOVA_SWEEP_TIMES`
+(default `07:40,19:40` America/New_York), so this cron job is a backup/external
+trigger. You can run the sweep anytime with the UI's **Run bounty sweep**
+button or `POST /api/sweep`, and inspect it via `GET /api/sweep/status`.
+
+**Full 28-repo scan:** the sweep runs a 10-repo limited scan until `GITHUB_TOKEN`
+is set on the nova service env (Render → nova → Environment) — or stored under
+`GITHUB_TOKEN` in the Nova Vault view — then the full 28-repo scan unlocks.
 
 ## Next Steps
 
