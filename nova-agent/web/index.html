@@ -249,6 +249,18 @@
   #task-view { flex: 1; overflow-y: auto; padding: 26px 30px 60px; }
   .task-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
   .task-head h2 { font-size: 21px; font-weight: 650; line-height: 1.35; max-width: 72%; }
+  .task-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; }
+  .btn-ghost {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    width: auto; padding: 9px 16px; border-radius: 12px;
+    border: 1px solid var(--border-2); background: var(--panel-2);
+    color: var(--text); font-size: 13px; font-weight: 600;
+    transition: border-color .15s, color .12s, transform .1s, opacity .15s;
+  }
+  .btn-ghost:hover:not(:disabled) { border-color: rgba(124,108,255,.55); color: #e9e6ff; }
+  .btn-ghost:active:not(:disabled) { transform: scale(.98); }
+  .btn-ghost:disabled { opacity: .45; cursor: default; }
+  .btn-ghost svg { width: 14px; height: 14px; }
   .task-meta { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
   .status-badge {
     display: inline-flex; align-items: center; gap: 6px;
@@ -491,10 +503,16 @@
             <span id="task-stats"></span>
           </div>
         </div>
-        <button class="btn-new" id="back-btn" style="width:auto;padding:9px 16px">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-          New task
-        </button>
+        <div class="task-actions">
+          <button class="btn-ghost" id="copy-btn" disabled title="Copy the task, steps and final report — paste it straight back into Freebuff chat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+            Copy results
+          </button>
+          <button class="btn-new" id="back-btn" style="width:auto;padding:9px 16px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            New task
+          </button>
+        </div>
       </div>
       <div id="task-steps"><div class="empty-state" id="steps-empty">Task queued — Nova is warming up…</div></div>
       <div id="task-report" hidden></div>
@@ -755,6 +773,17 @@ function demoRun(task) {
       $("#task-timer").style.color = "";
       const nTools = DEMO_SCRIPT.reduce((n, s) => n + s.tools.length, 0);
       $("#task-stats").textContent = `· ${DEMO_SCRIPT.length} steps · ${nTools} tool calls · ${fmtDur(Date.now() - t0)}`;
+      state.activeTask = {
+        task,
+        status: "done",
+        provider: "nova",
+        mock: true,
+        durationMs: Date.now() - t0,
+        steps: DEMO_SCRIPT.map((s, i) => ({ step: i + 1, toolNames: s.tools.map(([n]) => n), tools: s.tools.map(([n, p]) => ({ name: n, preview: p })) })),
+        toolCalls: nTools,
+        report: demoReport(task),
+      };
+      $("#copy-btn").disabled = false;
       const rep = $("#task-report");
       rep.hidden = false;
       rep.innerHTML = `<h2>Final report</h2>` + mdRender(demoReport(task));
@@ -789,6 +818,9 @@ function statusBadge(s) {
 }
 
 function renderTaskView(t) {
+  state.activeTask = t;
+  const copyBtn = $("#copy-btn");
+  copyBtn.disabled = !(t.status === "done" || t.status === "error");
   $("#task-title").textContent = t.task;
   $("#task-status").outerHTML = statusBadge(t.status);
   $("#task-provider").textContent = `${t.provider[0].toUpperCase() + t.provider.slice(1)}${t.mock ? " (mock)" : ""}`;
@@ -848,6 +880,66 @@ function mdRender(text) {
   if (inCode) html += "</pre>";
   return html;
 }
+
+/* ---------------- Copy results ---------------- */
+function legacyCopy(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
+function copyTaskResults() {
+  const t = state.activeTask;
+  if (!t) return;
+  const out = [];
+  out.push("**Task:** " + t.task);
+  const provider = t.provider ? t.provider[0].toUpperCase() + t.provider.slice(1) : "";
+  out.push("");
+  out.push("**Status:** " + (t.status === "done" ? "✅ done" : t.status === "error" ? "❌ error" : t.status) +
+    (provider ? " · " + provider : "") + (t.mock ? " (mock)" : "") +
+    (t.durationMs ? " · " + fmtDur(t.durationMs) : ""));
+  if (t.steps && t.steps.length) {
+    out.push("");
+    out.push("**Steps** — " + t.steps.length + " step" + (t.steps.length === 1 ? "" : "s") + ", " + (t.toolCalls || 0) + " tool calls:");
+    t.steps.forEach((st, i) => {
+      const tools = (st.tools && st.tools.length)
+        ? st.tools.map((tc) => tc.name + (tc.preview ? " — " + tc.preview : "")).join(" · ")
+        : (st.toolNames || []).join(", ");
+      out.push((st.step || i + 1) + ". " + tools);
+    });
+  }
+  if (t.status === "error" && t.error) {
+    out.push("");
+    out.push("**Error:** " + t.error);
+  }
+  if (t.report) {
+    out.push("");
+    out.push("**Final report**");
+    out.push("");
+    out.push(t.report);
+  }
+  const text = out.join("\n");
+  const okToast = () => toast("Copied — paste it anywhere, e.g. Freebuff chat 🎉");
+  const failToast = () => toast("Copy failed — select the report text manually to copy.", true);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(okToast, () => (legacyCopy(text) ? okToast() : failToast()));
+  } else {
+    legacyCopy(text) ? okToast() : failToast();
+  }
+}
+
+$("#copy-btn").addEventListener("click", copyTaskResults);
 
 /* ---------------- Polling ---------------- */
 async function pollTask() {
