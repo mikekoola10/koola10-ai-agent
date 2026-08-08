@@ -55,14 +55,43 @@ async function completeOpenAICompatible(
   }
 
   const data = (await res.json()) as {
-    choices?: { message?: ChatMessage }[];
+    choices?: {
+      message?: {
+        role?: string;
+        content?: string | null;
+        tool_calls?: Array<{
+          id?: string;
+          type?: string;
+          name?: string;
+          function?: { name?: string; arguments?: string };
+        }>;
+      };
+    }[];
     error?: { message?: string };
   };
 
   if (data.error?.message) throw new Error(`LLM API error: ${data.error.message}`);
   const message = data.choices?.[0]?.message;
   if (!message) throw new Error("LLM API returned no message.");
-  return message;
+
+  // OpenAI-compatible providers (DeepSeek, OpenAI, …) nest each tool call under
+  // `tool_calls[].function`, while the agent loop expects the flattened
+  // internal shape `{ id, name, arguments }`. Normalize here so the dispatcher
+  // never sees a tool named "undefined".
+  const rawCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  const tool_calls: ToolCall[] | undefined = rawCalls.length
+    ? rawCalls.map((tc) => ({
+        id: tc.id ?? `call_${Math.random().toString(36).slice(2, 10)}`,
+        name: tc.function?.name ?? tc.name ?? "unknown",
+        arguments: tc.function?.arguments ?? "",
+      }))
+    : undefined;
+
+  return {
+    role: (message.role as ChatMessage["role"]) ?? "assistant",
+    content: message.content ?? null,
+    tool_calls,
+  };
 }
 
 /* ------------------------------------------------------------------ */
