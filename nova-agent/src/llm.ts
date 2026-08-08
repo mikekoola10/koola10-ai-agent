@@ -32,6 +32,27 @@ async function completeOpenAICompatible(
   tools: ToolDefinition[],
   opts: CompleteOptions,
 ): Promise<ChatMessage> {
+  // DeepSeek/OpenAI require tool calls on the wire in the OpenAI shape
+  // ({id, type: "function", function: {name, arguments}}) and tool results as
+  // {role: "tool", tool_call_id, content}. Convert the internal shape back.
+  const wireMessages = messages.map((m) => {
+    if (m.tool_calls?.length) {
+      return {
+        role: m.role,
+        content: m.content,
+        tool_calls: m.tool_calls.map((tc) => ({
+          id: tc.id,
+          type: "function",
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      };
+    }
+    if (m.role === "tool") {
+      return { role: "tool", tool_call_id: m.tool_call_id, content: m.content };
+    }
+    return { role: m.role, content: m.content };
+  });
+
   const res = await fetch(`${config.apiBase}/chat/completions`, {
     method: "POST",
     headers: {
@@ -40,7 +61,7 @@ async function completeOpenAICompatible(
     },
     body: JSON.stringify({
       model: config.model,
-      messages,
+      messages: wireMessages,
       tools,
       tool_choice: "auto",
       temperature: opts.temperature ?? 0.7,
