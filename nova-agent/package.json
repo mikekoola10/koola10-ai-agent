@@ -17,17 +17,18 @@
     "typecheck": "tsc --noEmit",
     "smoke": "node dist/index.js --mock \"explore the current directory and write a summary report\"",
     "tools:browser": "npx playwright install chromium",
+    "postinstall": "node scripts/install-browser.cjs",
     "prepublishOnly": "npm run typecheck && npm run build"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "@composio/core": "latest"
+    "@composio/core": "latest",
+    "playwright": "^1.49.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "playwright": "^1.49.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

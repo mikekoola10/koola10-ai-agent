@@ -42,6 +42,7 @@ Content-Type: application/json
 | 7 | revenue | `45 14,23 * * *` | POST /admin/trigger_affiliate | Stripe vertical |
 | 8 | revenue | `5 9,18 * * *` | POST /admin/trigger_bounty | Grant / bounty |
 | 9 | revenue | `11 3,15 * * *` | POST /admin/run-scheduled-sprint | Full sprint |
+| 10 | revenue | `40 7,19 * * *` | POST https://nova-rftk.onrender.com/api/tasks | Nova AI bounty sweep (body = bounty-sweep prompt) |
 
 ## Setup — Manual (UI)
 
@@ -86,6 +87,17 @@ You should see the analytics history grow and the email signup tally tick up.
 - **Set timezone to `America/New_York`** in cron-job.org (matches your `CronManager.jsx` preset).
 - **Email signups from cron use dummy addresses** — they pad the count but aren't
   real leads. Wire your waitlist form to call the same endpoint with real emails.
+
+## Nova AI Bounty Sweep (job #10)
+
+Unlike the rows above, this job targets **Nova** (`nova-rftk.onrender.com`), not the
+Go backend. It POSTs the bounty-sweep standing order to `POST /api/tasks`;
+Nova scans dedicated bounty programs + AI repos, ranks winnable bounties, and
+writes a human-review deck to `web/artifacts/bounties/bounty-report-<date>.md`
+(browsable at `/artifacts/bounties/...`). Nova **drafts only — it never submits**;
+a human reviews and approves before anything is posted. No auth header needed.
+The sweep runs unauthenticated (10 GitHub req/min) until `GITHUB_TOKEN` is added
+to the nova service env on Render, then the full 28-repo scan unlocks.
 
 ## Next Steps
 
