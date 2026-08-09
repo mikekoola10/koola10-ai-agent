@@ -71,10 +71,28 @@ export function vaultRemoteEnabled(): boolean {
 let redisClient: RedisClientType | null = null;
 let redisErrorLogged = false;
 
+/**
+ * Bounded reconnect backoff. node-redis retries forever by default (its
+ * connect() promise never resolves on a failing URL), which previously let a
+ * misconfigured REDIS_URL hang the vault — and even block server startup.
+ * Returning an Error makes connect() reject after a few quick retries so the
+ * vault degrades to local-only mode instead of hanging.
+ */
+function redisRetryStrategy(retries: number): number | Error {
+  if (retries >= 3) return new Error("redis unreachable — gave up after retries");
+  return Math.min(100 * 2 ** retries, 2000);
+}
+
 async function redisGetClient(): Promise<RedisClientType | null> {
-  if (redisClient) return redisClient;
+  if (redisClient?.isOpen) return redisClient;
   try {
-    redisClient = createClient({ url: connectionUrl() });
+    redisClient = createClient({
+      url: connectionUrl(),
+      socket: {
+        connectTimeout: 5000,
+        reconnectStrategy: redisRetryStrategy,
+      },
+    });
     redisClient.on("error", (err) => {
       if (!redisErrorLogged) {
         redisErrorLogged = true;
@@ -88,6 +106,16 @@ async function redisGetClient(): Promise<RedisClientType | null> {
       redisErrorLogged = true;
       console.error(`vault: redis connect failed — ${err instanceof Error ? err.message : String(err)}`);
     }
+    // Drop the dead client so the next call retries a fresh connection instead
+    // of reusing a broken one.
+    if (redisClient) {
+      try {
+        redisClient.destroy();
+      } catch {
+        /* best effort */
+      }
+    }
+    redisClient = null;
     return null;
   }
 }

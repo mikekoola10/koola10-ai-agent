@@ -684,7 +684,15 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
 
 async function main(): Promise<void> {
   loadDotEnv(process.cwd());
-  const restored = await vaultSyncFromRemote();
+  // Restore the vault from the durable remote store, but never let a slow or
+  // unreachable remote backend delay (or block) the web server from starting.
+  // (node-redis retries forever by default, so this race guarantees the server
+  // comes up within a few seconds even if REDIS_URL is misconfigured.)
+  type SyncResult = Awaited<ReturnType<typeof vaultSyncFromRemote>>;
+  const restoreTimeout = new Promise<SyncResult>((resolve) =>
+    setTimeout(() => resolve({ pulled: false, error: "remote restore timed out" }), 5000),
+  );
+  const restored = await Promise.race([vaultSyncFromRemote(), restoreTimeout]);
   if (restored.error) console.log(`   vault:    remote restore skipped — ${restored.error}`);
   const config = applyVaultOverrides(loadConfig({ cwd: process.cwd() }));
 
