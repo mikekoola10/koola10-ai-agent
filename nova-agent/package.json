@@ -25,7 +25,8 @@
   },
   "dependencies": {
     "@composio/core": "latest",
-    "playwright": "^1.49.0"
+    "playwright": "^1.49.0",
+    "redis": "^6.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

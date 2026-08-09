@@ -5,7 +5,7 @@ import { runAgent } from "./agent.js";
 import { keyEnvFor, loadConfig, loadDotEnv, type CliFlags } from "./config.js";
 import { buildToolDefinitions, verifyConnectors } from "./tools/index.js";
 import { automationTool, buildDailyReport, reportDeliveryProvider } from "./tools/automations.js";
-import { applyVaultOverrides, vaultDelete, vaultGet, vaultInfo, vaultList, vaultSet } from "./tools/vault.js";
+import { applyVaultOverrides, vaultDelete, vaultGet, vaultInfo, vaultList, vaultPushToRemote, vaultSet, vaultSyncFromRemote } from "./tools/vault.js";
 import { color, firstLine, formatDuration } from "./util.js";
 
 const VERSION = "0.4.0";
@@ -187,6 +187,8 @@ async function main(): Promise<void> {
   }
 
   loadDotEnv(process.cwd());
+  const restored = await vaultSyncFromRemote();
+  if (restored.error) console.log(color.yellow(`  vault remote restore skipped — ${restored.error}`));
   const config = applyVaultOverrides(loadConfig({ ...flags, cwd: process.cwd() }));
 
   if (vaultArgs) {
@@ -214,7 +216,9 @@ async function main(): Promise<void> {
           console.error(color.red(`nova: ${res.error}`));
           process.exit(1);
         }
-        console.log(color.green(`  Stored ${name} (encrypted) — ${info.dir}`));
+        const sync = await vaultPushToRemote();
+        const syncText = sync.ok ? color.dim("(remote backup synced)") : color.yellow(`(remote backup FAILED: ${sync.error})`);
+        console.log(color.green(`  Stored ${name} (encrypted) — ${info.dir} ${syncText}`));
         return;
       }
       case "get": {
@@ -236,7 +240,9 @@ async function main(): Promise<void> {
           console.error(color.red(`nova: --vault ${action} needs <name>`));
           process.exit(1);
         }
-        console.log(vaultDelete(name) ? color.green(`  Removed ${name} from the vault`) : color.yellow(`  No vault entry named ${name}`));
+        const removed = vaultDelete(name);
+        if (removed) await vaultPushToRemote();
+        console.log(removed ? color.green(`  Removed ${name} from the vault`) : color.yellow(`  No vault entry named ${name}`));
         return;
       }
       default:

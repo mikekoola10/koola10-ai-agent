@@ -147,8 +147,11 @@ of the UI, in `GET /api/health`, and in `node dist/index.js --verify-connectors`
 | `NOVA_DAILY_REPORT` | No | Enable the daily Nova-generated report email, default `1` |
 | `NOVA_DAILY_REPORT_TIME` | No | Local time the report fires, default `09:00` |
 | `NOVA_REPORT_PROVIDER` | No | Report delivery target: `zapier` \| `make` \| `n8n` (defaults to the first configured webhook) |
-| `NOVA_VAULT_KEY` | No | Master key for the encrypted vault (else auto-created at `vault/.master.key`) |
+| `NOVA_VAULT_KEY` | For durable vaults | Master key for the encrypted vault (else auto-created at `vault/.master.key` — which disappears on every Render redeploy, so set it) |
 | `NOVA_VAULT_DIR` | No | Vault storage directory, default `./vault` |
+| `REDIS_URL` | For durable vaults | Redis connection string (e.g. Render managed Redis `redis://red-...` or `rediss://...`) — mirrors the encrypted vault off the container so keys survive redeploys (`NOVA_REDIS_URL` alias accepted) |
+| `UPSTASH_REDIS_REST_URL` | For durable vaults | Alternative backend: Upstash Redis REST URL — mirrors the encrypted vault off the container so keys survive redeploys (`NOVA_VAULT_URL` alias accepted) |
+| `UPSTASH_REDIS_REST_TOKEN` | For durable vaults | Upstash Redis REST token (`NOVA_VAULT_TOKEN` alias accepted) |
 | `PORT` | No | UI port, default `3000` |
 
 ## Connector verification ("is my key actually working?")
@@ -250,6 +253,42 @@ Nova can collect API keys and webhook URLs during a job and store them in an
 **encrypted vault** (AES-256-GCM at rest, stored in `vault/keys.json`, chmod
 600, gitignored). The master key comes from `NOVA_VAULT_KEY` when set,
 otherwise Nova auto-generates `vault/.master.key` on first use.
+
+### Making the vault survive redeploys (important on Render)
+
+Render builds a fresh container on every deploy, so **anything stored only in
+`vault/` on the container disk is wiped on each deploy** — including keys you
+add in the dashboard's Vault view. To keep vault keys permanently, mirror the
+encrypted vault to a remote Redis. Two backends are supported — set **one** of
+them:
+
+**A) Standard Redis connection string (recommended — reuse the Redis you may
+already have, e.g. Render's managed Redis `redis://red-...`):**
+
+```text
+REDIS_URL=redis://red-xxxx:6379
+NOVA_VAULT_KEY=<your own master key, any long string>
+```
+
+**B) Upstash REST API (no Redis client needed):**
+
+1. Create a free Redis database at https://console.upstash.com.
+2. Copy the **REST URL** and **REST token** from the database's REST API tab.
+3. Set these in the Render **nova** service environment (or your `.env`):
+
+```text
+NOVA_VAULT_KEY=<your own master key, any long string>
+UPSTASH_REDIS_REST_URL=https://us1-xxxx.upstash.io
+UPSTASH_REDIS_REST_TOKEN=<rest token>
+```
+
+`NOVA_VAULT_KEY` is **required** for the remote copy to be decryptable after a
+redeploy (without it the auto-generated master key is wiped with the disk).
+Once configured, every vault write is mirrored to the remote Redis immediately
+and restored automatically on startup — keys survive redeploys, restarts, and
+instance churn. `GET /api/vault` and the startup log show the remote backup
+status; `NOVA_REDIS_URL`/`NOVA_VAULT_URL`/`NOVA_VAULT_TOKEN` are accepted
+aliases.
 
 Ways to use it:
 

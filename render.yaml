@@ -61,6 +61,21 @@ services:
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
+      # Durable vault: without these the encrypted vault (and any key stored
+      # in the Nova Vault view) is wiped on every deploy. Set NOVA_VAULT_KEY
+      # (master encryption key — any long string) plus ONE remote backend:
+      #   REDIS_URL                 your Redis connection string, e.g. Render
+      #                             managed Redis (redis://red-... or rediss://...)
+      #   UPSTASH_REDIS_REST_URL    alternative: Upstash Redis REST URL
+      #   UPSTASH_REDIS_REST_TOKEN  + its REST token (if using Upstash)
+      - key: NOVA_VAULT_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
       - key: NOVA_CONNECTOR_CHECK_HOURS
         value: "12"
       - key: NOVA_DAILY_REPORT

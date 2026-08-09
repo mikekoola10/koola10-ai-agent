@@ -28,7 +28,7 @@ import { runAgent } from "./agent.js";
 import { keyEnvFor, loadConfig, loadDotEnv, type NovaConfig } from "./config.js";
 import { buildToolDefinitions, verifyConnectors } from "./tools/index.js";
 import { automationTool, buildDailyReport, reportDeliveryProvider } from "./tools/automations.js";
-import { applyVaultOverrides, vaultDelete, vaultInfo, vaultList, vaultSet } from "./tools/vault.js";
+import { applyVaultOverrides, vaultDelete, vaultInfo, vaultList, vaultPushToRemote, vaultSet, vaultSyncFromRemote } from "./tools/vault.js";
 import { firstLine } from "./util.js";
 
 export const VERSION = "0.4.0";
@@ -563,7 +563,14 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
       }
 
       if (req.method === "GET" && pathname === "/api/vault") {
-        sendJson(res, 200, { names: vaultList(), count: vaultInfo().count, dir: vaultInfo().dir });
+        const info = vaultInfo();
+        sendJson(res, 200, {
+          names: vaultList(),
+          count: info.count,
+          dir: info.dir,
+          usingEnvKey: info.usingEnvKey,
+          remote: info.remote,
+        });
         return;
       }
 
@@ -586,13 +593,16 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           sendJson(res, 400, { error: result.error });
           return;
         }
-        sendJson(res, 200, { ok: true, name });
+        const sync = await vaultPushToRemote();
+        sendJson(res, 200, { ok: true, name, remoteSynced: sync.ok, remoteError: sync.error ?? null });
         return;
       }
 
       const vm = pathname.match(/^\/api\/vault\/([^/]+)$/);
       if (vm && req.method === "DELETE") {
-        sendJson(res, 200, { ok: vaultDelete(decodeURIComponent(vm[1]!)) });
+        const ok = vaultDelete(decodeURIComponent(vm[1]!));
+        const sync = ok ? await vaultPushToRemote() : { ok: true };
+        sendJson(res, 200, { ok, remoteSynced: sync.ok, remoteError: sync.error ?? null });
         return;
       }
 
@@ -672,8 +682,10 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
   return server;
 }
 
-function main(): void {
+async function main(): Promise<void> {
   loadDotEnv(process.cwd());
+  const restored = await vaultSyncFromRemote();
+  if (restored.error) console.log(`   vault:    remote restore skipped — ${restored.error}`);
   const config = applyVaultOverrides(loadConfig({ cwd: process.cwd() }));
 
   const autoMock = config.apiKey === "";
@@ -698,7 +710,10 @@ function main(): void {
   const sweepStatus = server.sweepScheduler ? server.sweepScheduler.status() : null;
   console.log(`   sweep:    bounty sweep ${sweepStatus && sweepStatus.enabled ? `scheduled ${sweepStatus.times.join(", ")} ${sweepStatus.tz} · ${sweepStatus.repos}-repo ${sweepStatus.fullScan ? "FULL" : "limited"} scan` : "disabled"} (NOVA_SWEEP_TIMES / GITHUB_TOKEN)`);
   const vaultStatus = vaultInfo();
-  console.log(`   vault:    ${vaultStatus.count} encrypted entr${vaultStatus.count === 1 ? "y" : "ies"} (${vaultStatus.dir}${vaultStatus.usingEnvKey ? " · NOVA_VAULT_KEY" : ""})`);
+  const remoteText = vaultStatus.remote.enabled
+    ? ` · remote backup ${vaultStatus.remote.host}${vaultStatus.remote.needsMasterKey ? " ⚠ set NOVA_VAULT_KEY" : ""}`
+    : "";
+  console.log(`   vault:    ${vaultStatus.count} encrypted entr${vaultStatus.count === 1 ? "y" : "ies"} (${vaultStatus.dir}${vaultStatus.usingEnvKey ? " · NOVA_VAULT_KEY" : ""}${remoteText})`);
   console.log(`   ctrl-c to stop`);
 
   server.on("error", (err) => {
@@ -715,5 +730,8 @@ function main(): void {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
+  main().catch((err) => {
+    console.error(`nova-ui: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  });
 }

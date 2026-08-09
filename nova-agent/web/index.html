@@ -532,6 +532,39 @@
         setInterval(refreshSweepStatus, 30000);
       }, 0);
       </script>
+      <script>
+      /* Vault durability status — deferred until the main script has parsed so
+         the global renderVault exists, then wrapped to surface the remote
+         backup (Redis) state in the Vault view. */
+      setTimeout(() => {
+        const orig = window.renderVault;
+        if (typeof orig !== "function") return;
+        window.renderVault = function (st) {
+          orig(st);
+          if (!st || !st.remote) return;
+          const grid = document.getElementById("vault-grid");
+          if (!grid) return;
+          const remote = st.remote.enabled;
+          const badge = remote
+            ? (st.remote.needsMasterKey ? `<span class="conn-badge fail">NO MASTER KEY</span>` : `<span class="conn-badge ok">REMOTE BACKUP</span>`)
+            : `<span class="conn-badge off">LOCAL ONLY</span>`;
+          const line = remote
+            ? (st.remote.needsMasterKey
+                ? `Mirroring to ${esc(st.remote.host)} — but NOVA_VAULT_KEY is NOT set, so the backup can't be decrypted after a redeploy.`
+                : `Survives redeploys — mirrored to ${esc(st.remote.host)} and restored automatically on startup.`)
+            : `Stored on the container disk only — wiped on every redeploy. Set REDIS_URL (or UPSTASH_REDIS_REST_URL + token) + NOVA_VAULT_KEY to make keys permanent.`;
+          const card = document.createElement("div");
+          card.className = "conn-card " + (remote ? (st.remote.needsMasterKey ? "fail" : "ok") : "off");
+          card.innerHTML =
+            `<div class="conn-top"><span class="conn-icon">${remote ? "🔁" : "💾"}</span><b>Durability</b>${badge}</div>` +
+            `<div class="conn-detail">${line}</div>` +
+            `<div class="conn-env">${remote ? "REDIS_URL / UPSTASH_REDIS_REST_URL · NOVA_VAULT_KEY" : "NOVA_VAULT_KEY · REDIS_URL / UPSTASH_REDIS_REST_URL"}</div>`;
+          grid.prepend(card);
+          const sub = document.getElementById("vault-subtitle");
+          if (sub) sub.textContent = `Encrypted API keys & webhook URLs — ${st.count} entr${st.count === 1 ? "y" : "ies"} stored · ${remote ? "remote backup on" : "local only"}`;
+        };
+      }, 0);
+      </script>
 
       <div class="feature-card">
         <div>
@@ -781,8 +814,8 @@ function renderStaticVault() {
         <b>Credential vault</b>
         <span class="conn-badge ok">READY</span>
       </div>
-      <div class="conn-detail">Nova stores API keys and webhook URLs encrypted at rest (AES-256-GCM) and wires them into connectors automatically.</div>
-      <div class="conn-env">NOVA_VAULT_KEY · vault/keys.json</div>
+      <div class="conn-detail">Nova stores API keys and webhook URLs encrypted at rest (AES-256-GCM) and wires them into connectors automatically. On Render, keys survive redeploys when mirrored to a remote Redis (set REDIS_URL or UPSTASH_REDIS_REST_URL).</div>
+      <div class="conn-env">NOVA_VAULT_KEY · REDIS_URL or UPSTASH_REDIS_REST_URL · UPSTASH_REDIS_REST_TOKEN</div>
     </div>`;
 }
 
