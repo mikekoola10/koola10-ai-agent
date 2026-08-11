@@ -696,6 +696,31 @@ async function main(): Promise<void> {
   if (restored.error) console.log(`   vault:    remote restore skipped — ${restored.error}`);
   const config = applyVaultOverrides(loadConfig({ cwd: process.cwd() }));
 
+  // Deferred restore retries: a slow/cold Redis at boot can make the first
+  // restore time out (or silently no-op), leaving the vault empty on a fresh
+  // container — exactly what wipes UI-added keys on redeploy. Re-attempt in
+  // the background a few times; the server is already listening by then, and
+  // each retry builds a fresh client. Skips automatically once the vault is
+  // populated, so it never clobbers user edits.
+  const retryRestore = (delayMs: number): void => {
+    setTimeout(() => {
+      void (async () => {
+        if (vaultList().length > 0) return;
+        const res = await vaultSyncFromRemote();
+        if (res.pulled) {
+          console.log("   vault:    restored from remote store (background retry)");
+          // Re-apply overrides onto the shared config so connector status /
+          // health reflect the restored token without needing another restart.
+          Object.assign(config, applyVaultOverrides(config));
+        } else if (res.error) {
+          console.log(`   vault:    background restore retry failed — ${res.error}`);
+        }
+      })();
+    }, delayMs);
+  };
+  retryRestore(15_000);
+  retryRestore(60_000);
+
   const autoMock = config.apiKey === "";
   const cfg = autoMock ? { ...config, mock: true } : config;
 

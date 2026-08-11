@@ -72,6 +72,30 @@ let redisClient: RedisClientType | null = null;
 let redisErrorLogged = false;
 
 /**
+ * Bound a redis operation so a wedged/stale socket can never hang the vault.
+ * node-redis has no per-command timeout; the underlying promise keeps running
+ * but the caller gets an error instead of blocking, and the next call rebuilds
+ * the client from scratch (see redisGetClient).
+ */
+function withTimeout<T>(p: Promise<T>, ms: number, op: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`redis ${op} timed out after ${ms}ms`));
+    }, ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/**
  * Bounded reconnect backoff. node-redis retries forever by default (its
  * connect() promise never resolves on a failing URL), which previously let a
  * misconfigured REDIS_URL hang the vault — and even block server startup.
@@ -99,7 +123,7 @@ async function redisGetClient(): Promise<RedisClientType | null> {
         console.error(`vault: redis client error — ${err instanceof Error ? err.message : String(err)}`);
       }
     });
-    await redisClient.connect();
+    await withTimeout(redisClient.connect(), 10_000, "connect");
     return redisClient;
   } catch (err) {
     if (!redisErrorLogged) {
@@ -134,7 +158,7 @@ async function remoteGet(): Promise<string | null> {
     if (remoteBackend() === "redis") {
       const client = await redisGetClient();
       if (!client) return null;
-      const value = await client.get(REMOTE_KEY);
+      const value = await withTimeout(client.get(REMOTE_KEY), 8000, "GET");
       return typeof value === "string" ? value : null;
     }
     return null;
@@ -157,7 +181,7 @@ async function remoteSet(value: string): Promise<boolean> {
     if (remoteBackend() === "redis") {
       const client = await redisGetClient();
       if (!client) return false;
-      await client.set(REMOTE_KEY, value);
+      await withTimeout(client.set(REMOTE_KEY, value), 8000, "SET");
       return true;
     }
     return false;
