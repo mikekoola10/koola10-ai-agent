@@ -611,6 +611,30 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
         return;
       }
 
+      if (req.method === "GET" && pathname === "/api/bounties/debug") {
+        const debug: Record<string, unknown> = { cwd: process.cwd(), webDir: WEB_DIR };
+        // Check artifact dir
+        const artifactDir = join(WEB_DIR, "artifacts", "bounties");
+        try {
+          debug.artifactFiles = readdirSync(artifactDir);
+        } catch { debug.artifactFiles = "dir not found"; }
+        // Check output dir
+        const outputDir = join(process.cwd(), "output");
+        try {
+          const files = readdirSync(outputDir);
+          debug.outputFiles = files;
+          // Try to read bounty files
+          for (const f of files) {
+            if (f.includes("bounty") && f.endsWith(".md")) {
+              const content = readFileSync(join(outputDir, f), "utf8");
+              debug[`output_${f}_preview`] = content.slice(0, 1500);
+            }
+          }
+        } catch { debug.outputFiles = "dir not found"; }
+        sendJson(res, 200, debug);
+        return;
+      }
+
       if (req.method === "POST" && pathname === "/api/bounties/approve") {
         const body = await readBody(req);
         const repo = String(body.repo || "");
