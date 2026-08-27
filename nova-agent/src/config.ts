@@ -138,7 +138,7 @@ export function loadConfig(flags: CliFlags = {}): NovaConfig {
     apiKey: env(KEY_ENV[provider]) ?? "",
     apiBase: (env("NOVA_API_BASE") ?? DEFAULT_BASE[provider]).replace(/\/+$/, ""),
     model: flags.model ?? env("NOVA_MODEL") ?? DEFAULT_MODEL[provider],
-    maxSteps: flags.maxSteps ? Number.parseInt(flags.maxSteps, 10) : intEnv("NOVA_MAX_STEPS", 25),
+    maxSteps: flags.maxSteps ? Number.parseInt(flags.maxSteps, 10) : intEnv("NOVA_MAX_STEPS", 50),
     maxToolOutputChars,
     toolTimeoutMs: intEnv("NOVA_TOOL_TIMEOUT_MS", 60_000),
     mock: flags.mock ?? boolEnv("NOVA_MOCK"),
