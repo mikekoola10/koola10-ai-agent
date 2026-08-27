@@ -21,7 +21,7 @@
  *   GET  /                   -> the web UI
  */
 import { createServer, type Server } from "node:http";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runAgent } from "./agent.js";
@@ -566,12 +566,47 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
       }
 
       if (req.method === "GET" && pathname === "/api/bounties/deck") {
-        const dir = join(WEB_DIR, "artifacts", "bounties");
-        const jsonName = (new Date().toISOString().slice(0, 10)) + ".json";
+        const today = new Date().toISOString().slice(0, 10);
         let bounties: unknown[] = [];
+        // 1. Expected JSON sidecar in artifacts/bounties/
+        const artifactDir = join(WEB_DIR, "artifacts", "bounties");
+        const artifactJson = join(artifactDir, `bounty-report-${today}.json`);
         try {
-          bounties = JSON.parse(readFileSync(join(dir, jsonName), "utf8"));
-        } catch { /* no JSON deck yet */ }
+          bounties = JSON.parse(readFileSync(artifactJson, "utf8"));
+        } catch { /* not found, try fallbacks */ }
+        // 2. Fallback: output/ directory (LLM sometimes writes here)
+        if (!bounties.length) {
+          const outputDir = join(process.cwd(), "output");
+          try {
+            const files = readdirSync(outputDir);
+            const jsonFile = files.find((f) => f.endsWith(".json") && f.includes("bounty"));
+            if (jsonFile) {
+              bounties = JSON.parse(readFileSync(join(outputDir, jsonFile), "utf8"));
+            }
+          } catch { /* output dir may not exist */ }
+        }
+        // 3. Fallback: parse markdown from output/ or artifacts/
+        if (!bounties.length) {
+          const searchDirs = [artifactDir, join(process.cwd(), "output")];
+          for (const dir of searchDirs) {
+            try {
+              const files = readdirSync(dir);
+              const mdFile = files.find((f) => f.endsWith(".md") && f.includes("bounty"));
+              if (mdFile) {
+                const md = readFileSync(join(dir, mdFile), "utf8");
+                // Extract issue URLs and amounts from markdown
+                const urlRegex = /https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/issues\/(\d+)/g;
+                let match;
+                while ((match = urlRegex.exec(md)) !== null) {
+                  const [_, owner, repo, num] = match;
+                  if (!bounties.find((b: any) => b.url === match![0])) {
+                    bounties.push({ repo: `${owner}/${repo}`, issueNumber: Number(num), url: match[0], title: "", amount: "", approach: "", draftComment: "" });
+                  }
+                }
+              }
+            } catch { /* skip */ }
+          }
+        }
         sendJson(res, 200, { bounties });
         return;
       }
