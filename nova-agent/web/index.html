@@ -431,6 +431,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
         <span>Scheduled</span>
       </button>
+      <button class="nav-item" data-view="bounties" onclick="showBounties();event.stopImmediatePropagation();">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
+        <span>Bounties</span>
+      </button>
       <button class="nav-item" data-view="library">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13Z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>
         <span>Library</span>
@@ -678,11 +682,153 @@
         <code style="font-family:ui-monospace,monospace">vault</code> tool. Values never leave the server.
       </div>
     </section>
+
+    <!-- Bounty Board view -->
+    <section id="bounties-view" hidden>
+      <div class="conn-head">
+        <div>
+          <h2>Bounty Board</h2>
+          <div class="task-meta" id="bounties-subtitle">Human-review decks from the automated sweep</div>
+        </div>
+        <button class="btn-new" id="sweep-now-btn" style="width:auto;padding:9px 16px" onclick="runSweepNow()">▶ Run sweep now</button>
+      </div>
+      <div class="conn-grid" id="bounties-grid"></div>
+      <div id="bounties-content"></div>
+      <div class="conn-hint">
+        <b>How this works:</b> Nova sweeps 28 repos twice a day (07:40 &amp; 19:40 ET) and drafts a
+        review deck — ranked bounties, solution approach, and a ready-to-post first comment for each.
+        Nova never posts anything. You review the deck here, edit if you like, then approve —
+        that's the human-in-the-loop that keeps submissions clean.
+      </div>
+    </section>
   </main>
 </div>
 
 <script>
 "use strict";
+/* ---------------- Bounty Board ---------------- */
+function renderMd(md) {
+  return (md || "")
+    .split(/\n/)
+    .map((raw) => {
+      const line = raw.trimEnd();
+      if (/^#{1,4}\s/.test(line)) {
+        const lvl = Math.min(line.match(/^#+/)[0].length + 2, 6);
+        return `<h${lvl} style="margin:14px 0 6px;font-size:${lvl <= 3 ? 15 : 13}px">${esc(line.replace(/^#+\s*/, ""))}</h${lvl}>`;
+      }
+      if (/^[-*]\s/.test(line)) return `<div style="margin:3px 0;padding-left:14px">• ${esc(line.replace(/^[-*]\s/, ""))}</div>`;
+      if (/^\d+\.\s/.test(line)) return `<div style="margin:3px 0;padding-left:14px">${esc(line.replace(/^(\d+\.)\s/, "$1 "))}</div>`;
+      if (!line || line === "---") return `<div style="height:8px"></div>`;
+      const t = esc(line)
+        .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:#7c6cff">$1</a>');
+      return `<div style="margin:3px 0;line-height:1.5">${t}</div>`;
+    })
+    .join("");
+}
+
+async function loadBounties() {
+  const grid = $("#bounties-grid");
+  const content = $("#bounties-content");
+  try {
+    const [deckData, jsonData] = await Promise.all([
+      jget("/api/bounties"),
+      jget("/api/bounties/deck").catch(() => ({ bounties: [] }))
+    ]);
+    const files = deckData.files || [];
+    const bounties = jsonData.bounties || [];
+    if (files.length === 0) {
+      grid.innerHTML = `<div class="conn-card" style="grid-column:1/-1"><b>No decks yet.</b><br>Run the sweep now (or wait for the 07:40 / 19:40 ET schedule) — Nova scans 28 repos and drafts a review deck with ranked bounties, solution approaches, and ready-to-approve first comments.</div>`;
+      content.innerHTML = "";
+      $("#bounties-subtitle").textContent = "Human-review decks from the automated sweep";
+      return;
+    }
+    $("#bounties-subtitle").textContent = `${files.length} deck${files.length === 1 ? "" : "s"} · ${bounties.length} bounties ready for review`;
+    grid.innerHTML = files
+      .map((f, i) => `<div class="conn-card" style="grid-column:1/-1;${i === 0 ? "border-color:rgba(124,108,255,.55)" : ""}"><b>${esc(f.name)}</b> <span class="task-meta">${new Date(f.modifiedAt).toLocaleString()}</span>${i === 0 ? ' <span style="color:#4ade80">● latest</span>' : ""}</div>`)
+      .join("");
+    let html = "";
+    if (bounties.length > 0) {
+      html += `<div style="margin-top:16px">`;
+      bounties.forEach((b, i) => {
+        const id = `bounty-comment-${i}`;
+        html += `<div class="conn-card" style="grid-column:1/-1;margin-bottom:12px;border-left:3px solid ${b.amount ? '#4ade80' : '#818cf8'}">
+          <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:8px">
+            <div>
+              <b>${esc(b.title || 'Bounty #' + (i+1))}</b>
+              <div class="task-meta" style="margin-top:2px">${esc(b.repo)} · ${esc(b.amount || 'amount TBD')}</div>
+            </div>
+            <a href="${esc(b.url || '#')}" target=""_blank" style="color:#818cf8;font-size:13px;white-space:nowrap">View on GitHub ↗</a>
+          </div>
+          ${b.approach ? `<div style="margin-top:10px;font-size:13px;color:#a5b4fc"><b>Approach:</b> ${esc(b.approach)}</div>` : ''}
+          <div style="margin-top:10px">
+            <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px">Draft first comment (edit before approving):</label>
+            <textarea id="${id}" style="width:100%;min-height:80px;background:#1e1b2e;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px;font-size:13px;font-family:monospace;resize:vertical">${esc(b.draftComment || '')}</textarea>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+            <button onclick="approveBounty(${i}, '${esc(b.repo)}', ${b.issueNumber || 0}, this)" style="background:#4ade80;color:#000;border:none;border-radius:6px;padding:7px 14px;font-weight:600;cursor:pointer;font-size:13px">✓ Approve & Post</button>
+            <span id="bounty-status-${i}" style="font-size:12px;color:#64748b"></span>
+          </div>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+    content.innerHTML = html + (deckData.latest ? `<div class="conn-hint" style="margin-top:14px">${renderMd(deckData.latest.content)}</div>` : "");
+  } catch (e) {
+    grid.innerHTML = `<div class="conn-card" style="grid-column:1/-1">Could not load bounty decks — ${esc(e.message || e)}</div>`;
+  }
+}
+
+async function approveBounty(index, repo, issueNumber, btn) {
+  const textarea = document.getElementById(`bounty-comment-${index}`);
+  const status = document.getElementById(`bounty-status-${index}`);
+  const comment = textarea ? textarea.value.trim() : "";
+  if (!comment) { toast("Comment is empty — write something first!", true); return; }
+  if (!repo || !issueNumber) { toast("Missing repo or issue number", true); return; }
+  btn.disabled = true;
+  btn.textContent = "⏳ Posting…";
+  status.textContent = "";
+  try {
+    const r = await jpost("/api/bounties/approve", { repo, issueNumber, comment });
+    if (r.ok) {
+      btn.textContent = "✅ Posted!";
+      btn.style.background = "#22c55e";
+      status.innerHTML = `<a href="${esc(r.url)}" target="_blank" style="color:#4ade80">View comment ↗</a>`;
+      toast("Comment posted to GitHub!");
+    } else {
+      throw new Error(r.error || "Unknown error");
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "✓ Approve & Post";
+    status.textContent = "Failed: " + (e.message || e);
+    toast("Post failed: " + (e.message || e), true);
+  }
+}
+
+function showBounties() {
+  stopPolling();
+  state.activeId = null;
+  $("#hero-view").hidden = true;
+  $("#task-view").hidden = true;
+  $("#connectors-view").hidden = true;
+  $("#vault-view").hidden = true;
+  $("#scheduled-view").hidden = true;
+  $("#bounties-view").hidden = false;
+  setActiveNav("bounties");
+  loadBounties();
+}
+
+async function runSweepNow() {
+  try {
+    const r = await jpost("/api/sweep", {});
+    toast(`Sweep launched — ${r.fullScan ? "FULL " + r.repos + "-repo scan" : "limited scan"} (draft only, nothing posted)`);
+    setTimeout(loadBounties, 2500);
+  } catch (e) {
+    toast("Sweep failed to launch: " + (e.message || e), true);
+  }
+}
+/* ---------------- /Bounty Board ---------------- */
 /* ------------------------------------------------------------------ */
 /* Nova UI — vanilla JS client (no frameworks, no build step)          */
 /* ------------------------------------------------------------------ */

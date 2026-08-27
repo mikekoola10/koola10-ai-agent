@@ -21,7 +21,7 @@
  *   GET  /                   -> the web UI
  */
 import { createServer, type Server } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runAgent } from "./agent.js";
@@ -29,7 +29,7 @@ import { keyEnvFor, loadConfig, loadDotEnv, type NovaConfig } from "./config.js"
 import { buildToolDefinitions, verifyConnectors } from "./tools/index.js";
 import { automationTool, buildDailyReport, reportDeliveryProvider } from "./tools/automations.js";
 import { applyVaultOverrides, vaultDelete, vaultInfo, vaultList, vaultPushToRemote, vaultSet, vaultSyncFromRemote } from "./tools/vault.js";
-import { firstLine } from "./util.js";
+import { firstLine, redactSecrets } from "./util.js";
 
 export const VERSION = "0.4.0";
 
@@ -447,7 +447,7 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
         },
         onTool: ({ name, output, elapsedMs }) => {
           const last = rec.steps[rec.steps.length - 1];
-          if (last) last.tools.push({ name, preview: firstLine(output, 200), elapsedMs });
+          if (last) last.tools.push({ name, preview: redactSecrets(firstLine(output, 200)), elapsedMs });
           rec.updatedAt = Date.now();
         },
         onError: (err) => {
@@ -536,6 +536,85 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
 
       if (req.method === "GET" && pathname === "/api/sweep/status") {
         sendJson(res, 200, sweep.status());
+        return;
+      }
+      if (req.method === "GET" && pathname === "/api/bounties") {
+        const dir = join(WEB_DIR, "artifacts", "bounties");
+        let files: Array<{ name: string; modifiedAt: number; size: number }> = [];
+        try {
+          files = readdirSync(dir, { withFileTypes: true })
+            .filter((d) => d.isFile() && d.name.endsWith(".md"))
+            .map((d) => {
+              const st = statSync(join(dir, d.name));
+              return { name: d.name, modifiedAt: st.mtimeMs, size: st.size };
+            })
+            .sort((a, b) => b.modifiedAt - a.modifiedAt);
+        } catch {
+          files = [];
+        }
+        const latest = files[0] ?? null;
+        let content = "";
+        if (latest) {
+          try {
+            content = readFileSync(join(dir, latest.name), "utf8");
+          } catch {
+            content = "";
+          }
+        }
+        sendJson(res, 200, { files, latest: latest ? { ...latest, content } : null });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/bounties/deck") {
+        const dir = join(WEB_DIR, "artifacts", "bounties");
+        const jsonName = (new Date().toISOString().slice(0, 10)) + ".json";
+        let bounties: unknown[] = [];
+        try {
+          bounties = JSON.parse(readFileSync(join(dir, jsonName), "utf8"));
+        } catch { /* no JSON deck yet */ }
+        sendJson(res, 200, { bounties });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/bounties/approve") {
+        const body = await readBody(req);
+        const repo = String(body.repo || "");
+        const issueNumber = Number(body.issueNumber);
+        const comment = String(body.comment || "");
+        if (!repo || !issueNumber || !comment) {
+          sendJson(res, 400, { error: "Missing repo, issueNumber, or comment" });
+          return;
+        }
+        if (!config.githubToken) {
+          sendJson(res, 500, { error: "GITHUB_TOKEN not configured" });
+          return;
+        }
+        try {
+          const url = `https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`;
+          const ghRes = await fetch(url, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${config.githubToken}`,
+              Accept: "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "Content-Type": "application/json",
+              "User-Agent": "koola10-nova-agent",
+            },
+            body: JSON.stringify({ body: comment }),
+            signal: AbortSignal.timeout(15_000),
+          });
+          const text = await ghRes.text();
+          if (!ghRes.ok) {
+            sendJson(res, ghRes.status, { error: `GitHub ${ghRes.status}: ${text.slice(0, 300)}` });
+            return;
+          }
+          let ghData: unknown;
+          try { ghData = JSON.parse(text); } catch { ghData = { html_url: "" }; }
+          const htmlUrl = (ghData as Record<string, unknown>).html_url ?? `https://github.com/${repo}/issues/${issueNumber}#issuecomment-new`;
+          sendJson(res, 200, { ok: true, url: String(htmlUrl) });
+        } catch (err) {
+          sendJson(res, 500, { error: `Post failed: ${(err as Error).message}` });
+        }
         return;
       }
 

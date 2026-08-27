@@ -62,6 +62,24 @@ if needed). For each top candidate include:
   you.
 - Footer: "Requires human approval before ANY post or submission."
 
+ALSO write a JSON sidecar file at `web/artifacts/bounties/bounty-report-YYYY-MM-DD.json`
+with the same date. This file is an array of objects, one per top bounty:
+```json
+[
+  {
+    "repo": "owner/repo",
+    "issueNumber": 123,
+    "title": "Issue title",
+    "url": "https://github.com/owner/repo/issues/123",
+    "amount": "$500",
+    "approach": "Brief solution approach",
+    "draftComment": "The full draft first comment ready to post"
+  }
+]
+```
+The JSON is what the Nova UI uses to show Approve buttons. Make sure issueNumber
+is the integer issue number extracted from the URL.
+
 Finish with a 5-line summary in your final report, including the deck path.
 
 ## Hard rules
