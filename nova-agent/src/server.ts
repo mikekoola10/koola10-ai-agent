@@ -566,46 +566,47 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
       }
 
       if (req.method === "GET" && pathname === "/api/bounties/deck") {
-        const today = new Date().toISOString().slice(0, 10);
         let bounties: unknown[] = [];
-        // 1. Expected JSON sidecar in artifacts/bounties/
-        const artifactDir = join(WEB_DIR, "artifacts", "bounties");
-        const artifactJson = join(artifactDir, `bounty-report-${today}.json`);
-        try {
-          bounties = JSON.parse(readFileSync(artifactJson, "utf8"));
-        } catch { /* not found, try fallbacks */ }
-        // 2. Fallback: output/ directory (LLM sometimes writes here)
-        if (!bounties.length) {
-          const outputDir = join(process.cwd(), "output");
+        // Search ALL directories for bounty JSON or markdown
+        const searchDirs = [
+          join(WEB_DIR, "artifacts", "bounties"),
+          join(process.cwd(), "output"),
+          join(process.cwd(), "artifacts", "bounties"),
+        ];
+        for (const dir of searchDirs) {
+          if (bounties.length) break;
           try {
-            const files = readdirSync(outputDir);
+            const files = readdirSync(dir);
+            // Try JSON first
             const jsonFile = files.find((f) => f.endsWith(".json") && f.includes("bounty"));
             if (jsonFile) {
-              bounties = JSON.parse(readFileSync(join(outputDir, jsonFile), "utf8"));
+              try {
+                bounties = JSON.parse(readFileSync(join(dir, jsonFile), "utf8"));
+                break;
+              } catch { /* parse error, skip */ }
             }
-          } catch { /* output dir may not exist */ }
-        }
-        // 3. Fallback: parse markdown from output/ or artifacts/
-        if (!bounties.length) {
-          const searchDirs = [artifactDir, join(process.cwd(), "output")];
-          for (const dir of searchDirs) {
-            try {
-              const files = readdirSync(dir);
-              const mdFile = files.find((f) => f.endsWith(".md") && f.includes("bounty"));
-              if (mdFile) {
-                const md = readFileSync(join(dir, mdFile), "utf8");
-                // Extract issue URLs and amounts from markdown
-                const urlRegex = /https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/issues\/(\d+)/g;
-                let match;
-                while ((match = urlRegex.exec(md)) !== null) {
-                  const [_, owner, repo, num] = match;
-                  if (!bounties.find((b: any) => b.url === match![0])) {
-                    bounties.push({ repo: `${owner}/${repo}`, issueNumber: Number(num), url: match[0], title: "", amount: "", approach: "", draftComment: "" });
-                  }
+            // Try markdown fallback
+            const mdFile = files.find((f) => f.endsWith(".md") && f.includes("bounty"));
+            if (mdFile) {
+              const md = readFileSync(join(dir, mdFile), "utf8");
+              const urlRegex = /https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/issues\/(\d+)/g;
+              let match;
+              while ((match = urlRegex.exec(md)) !== null) {
+                const [_, owner, repo, num] = match;
+                if (!(bounties as any[]).find((b) => b.url === match![0])) {
+                  // Try to extract title from nearby lines
+                  const beforeMd = md.slice(Math.max(0, match.index - 200), match.index);
+                  const titleMatch = beforeMd.match(/#{1,3}\s+(.+)$/m) || beforeMd.match(/\*\*(.+?)\*\*/);
+                  const title = titleMatch ? titleMatch[1].trim() : "";
+                  // Try to extract amount
+                  const afterMd = md.slice(match.index, match.index + 500);
+                  const amtMatch = afterMd.match(/\$[\d,]+/);
+                  const amount = amtMatch ? amtMatch[0] : "";
+                  bounties.push({ repo: `${owner}/${repo}`, issueNumber: Number(num), url: match[0], title, amount, approach: "", draftComment: "" });
                 }
               }
-            } catch { /* skip */ }
-          }
+            }
+          } catch { /* dir doesn't exist, skip */ }
         }
         sendJson(res, 200, { bounties });
         return;
