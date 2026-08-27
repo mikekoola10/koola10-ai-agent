@@ -195,7 +195,7 @@ function readSweepPrompt(): string {
 
 /** Task text used for both the scheduled and manual sweep triggers. */
 export const SWEEP_TASK = (): string =>
-  "Read prompts/bounty-sweep.md (relative to the nova-agent project root) and execute the bounty sweep exactly as instructed. Reply with the path of the written review deck.";
+  "Read prompts/bounty-sweep.md (relative to the nova-agent project root) and execute the bounty sweep exactly as instructed. CRITICAL: You MUST write your JSON output to web/artifacts/bounties/bounty-report-YYYY-MM-DD.json (use today's date). The Nova UI reads this exact file to show the approval deck. Do NOT write to output/ — the UI cannot see files there. Reply with the path of the written review deck.";
 
 /** Current HH:MM in a fixed timezone (e.g. America/New_York). */
 function tzTime(tz: string, d: Date): { hh: string; mm: string } {

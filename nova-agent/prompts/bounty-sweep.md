@@ -51,8 +51,15 @@ Score each candidate by: amount × (confidence you could solve it) × (open and
 unassigned) × (recent activity). Keep the **top 5**.
 
 ## 4. Deliverable — human-review deck (never auto-submit)
-Write `web/artifacts/bounties/bounty-report-YYYY-MM-DD.md` (create the directory
-if needed). For each top candidate include:
+
+**OUTPUT PATHS (MUST follow exactly — the UI cannot read files elsewhere):**
+- Markdown deck: `web/artifacts/bounties/bounty-report-YYYY-MM-DD.md`
+- JSON sidecar: `web/artifacts/bounties/bounty-report-YYYY-MM-DD.json`
+
+Create the `web/artifacts/bounties/` directory if needed using `mkdir -p`.
+Do NOT write to `output/` or any other directory — the Nova UI only reads from `web/artifacts/bounties/`.
+
+For each top candidate include:
 - issue title, URL, repo
 - bounty amount and any deadline
 - why it's winnable and what it actually requires
