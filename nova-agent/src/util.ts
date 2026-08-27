@@ -22,6 +22,16 @@ export function firstLine(s: string, max = 140): string {
   return line.length > max ? `${line.slice(0, max)}…` : line;
 }
 
+/** Mask secret-looking values so they never land in task previews/logs. */
+export function redactSecrets(s: string): string {
+  return s
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "***REDACTED***")
+    .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "***REDACTED***")
+    .replace(/\bsk-[A-Za-z0-9]{16,}\b/g, "sk-***REDACTED***")
+    .replace(/rediss?:\/\/[^@\s/]+@/g, (m) => m.replace(/:\/\/[^@]+@/, "://***REDACTED***@"))
+    .replace(/\bBearer\s+[A-Za-z0-9._-]{12,}\b/gi, "Bearer ***REDACTED***");
+}
+
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const s = ms / 1000;
