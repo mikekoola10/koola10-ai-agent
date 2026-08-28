@@ -539,24 +539,29 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
         return;
       }
       if (req.method === "GET" && pathname === "/api/bounties") {
-        const dir = join(WEB_DIR, "artifacts", "bounties");
-        let files: Array<{ name: string; modifiedAt: number; size: number }> = [];
-        try {
-          files = readdirSync(dir, { withFileTypes: true })
-            .filter((d) => d.isFile() && d.name.endsWith(".md"))
-            .map((d) => {
-              const st = statSync(join(dir, d.name));
-              return { name: d.name, modifiedAt: st.mtimeMs, size: st.size };
-            })
-            .sort((a, b) => b.modifiedAt - a.modifiedAt);
-        } catch {
-          files = [];
+        // Search multiple directories for bounty markdown files
+        const searchDirs = [
+          join(WEB_DIR, "artifacts", "bounties"),
+          join(process.cwd(), "output"),
+        ];
+        let files: Array<{ name: string; modifiedAt: number; size: number; dir: string }> = [];
+        for (const dir of searchDirs) {
+          try {
+            const found = readdirSync(dir, { withFileTypes: true })
+              .filter((d) => d.isFile() && d.name.endsWith(".md") && (d.name.toLowerCase().includes("bounty") || d.name.toLowerCase().includes("sweep")))
+              .map((d) => {
+                const st = statSync(join(dir, d.name));
+                return { name: d.name, modifiedAt: st.mtimeMs, size: st.size, dir };
+              });
+            files.push(...found);
+          } catch { /* dir doesn't exist, skip */ }
         }
+        files.sort((a, b) => b.modifiedAt - a.modifiedAt);
         const latest = files[0] ?? null;
         let content = "";
         if (latest) {
           try {
-            content = readFileSync(join(dir, latest.name), "utf8");
+            content = readFileSync(join(latest.dir, latest.name), "utf8");
           } catch {
             content = "";
           }

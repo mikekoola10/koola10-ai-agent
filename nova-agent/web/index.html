@@ -741,6 +741,13 @@ async function loadBounties() {
       grid.innerHTML = `<div class="conn-card" style="grid-column:1/-1"><b>No decks yet.</b><br>Run the sweep now (or wait for the 07:40 / 19:40 ET schedule) — Nova scans 28 repos and drafts a review deck with ranked bounties, solution approaches, and ready-to-approve first comments.</div>`;
       content.innerHTML = "";
       $("#bounties-subtitle").textContent = "Human-review decks from the automated sweep";
+      // Still show any markdown report from the latest sweep
+      const fallback = jsonData.latest || deckData.latest;
+      if (fallback && fallback.content) {
+        grid.innerHTML = `<div class="conn-card" style="grid-column:1/-1;border-color:rgba(124,108,255,.55)"><b>${esc(fallback.name || 'Sweep report')}</b> <span class="task-meta">${new Date(fallback.modifiedAt || Date.now()).toLocaleString()}</span> <span style="color:#4ade80">● latest</span></div>`;
+        content.innerHTML = `<div class="conn-hint" style="margin-top:14px">${renderMd(fallback.content)}</div>`;
+        $("#bounties-subtitle").textContent = "Sweep report — no approvable bounties found";
+      }
       return;
     }
     $("#bounties-subtitle").textContent = `${files.length} deck${files.length === 1 ? "" : "s"} · ${bounties.length} bounties ready for review`;
