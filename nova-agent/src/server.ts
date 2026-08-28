@@ -660,14 +660,30 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
               if (bounties.length === 0) {
                 const repoRegex = /`([\w.-]+)\/([\w.-]+)`/g;
                 const seen2 = new Set<string>();
+                // Exclude invalid repo-like patterns
+                const invalidRepos = /^(search|issues|pull|labels|wiki|api|graphql|raw|blob|tree|releases|actions|projects|security|insights|settings|packages|orgs|users|notifications)$/i;
                 while ((match = repoRegex.exec(md)) !== null) {
                   const repoKey = `${match[1]}/${match[2]}`;
                   if (seen2.has(repoKey)) continue;
+                  if (invalidRepos.test(match[1]) || invalidRepos.test(match[2])) continue;
                   seen2.add(repoKey);
                   const ctx = md.slice(Math.max(0, match.index - 100), match.index + 300);
                   const amtMatch = ctx.match(/\$[\d,]+/);
                   const amount = amtMatch ? amtMatch[0] : "";
-                  bounties.push({ repo: repoKey, issueNumber: 0, url: `https://github.com/${repoKey}`, title: repoKey, amount, approach: "", draftComment: "" });
+                  // Extract description from nearby context
+                  const lines = ctx.split('\n').filter((l: string) => l.trim());
+                  const descLine = lines.find((l: string) => l.includes('bounty') || l.includes('Bounty') || l.includes('reward') || l.includes('Reward')) || '';
+                  const title = descLine.replace(/^[\s-*#`]+/, '').trim().slice(0, 100) || repoKey;
+                  // Generate a draft comment
+                  const draftComment = `Hi! I'd like to work on this bounty. I have experience with the relevant technologies and can deliver a quality solution. Let me know if you'd like me to proceed.`;
+                  bounties.push({ repo: repoKey, issueNumber: 0, url: `https://github.com/${repoKey}`, title, amount, approach: '', draftComment });
+                }
+              }
+              // Post-process: generate draft comments for bounties with empty drafts
+              for (const b of bounties as any[]) {
+                if (!b.draftComment) {
+                  const amt = b.amount ? ` (${b.amount})` : '';
+                  b.draftComment = `Hi! I'd like to work on this${amt} bounty. I can deliver a quality solution. Let me know if you'd like me to proceed.`;
                 }
               }
             }
