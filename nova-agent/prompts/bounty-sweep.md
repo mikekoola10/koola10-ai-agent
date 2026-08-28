@@ -1,4 +1,4 @@
-# Nova Bounty Sweep — standing order
+# Nova Bounty Sweep — standing order (v2.0)
 
 You are executing the standing bounty sweep for Koola10. **This task is READ-ONLY
 against GitHub**: you may scan, read, analyze, and draft — you must NEVER post
@@ -6,71 +6,159 @@ comments, open issues/PRs, or take any visible action. Everything you produce is
 for a human to review and approve first.
 
 ## Mission
-Find real, open, winnable GitHub bounties, rank them by (value × likelihood of
-winning), and deliver a human-review deck.
+Find real, open, winnable GitHub bounties worth **$50+**, rank them by
+(value × likelihood of winning), and deliver a human-review deck with
+ready-to-post first comments.
 
-## 1. Scope — repositories
-Prefer the `github` tool when `GITHUB_TOKEN` is set (5,000 req/hr). Otherwise use
-`curl -s` against `https://api.github.com` with a 1–2s pause between requests
-(anonymous limit ~10 req/min); if you hit rate limits, note it and continue.
+---
 
-**Dedicated bounty programs (highest priority):**
-- TheSCInitiative/bounties
-- projectdiscovery/oss-bounty-program
-- zama-ai/bounty-program
-- stacksgov/critical-bounties
-- Concordium/Concordium-Free-Open-Grants-Program
+## Phase 1: Global bounty search (HIGHEST PRIORITY)
 
-**AI / open-source repos:**
-open-webui/open-webui, langchain-ai/langchain, run-llama/llama_index,
-microsoft/autogen, crewAIInc/crewAI, Significant-Gravitas/AutoGPT,
-Pythagora-io/gpt-pilot, lobehub/lobe-chat, danny-avila/LibreChat,
-huggingface/transformers, vllm-project/vllm, ollama/ollama,
-ggerganov/llama.cpp, letta-ai/letta, mem0ai/mem0, BerriAI/litellm,
-Aider-AI/aider, All-Hands-AI/OpenHands, camel-ai/camel,
-ScrapeGraphAI/Scrapegraph-ai, ComposioHQ/composio, phidatahq/phidata,
-jina-ai/reader
+Use the `github` tool (or `curl` against `https://api.github.com/search/issues`)
+to search ALL of GitHub for open bounties. Run these searches IN ORDER:
 
-If `GITHUB_TOKEN` is NOT set, scan only the 5 dedicated bounty programs plus the
-first 5 AI repos (10 repos total) and add a note that the full 28-repo sweep
-requires `GITHUB_TOKEN`.
+### Search 1: Algora-verified bounties (real money, paid on merge)
+```
+label:"💎 Bounty" state:open type:issue sort:created
+```
+These are the highest-quality bounties — verified by Algora.io, paid via Stripe
+on merge. Take ALL results from this search.
 
-## 2. Search strategy (per repo)
-1. Open issues labeled `bounty`
-2. `"bounty" in:title` open issues; add `"bounty" in:body` if results are thin
-3. On dedicated programs, list ALL open issues (they are all bounty material)
-4. Verify by listing the repo's labels — if a `bounty` label exists, search by it
+### Search 2: Dollar-amount bounties
+```
+label:bounty "$" state:open type:issue sort:updated
+```
+Find bounties with explicit dollar amounts. Prioritize $100+.
 
-Extract dollar amounts from title/body. **Exclude** promotional/spam issues
-(third-party "collaboration" posts, random USDC offers from strangers,
-auto-generated PRs). Note security-only programs locked behind private
-disclosure separately.
+### Search 3: General bounty label
+```
+label:bounty state:open type:issue sort:created
+```
+Cast a wider net for repos that use the standard `bounty` label.
 
-## 3. Ranking
-Score each candidate by: amount × (confidence you could solve it) × (open and
-unassigned) × (recent activity). Keep the **top 5**.
+### Search 4: Bounty platforms
+```
+"algora.io" OR "opire.dev" OR "gitcoin" state:open type:issue sort:updated
+```
+Catch bounties posted on bounty platforms.
 
-## 4. Deliverable — human-review deck (never auto-submit)
+### Search 5: Dollar amounts in body
+```
+"$" "bounty" state:open type:issue sort:updated
+```
+Find bounties that mention dollar amounts in the issue body.
 
-**OUTPUT PATHS (MUST follow exactly — the UI cannot read files elsewhere):**
-- Markdown deck: `web/artifacts/bounties/bounty-report-YYYY-MM-DD.md`
-- JSON sidecar: `web/artifacts/bounties/bounty-report-YYYY-MM-DD.json`
+**Rate limiting:** If you hit 403/429, pause 30 seconds and continue. You have
+`GITHUB_TOKEN` with 5,000 req/hr — use it for all API calls.
 
-Create the `web/artifacts/bounties/` directory if needed using `mkdir -p`.
-Do NOT write to `output/` or any other directory — the Nova UI only reads from `web/artifacts/bounties/`.
+---
 
-For each top candidate include:
-- issue title, URL, repo
-- bounty amount and any deadline
-- why it's winnable and what it actually requires
-- **Draft solution approach** — a concrete plan, not a code dump
-- **Draft first comment** — a professional message (ask a clarifying question or
-  signal intent) ready for a human to edit and approve. It must NOT be posted by
-  you.
-- Footer: "Requires human approval before ANY post or submission."
+## Phase 2: Known bounty repositories (supplement global search)
 
-ALSO write a JSON sidecar file at `web/artifacts/bounties/bounty-report-YYYY-MM-DD.json`
-with the same date. This file is an array of objects, one per top bounty:
+These repos are PROVEN to have active bounty programs. Scan each one for
+open issues labeled `bounty`, `reward`, `💰`, or `💎 Bounty`:
+
+### Tier 1 — Active bounty programs (scan ALL open issues)
+- `calcom/cal.com` — TypeScript/React, $50-$500 bounties
+- `coollabsio/coolify` — PHP/Laravel, $7-$100 bounties
+- `activepieces/activepieces` — TypeScript, $50-$100 bounties
+- `tenstorrent/tt-metal` — C++/Metal, $3,500-$10,000 bounties
+- `zio/zio` — Scala, $150-$1,000 bounties
+- `rohitdash08/FinMind` — TypeScript, $200-$1,000 bounties
+- `archestra-ai/archestra` — TypeScript, $100-$500 bounties
+- `FreezingMoon/AncientBeast` — JS/CSS, 8-10 XTR bounties
+- `hashgraph/guardian` — $100K annual bounty program, $3K-$5K per bounty
+- `ClickHouse/ClickHouse` — Bug bounty program
+- `systeminit/si` — Bug bounty program
+
+### Tier 2 — Bounty-friendly repos (check for bounty labels)
+- `vercel/next.js` — occasional bounties
+- `supabase/supabase` — occasional bounties
+- `oven-sh/bun` — occasional bounties
+- `microsoft/vscode` — bug bounties
+- `huggingface/transformers` — community bounties
+- `langchain-ai/langchain` — community bounties
+- `run-llama/llama_index` — community bounties
+- `microsoft/autogen` — community bounties
+- `crewAIInc/crewAI` — community bounties
+- `Significant-Gravitas/AutoGPT` — community bounties
+- `lobehub/lobe-chat` — IssueHunt bounties
+- `danny-avila/LibreChat` — community bounties
+- `BerriAI/litellm` — community bounties
+- `Aider-AI/aider` — community bounties
+- `All-Hands-AI/OpenHands` — community bounties
+- `ComposioHQ/composio` — community bounties
+- `phidatahq/phidata` — community bounties
+
+### Tier 3 — Crypto/Web3 bounty programs
+- `Scottcjn/rustchain-bounties` — active bounty board
+- `TheSCInitiative/bounties` — bounty board
+- `projectdiscovery/oss-bounty-program` — OSS bounties
+- `zama-ai/bounty-program` — FHE bounties
+
+---
+
+## Phase 3: Filtering (EXCLUDE aggressively)
+
+**EXCLUDE these patterns** (they are spam, not real bounties):
+- Issues by `Nexussyn` or `tdpeta754` (serial spammers)
+- "AI Growth Engine" or "AiMPN" promotional posts
+- Third-party "collaboration" offers from strangers
+- Auto-generated dependency update PRs
+- Issues asking "is there a bounty program?" (questions, not bounties)
+- Issues with no dollar amount AND no bounty label
+- Security-only programs that require private disclosure (HackerOne, etc.)
+
+**INCLUDE only issues that:**
+- Have a `bounty`, `reward`, `💰`, or `💎 Bounty` label, OR
+- Contain an explicit dollar amount ($XX) in title or body, OR
+- Are from a known bounty platform (Algora, Opire, Gitcoin)
+
+---
+
+## Phase 4: Scoring and ranking
+
+For each qualifying bounty, score on 4 dimensions (each 1-10):
+
+1. **Value** (amount): $1000+ = 10, $500+ = 8, $100+ = 6, $50+ = 4, <$50 = 2
+2. **Winnability**: Is the problem well-defined? Are there few competing PRs?
+   Is it in a language we know? Low competition + clear spec = high score.
+3. **Freshness**: Created in last 7 days = 10, 30 days = 7, 90 days = 4, older = 2
+4. **Confidence**: How confident are we we can actually solve it?
+   TypeScript/Python/JS = 9, Go/Rust = 7, C++ = 5, Scala/Haskell = 3
+
+**Final score** = (Value × 0.3) + (Winnability × 0.3) + (Freshness × 0.2) + (Confidence × 0.2)
+
+Keep the **top 10** bounties. If fewer than 10 qualify, keep all of them.
+
+---
+
+## Phase 5: Draft first comments
+
+For each top bounty, draft a **professional first comment** that:
+1. Shows you understand the problem (paraphrase the issue)
+2. Proposes a concrete approach (2-3 sentences)
+3. Asks ONE clarifying question if needed
+4. Signals intent to work on it
+5. Is concise (3-5 sentences max — no essays)
+
+**Example draft:**
+> I'd like to tackle this. My approach: [1-2 sentence plan]. One question before I start — [specific question]. I can have a PR ready within [timeframe].
+
+**Never** include:
+- "As an AI..." or "I am an AI assistant..."
+- Generic pleasantries or fluff
+- Promises you can't keep
+- Technical jargon that doesn't add value
+
+---
+
+## Phase 6: Deliverable — human-review deck
+
+**OUTPUT PATHS (MUST follow exactly):**
+Write to `output/bounty-report-YYYY-MM-DD.json` (the deck endpoint searches here).
+
+The JSON file is an array of objects:
 ```json
 [
   {
@@ -79,17 +167,26 @@ with the same date. This file is an array of objects, one per top bounty:
     "title": "Issue title",
     "url": "https://github.com/owner/repo/issues/123",
     "amount": "$500",
-    "approach": "Brief solution approach",
-    "draftComment": "The full draft first comment ready to post"
+    "approach": "Brief solution approach (2-3 sentences)",
+    "draftComment": "The full draft first comment ready to post",
+    "score": 8.5,
+    "freshness": "2 days ago",
+    "competition": "1 existing PR"
   }
 ]
 ```
-The JSON is what the Nova UI uses to show Approve buttons. Make sure issueNumber
-is the integer issue number extracted from the URL.
 
-Finish with a 5-line summary in your final report, including the deck path.
+Also write a markdown report to `output/bounty-sweep-report.md` with:
+- Executive summary (total found, top 3 highlights)
+- Full ranked list with details
+- Stats: repos scanned, issues checked, bounties found, spam excluded
+- Footer: "Requires human approval before ANY post or submission."
+
+---
 
 ## Hard rules
 - Never comment, post, PR, or submit anything. Drafting only.
 - Never claim you can do something you can't.
+- Always use `GITHUB_TOKEN` for API calls (5,000 req/hr vs 10 req/min anonymous).
 - If the scan finds nothing, say so plainly — that IS a valid result.
+- Focus on QUALITY over quantity — 5 real bounties beat 50 spam hits.
