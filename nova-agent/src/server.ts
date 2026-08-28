@@ -28,7 +28,7 @@ import { runAgent } from "./agent.js";
 import { keyEnvFor, loadConfig, loadDotEnv, type NovaConfig } from "./config.js";
 import { buildToolDefinitions, verifyConnectors } from "./tools/index.js";
 import { automationTool, buildDailyReport, reportDeliveryProvider } from "./tools/automations.js";
-import { applyVaultOverrides, vaultDelete, vaultInfo, vaultList, vaultPushToRemote, vaultSet, vaultSyncFromRemote } from "./tools/vault.js";
+import { applyVaultOverrides, vaultDelete, vaultGet, vaultInfo, vaultList, vaultPushToRemote, vaultSet, vaultSyncFromRemote } from "./tools/vault.js";
 import { firstLine, redactSecrets } from "./util.js";
 
 export const VERSION = "0.4.0";
@@ -462,6 +462,22 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
       rec.toolCalls = result.toolCalls;
       if (!failed) rec.status = "done";
       rec.updatedAt = Date.now();
+      // Auto-save bounty deck to vault if this was a sweep task
+      if (rec.automated && rec.status === "done" && /bounty/i.test(rec.task || "")) {
+        try {
+          const outputDir = join(process.cwd(), "output");
+          const files = readdirSync(outputDir);
+          const jsonFile = files.find((f) => f.endsWith(".json") && f.includes("bounty"));
+          if (jsonFile) {
+            const raw = readFileSync(join(outputDir, jsonFile), "utf8");
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              vaultSet("BOUNTY_DECK", JSON.stringify({ bounties: parsed, savedAt: Date.now() }));
+              vaultPushToRemote();
+            }
+          }
+        } catch { /* best effort — vault save is non-critical */ }
+      }
     })();
 
     return rec;
@@ -631,6 +647,16 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
             }
           } catch { /* dir doesn't exist, skip */ }
         }
+        // Fallback: read from vault (persists across deploys)
+        if (bounties.length === 0) {
+          try {
+            const raw = vaultGet("BOUNTY_DECK");
+            if (raw) {
+              const deck = JSON.parse(raw);
+              bounties = deck.bounties || [];
+            }
+          } catch { /* vault parse error, skip */ }
+        }
         sendJson(res, 200, { bounties });
         return;
       }
@@ -656,6 +682,23 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           }
         } catch { debug.outputFiles = "dir not found"; }
         sendJson(res, 200, debug);
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/bounties/save") {
+        const body = await readBody(req);
+        const bounties = body.bounties;
+        if (!Array.isArray(bounties)) {
+          sendJson(res, 400, { error: "bounties array required" });
+          return;
+        }
+        const result = vaultSet("BOUNTY_DECK", JSON.stringify({ bounties, savedAt: Date.now() }));
+        if (!result.ok) {
+          sendJson(res, 500, { error: result.error });
+          return;
+        }
+        await vaultPushToRemote();
+        sendJson(res, 200, { ok: true, count: bounties.length });
         return;
       }
 
