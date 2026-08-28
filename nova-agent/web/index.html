@@ -1097,7 +1097,7 @@ function renderTaskView(t) {
   $("#task-title").textContent = t.task;
   $("#task-status").outerHTML = statusBadge(t.status);
   $("#task-provider").textContent = `${t.provider[0].toUpperCase() + t.provider.slice(1)}${t.mock ? " (mock)" : ""}`;
-  $("#task-stats").textContent = t.status === "done" ? `· ${t.steps} steps · ${t.toolCalls} tool calls · ${fmtDur(t.durationMs)}` : "";
+  $("#task-stats").textContent = t.status === "done" ? `· ${Array.isArray(t.steps) ? t.steps.length : t.steps} steps · ${t.toolCalls} tool calls · ${fmtDur(t.durationMs)}` : "";
 
   const stepsBox = $("#task-steps");
   $("#steps-empty").hidden = t.steps.length > 0;
