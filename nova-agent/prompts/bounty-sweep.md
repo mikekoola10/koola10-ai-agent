@@ -62,7 +62,11 @@ Keep the **top 10** by total score.
 
 ## Step 4: Write output
 
-Write a JSON file to `output/bounty-report-YYYY-MM-DD.json` (use today's date):
+CRITICAL: You MUST write TWO files:
+
+### File 1: `output/bounty-report-YYYY-MM-DD.json`
+
+This is a JSON array of bounty objects. The Nova UI reads this to show approve buttons:
 ```json
 [
   {
@@ -78,7 +82,15 @@ Write a JSON file to `output/bounty-report-YYYY-MM-DD.json` (use today's date):
 ]
 ```
 
-Also write `output/bounty-sweep-report.md` with a summary of findings.
+Include EVERY qualifying bounty from Step 3. Use `write_file` tool.
+
+### File 2: `output/bounty-sweep-report.md`
+
+A human-readable summary with:
+- Executive summary
+- Ranked list of bounties
+- Recommended action plan
+- Stats (repos scanned, issues checked, bounties found)
 
 ## Rules
 - Never comment, post, or submit. Drafting only.

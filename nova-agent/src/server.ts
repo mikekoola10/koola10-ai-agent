@@ -590,24 +590,42 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
                 break;
               } catch { /* parse error, skip */ }
             }
-            // Try markdown fallback
+            // Try markdown fallback — extract issue URLs AND repo names
             const mdFile = files.find((f) => f.endsWith(".md") && f.includes("bounty"));
             if (mdFile) {
               const md = readFileSync(join(dir, mdFile), "utf8");
+              // Extract GitHub issue URLs
               const urlRegex = /https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/issues\/(\d+)/g;
               let match;
               while ((match = urlRegex.exec(md)) !== null) {
                 const [_, owner, repo, num] = match;
                 if (!(bounties as any[]).find((b) => b.url === match![0])) {
-                  // Try to extract title from nearby lines
                   const beforeMd = md.slice(Math.max(0, match.index - 200), match.index);
                   const titleMatch = beforeMd.match(/#{1,3}\s+(.+)$/m) || beforeMd.match(/\*\*(.+?)\*\*/);
                   const title = titleMatch ? titleMatch[1].trim() : "";
-                  // Try to extract amount
                   const afterMd = md.slice(match.index, match.index + 500);
                   const amtMatch = afterMd.match(/\$[\d,]+/);
                   const amount = amtMatch ? amtMatch[0] : "";
                   bounties.push({ repo: `${owner}/${repo}`, issueNumber: Number(num), url: match[0], title, amount, approach: "", draftComment: "" });
+                }
+              }
+              // Also extract repo names from markdown (owner/repo pattern)
+              if (bounties.length === 0) {
+                const repoRegex = /`([\w.-]+)\/([\w.-]+)`/g;
+                const seen = new Set<string>();
+                while ((match = repoRegex.exec(md)) !== null) {
+                  const repoKey = `${match[1]}/${match[2]}`;
+                  if (seen.has(repoKey)) continue;
+                  seen.add(repoKey);
+                  // Extract amount from nearby context
+                  const ctx = md.slice(Math.max(0, match.index - 100), match.index + 300);
+                  const amtMatch = ctx.match(/\$[\d,]+/);
+                  const amount = amtMatch ? amtMatch[0] : "";
+                  // Extract description from nearby text
+                  const lines = ctx.split('\n').filter(l => l.trim());
+                  const descLine = lines.find(l => l.includes('Type:') || l.includes('Bounty:') || l.includes('Status:')) || '';
+                  const approach = descLine.replace(/^[\s-*]+/, '').trim();
+                  bounties.push({ repo: repoKey, issueNumber: 0, url: `https://github.com/${repoKey}`, title: repoKey, amount, approach, draftComment: "" });
                 }
               }
             }
