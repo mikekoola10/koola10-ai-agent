@@ -749,6 +749,10 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
         const repo = String(body.repo || "");
         const issueNumber = Number(body.issueNumber);
         const comment = String(body.comment || "");
+        const title = String(body.title || "");
+        const amount = String(body.amount || "");
+        const approach = String(body.approach || "");
+        const solve = body.solve === true; // launch full solve task?
         if (!repo || !issueNumber || !comment) {
           sendJson(res, 400, { error: "Missing repo, issueNumber, or comment" });
           return;
@@ -757,6 +761,8 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           sendJson(res, 500, { error: "GITHUB_TOKEN not configured" });
           return;
         }
+        // Step 1: Post the comment on the issue
+        let commentUrl = `https://github.com/${repo}/issues/${issueNumber}`;
         try {
           const url = `https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`;
           const ghRes = await fetch(url, {
@@ -778,10 +784,18 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           }
           let ghData: unknown;
           try { ghData = JSON.parse(text); } catch { ghData = { html_url: "" }; }
-          const htmlUrl = (ghData as Record<string, unknown>).html_url ?? `https://github.com/${repo}/issues/${issueNumber}#issuecomment-new`;
-          sendJson(res, 200, { ok: true, url: String(htmlUrl) });
+          commentUrl = String((ghData as Record<string, unknown>).html_url ?? commentUrl);
         } catch (err) {
           sendJson(res, 500, { error: `Post failed: ${(err as Error).message}` });
+          return;
+        }
+        // Step 2: If solve=true, launch a full bounty-solving task
+        if (solve) {
+          const solvePrompt = `Read prompts/bounty-solve.md (relative to the nova-agent project root) and execute the bounty solver exactly as instructed.\n\nREPO: ${repo}\nISSUE: ${issueNumber}\nTITLE: ${title}\nAMOUNT: ${amount}\nAPPROACH: ${approach}\nCOMMENT: ${comment}\n\nClone the repo, implement the fix, run tests, and create a PR. Write results to output/bounty-solve-${repo.replace(/\//g, "-")}-${issueNumber}.md`;
+          const rec = launchTask(solvePrompt, config.provider, true);
+          sendJson(res, 200, { ok: true, url: commentUrl, solveTaskId: rec.id, solveStatus: "queued" });
+        } else {
+          sendJson(res, 200, { ok: true, url: commentUrl });
         }
         return;
       }

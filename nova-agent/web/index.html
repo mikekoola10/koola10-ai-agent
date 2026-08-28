@@ -773,8 +773,9 @@ async function loadBounties() {
             <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px">Draft first comment (edit before approving):</label>
             <textarea id="${id}" style="width:100%;min-height:80px;background:#1e1b2e;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px;font-size:13px;font-family:monospace;resize:vertical">${esc(b.draftComment || '')}</textarea>
           </div>
-          <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
-            <button onclick="approveBounty(${i}, '${esc(b.repo)}', ${b.issueNumber || 0}, this)" style="background:#4ade80;color:#000;border:none;border-radius:6px;padding:7px 14px;font-weight:600;cursor:pointer;font-size:13px">✓ Approve & Post</button>
+          <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button onclick="approveBounty(${i}, '${esc(b.repo)}', ${b.issueNumber || 0}, false, this)" style="background:#4ade80;color:#000;border:none;border-radius:6px;padding:7px 14px;font-weight:600;cursor:pointer;font-size:13px">✓ Approve & Post</button>
+            ${b.issueNumber ? `<button onclick="approveBounty(${i}, '${esc(b.repo)}', ${b.issueNumber || 0}, true, this)" style="background:#f59e0b;color:#000;border:none;border-radius:6px;padding:7px 14px;font-weight:600;cursor:pointer;font-size:13px">⚡ Solve & PR</button>` : ''}
             <span id="bounty-status-${i}" style="font-size:12px;color:#64748b"></span>
           </div>
         </div>`;
@@ -787,28 +788,44 @@ async function loadBounties() {
   }
 }
 
-async function approveBounty(index, repo, issueNumber, btn) {
+async function approveBounty(index, repo, issueNumber, solve, btn) {
   const textarea = document.getElementById(`bounty-comment-${index}`);
   const status = document.getElementById(`bounty-status-${index}`);
   const comment = textarea ? textarea.value.trim() : "";
   if (!comment) { toast("Comment is empty — write something first!", true); return; }
   if (!repo || !issueNumber) { toast("Missing repo or issue number", true); return; }
+  // Get bounty data from the card
+  const cards = document.querySelectorAll('.conn-card');
+  const card = cards[index + 1]; // +1 because first card is the deck header
+  const titleEl = card ? card.querySelector('b') : null;
+  const metaEl = card ? card.querySelector('.task-meta') : null;
+  const approachEl = card ? card.querySelector('[style*="color:#a5b4fc"]') : null;
+  const bountyTitle = titleEl ? titleEl.textContent : '';
+  const bountyAmount = metaEl ? metaEl.textContent.split('·').pop().trim() : '';
+  const bountyApproach = approachEl ? approachEl.textContent.replace('Approach:', '').trim() : '';
   btn.disabled = true;
-  btn.textContent = "⏳ Posting…";
+  btn.textContent = solve ? "⚡ Solving…" : "⏳ Posting…";
   status.textContent = "";
   try {
-    const r = await jpost("/api/bounties/approve", { repo, issueNumber, comment });
+    const r = await jpost("/api/bounties/approve", { repo, issueNumber, comment, title: bountyTitle, amount: bountyAmount, approach: bountyApproach, solve });
     if (r.ok) {
-      btn.textContent = "✅ Posted!";
-      btn.style.background = "#22c55e";
-      status.innerHTML = `<a href="${esc(r.url)}" target="_blank" style="color:#4ade80">View comment ↗</a>`;
-      toast("Comment posted to GitHub!");
+      if (solve && r.solveTaskId) {
+        btn.textContent = "✅ Posted + Solving!";
+        btn.style.background = "#22c55e";
+        status.innerHTML = `<a href="${esc(r.url)}" target="_blank" style="color:#4ade80">Comment ↗</a> · Task <a href="#" onclick="loadTask('${r.solveTaskId}');return false" style="color:#f59e0b">${r.solveTaskId}</a>`;
+        toast("Comment posted! Nova is now solving the bounty — check the task for progress.");
+      } else {
+        btn.textContent = "✅ Posted!";
+        btn.style.background = "#22c55e";
+        status.innerHTML = `<a href="${esc(r.url)}" target="_blank" style="color:#4ade80">View comment ↗</a>`;
+        toast("Comment posted to GitHub!");
+      }
     } else {
       throw new Error(r.error || "Unknown error");
     }
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = "✓ Approve & Post";
+    btn.textContent = solve ? "⚡ Solve & PR" : "✓ Approve & Post";
     status.textContent = "Failed: " + (e.message || e);
     toast("Post failed: " + (e.message || e), true);
   }
@@ -1260,6 +1277,7 @@ function openTask(id) {
   startPolling();
   pollTask();
 }
+function loadTask(id) { openTask(id); }
 
 function showHero() {
   stopPolling();
