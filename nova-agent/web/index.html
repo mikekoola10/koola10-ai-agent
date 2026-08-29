@@ -775,7 +775,7 @@ async function loadBounties() {
           </div>
           <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button onclick="approveBounty(${i}, '${esc(b.repo)}', ${b.issueNumber || 0}, false, this)" style="background:#4ade80;color:#000;border:none;border-radius:6px;padding:7px 14px;font-weight:600;cursor:pointer;font-size:13px">✓ Approve & Post</button>
-            ${b.issueNumber ? `<button onclick="approveBounty(${i}, '${esc(b.repo)}', ${b.issueNumber || 0}, true, this)" style="background:#f59e0b;color:#000;border:none;border-radius:6px;padding:7px 14px;font-weight:600;cursor:pointer;font-size:13px">⚡ Solve & PR</button>` : ''}
+            <button onclick="approveBounty(${i}, '${esc(b.repo)}', ${b.issueNumber || 0}, true, this)" style="background:#f59e0b;color:#000;border:none;border-radius:6px;padding:7px 14px;font-weight:600;cursor:pointer;font-size:13px">⚡ Solve & PR</button>
             <span id="bounty-status-${i}" style="font-size:12px;color:#64748b"></span>
           </div>
         </div>`;
@@ -793,7 +793,7 @@ async function approveBounty(index, repo, issueNumber, solve, btn) {
   const status = document.getElementById(`bounty-status-${index}`);
   const comment = textarea ? textarea.value.trim() : "";
   if (!comment) { toast("Comment is empty — write something first!", true); return; }
-  if (!repo || !issueNumber) { toast("Missing repo or issue number", true); return; }
+  if (!repo) { toast("Missing repo name", true); return; }
   // Get bounty data from the card
   const cards = document.querySelectorAll('.conn-card');
   const card = cards[index + 1]; // +1 because first card is the deck header

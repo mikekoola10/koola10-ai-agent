@@ -482,6 +482,8 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           for (const mdFile of mdFiles) {
             const md = readFileSync(join(outputDir, mdFile), "utf8");
             vaultSet(`BOUNTY_REPORT_${mdFile.replace(/\.md$/, "")}`, JSON.stringify({ content: md, fileName: mdFile, savedAt: Date.now() }));
+            // Also save as the main report for the /api/bounties endpoint
+            vaultSet('BOUNTY_REPORT', JSON.stringify({ content: md, filename: mdFile, savedAt: Date.now() }));
           }
           if (mdFiles.length > 0) vaultPushToRemote();
         } catch { /* best effort — vault save is non-critical */ }
@@ -590,7 +592,18 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
             content = "";
           }
         }
-        sendJson(res, 200, { files, latest: latest ? { ...latest, content } : null });
+        // Fallback: if no files found, try vault for saved report
+        if (!content) {
+          try {
+            const raw = vaultGet('BOUNTY_REPORT');
+            if (raw) {
+              const report = JSON.parse(raw);
+              content = report.content || '';
+              files = [{ name: report.filename || 'bounty-report.md', modifiedAt: report.savedAt || Date.now(), size: content.length, dir: 'vault' }];
+            }
+          } catch { /* vault fallback failed */ }
+        }
+        sendJson(res, 200, { files, latest: latest ? { ...latest, content } : { name: 'vault-report', modifiedAt: Date.now(), content } });
         return;
       }
 
@@ -660,12 +673,21 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
               if (bounties.length === 0) {
                 const repoRegex = /`([\w.-]+)\/([\w.-]+)`/g;
                 const seen2 = new Set<string>();
-                // Exclude invalid repo-like patterns
-                const invalidRepos = /^(search|issues|pull|labels|wiki|api|graphql|raw|blob|tree|releases|actions|projects|security|insights|settings|packages|orgs|users|notifications)$/i;
+                // Exclude invalid repo-like patterns and non-repo patterns
+                const invalidRepos = /^(search|issues|pull|labels|wiki|api|graphql|raw|blob|tree|releases|actions|projects|security|insights|settings|packages|orgs|users|notifications|contributors)$/i;
                 while ((match = repoRegex.exec(md)) !== null) {
                   const repoKey = `${match[1]}/${match[2]}`;
                   if (seen2.has(repoKey)) continue;
                   if (invalidRepos.test(match[1]) || invalidRepos.test(match[2])) continue;
+                  // Validate: owner must not be empty, repo must not have file extensions
+                  if (!match[1] || !match[2]) continue;
+                  if (/\.json$|\.md$|\.js$|\.ts$|\.py$|\.yaml$|\.yml$/i.test(match[2])) continue;
+                  // Validate: owner/repo must look like a real GitHub repo (no repeated names, no table headers)
+                  if (match[1] === match[2]) continue;
+                  if (/^[|\s-]+$/.test(match[1]) || /^[|\s-]+$/.test(match[2])) continue;
+                  // Validate: both parts must be at least 2 chars and contain letters
+                  if (match[1].length < 2 || match[2].length < 2) continue;
+                  if (!/[a-zA-Z]/.test(match[1]) || !/[a-zA-Z]/.test(match[2])) continue;
                   seen2.add(repoKey);
                   const ctx = md.slice(Math.max(0, match.index - 100), match.index + 300);
                   const amtMatch = ctx.match(/\$[\d,]+/);
@@ -747,22 +769,40 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
       if (req.method === "POST" && pathname === "/api/bounties/approve") {
         const body = await readBody(req);
         const repo = String(body.repo || "");
-        const issueNumber = Number(body.issueNumber);
+        let issueNumber = Number(body.issueNumber);
         const comment = String(body.comment || "");
         const title = String(body.title || "");
         const amount = String(body.amount || "");
         const approach = String(body.approach || "");
         const solve = body.solve === true; // launch full solve task?
-        if (!repo || !issueNumber || !comment) {
-          sendJson(res, 400, { error: "Missing repo, issueNumber, or comment" });
+        if (!repo || !comment) {
+          sendJson(res, 400, { error: "Missing repo or comment" });
           return;
         }
         if (!config.githubToken) {
           sendJson(res, 500, { error: "GITHUB_TOKEN not configured" });
           return;
         }
+        // If no issue number, look up the repo's open issues to find a match
+        if (!issueNumber && title) {
+          try {
+            const searchUrl = `https://api.github.com/search/issues?q=repo:${repo}+type:issue+state:open+${encodeURIComponent(title.slice(0, 60))}`;
+            const searchRes = await fetch(searchUrl, {
+              headers: { Authorization: `Bearer ${config.githubToken}`, Accept: 'application/vnd.github+json', 'User-Agent': 'koola10-nova-agent' },
+              signal: AbortSignal.timeout(10_000),
+            });
+            if (searchRes.ok) {
+              const searchData = await searchRes.json() as any;
+              const items = searchData.items || [];
+              // Find best match by title similarity
+              const titleLower = title.toLowerCase();
+              const best = items.find((it: any) => it.title && titleLower.includes(it.title.toLowerCase().slice(0, 20))) || items[0];
+              if (best) issueNumber = best.number;
+            }
+          } catch { /* search failed, continue without issue number */ }
+        }
         // Step 1: Post the comment on the issue
-        let commentUrl = `https://github.com/${repo}/issues/${issueNumber}`;
+        let commentUrl = issueNumber ? `https://github.com/${repo}/issues/${issueNumber}` : `https://github.com/${repo}`;
         try {
           const url = `https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`;
           const ghRes = await fetch(url, {
