@@ -83,6 +83,62 @@
   .nav-item.active { background: var(--panel-2); color: var(--text); }
   .nav-item svg { width: 16px; height: 16px; flex: none; opacity: .85; }
 
+  /* ---------- Visualizer ---------- */
+  #nova-visualizer {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0; opacity: 0.35;
+  }
+  #hero-view { position: relative; }
+  #hero-view > * { position: relative; z-index: 1; }
+
+  /* ---------- Voice button ---------- */
+  .voice-btn {
+    width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--cyan);
+    background: transparent; color: var(--cyan); font-size: 18px;
+    display: grid; place-items: center; cursor: pointer; flex: none;
+    transition: all 0.2s; position: relative;
+  }
+  .voice-btn:hover { background: rgba(70, 224, 200, 0.1); box-shadow: 0 0 16px rgba(70, 224, 200, 0.3); }
+  .voice-btn.listening {
+    background: rgba(70, 224, 200, 0.2); border-color: var(--green);
+    animation: voice-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes voice-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(70, 224, 200, 0.4); }
+    50% { box-shadow: 0 0 0 12px rgba(70, 224, 200, 0); }
+  }
+
+  /* ---------- Memory view ---------- */
+  #memory-view { flex: 1; overflow-y: auto; padding: 26px 30px 60px; }
+  .mem-section { margin-bottom: 24px; }
+  .mem-section h3 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+  .mem-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; margin-bottom: 10px;
+  }
+  .mem-card .label { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.5px; }
+  .mem-card .value { font-size: 14px; color: var(--text); margin-top: 4px; }
+  .mem-card .detail { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .mem-stat {
+    display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px;
+  }
+  .mem-stat-item {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 20px; flex: 1; min-width: 120px; text-align: center;
+  }
+  .mem-stat-item .num { font-size: 24px; font-weight: 700; color: var(--accent); }
+  .mem-stat-item .lbl { font-size: 11px; color: var(--muted); margin-top: 4px; text-transform: uppercase; }
+  .mem-pattern { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .mem-pattern:last-child { border-bottom: none; }
+  .mem-pattern .conf {
+    width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 11px; font-weight: 700; color: #fff; flex: none;
+  }
+  .mem-pattern .conf.high { background: var(--green); }
+  .mem-pattern .conf.med { background: var(--amber); }
+  .mem-pattern .conf.low { background: var(--red); }
+  #memory-view .empty-state { color: var(--muted); text-align: center; padding: 40px 20px; }
+
   .side-section { margin-top: 14px; display: flex; flex-direction: column; gap: 2px; }
   .side-section.grow { flex: 1; min-height: 0; }
   .side-head {
@@ -436,6 +492,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
         <span>Bounties</span>
       </button>
+      <button class="nav-item" data-view="memory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a9 9 0 0 1 9 9c0 5-9 13-9 13S3 16 3 11a9 9 0 0 1 9-9Z"/><circle cx="12" cy="11" r="3"/></svg>
+        <span>Memory</span>
+      </button>
       <button class="nav-item" data-view="library">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13Z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>
         <span>Library</span>
@@ -476,6 +536,7 @@
 
     <!-- Hero -->
     <section id="hero-view">
+      <canvas id="nova-visualizer" width="800" height="600"></canvas>
       <h1>What can Nova do for you?</h1>
       <p class="sub">Assign a task — Nova plans, uses its tools, iterates, and delivers a finished result.</p>
 
@@ -483,6 +544,7 @@
         <div class="input-row">
           <button class="circle-btn" id="attach-btn" title="Attach">+</button>
           <textarea id="task-input" rows="1" placeholder="Assign a task or type / for more"></textarea>
+          <button class="voice-btn" id="voice-btn" title="Push to talk — hold to speak">🎤</button>
           <select id="provider-select" title="Model provider">
             <option value="deepseek">DeepSeek</option>
             <option value="anthropic">Claude (Anthropic)</option>
@@ -702,6 +764,21 @@
         that's the human-in-the-loop that keeps submissions clean.
       </div>
     </section>
+
+    <section id="memory-view" hidden>
+      <div class="conn-head">
+        <div>
+          <h2>🧠 Memory Vault</h2>
+          <div class="task-meta" id="memory-subtitle">Nova's persistent memory — patterns, knowledge, and daily notes</div>
+        </div>
+      </div>
+      <div id="memory-content"></div>
+      <div class="conn-hint">
+        <b>How it works:</b> Nova remembers everything across sessions. Bounty patterns, repo knowledge,
+        daily activity notes, and learned skills are stored in the encrypted vault and survive redeploys.
+        Every sweep and solve automatically updates Nova's memory.
+      </div>
+    </section>
   </main>
 </div>
 
@@ -841,6 +918,7 @@ function showBounties() {
   $("#vault-view").hidden = true;
   $("#scheduled-view").hidden = true;
   $("#bounties-view").hidden = false;
+  $("#memory-view").hidden = true;
   setActiveNav("bounties");
   loadBounties();
 }
@@ -856,6 +934,239 @@ async function runSweepNow() {
 }
 /* ---------------- /Bounty Board ---------------- */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Memory view                                                         */
+/* ------------------------------------------------------------------ */
+
+let memoryData = null;
+
+async function loadMemory() {
+  try {
+    memoryData = await jget("/api/memory");
+    renderMemory(memoryData);
+  } catch (e) {
+    document.getElementById("memory-content").innerHTML = `<div class="empty-state">Could not load memory — ${esc(e.message || e)}</div>`;
+  }
+}
+
+function renderMemory(data) {
+  if (!data) { document.getElementById("memory-content").innerHTML = `<div class="empty-state">Loading memory…</div>`; return; }
+  const p = data.profile || {};
+  const d = data.daily || {};
+  const patterns = data.patterns || [];
+  const repos = data.repos || [];
+  const skills = data.skills || [];
+
+  let html = `<div class="mem-stat">
+    <div class="mem-stat-item"><div class="num">${d.sweeps || 0}</div><div class="lbl">Sweeps Today</div></div>
+    <div class="mem-stat-item"><div class="num">${d.solves || 0}</div><div class="lbl">Solves Today</div></div>
+    <div class="mem-stat-item"><div class="num">${d.bountiesFound || 0}</div><div class="lbl">Bounties Found</div></div>
+    <div class="mem-stat-item"><div class="num">$${d.earnings || 0}</div><div class="lbl">Earnings</div></div>
+  </div>`;
+
+  html += `<div class="mem-section"><h3>🧠 Operator Profile</h3>
+    <div class="mem-card"><div class="label">Name</div><div class="value">${esc(p.name || "Operator")}</div></div>
+    <div class="mem-card"><div class="label">Risk Tolerance</div><div class="value">${esc(p.riskTolerance || "moderate")}</div></div>
+    <div class="mem-card"><div class="label">Preferred Languages</div><div class="value">${esc((p.preferredLanguages || []).join(", "))}</div></div>
+  </div>`;
+
+  if (patterns.length) {
+    html += `<div class="mem-section"><h3>📊 Learned Patterns</h3>`;
+    for (const pat of patterns.slice(0, 10)) {
+      const cls = pat.confidence >= 0.7 ? "high" : pat.confidence >= 0.4 ? "med" : "low";
+      html += `<div class="mem-pattern"><div class="conf ${cls}">${(pat.confidence * 100).toFixed(0)}%</div><div><div style="font-size:13px">${esc(pat.pattern)}</div><div style="font-size:11px;color:var(--faint)">${pat.examples?.length || 0} examples</div></div></div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (repos.length) {
+    html += `<div class="mem-section"><h3>📦 Repository Knowledge</h3>`;
+    for (const r of repos) {
+      const icon = r.verdict === "pursue" ? "✅" : r.verdict === "avoid" ? "🚫" : "👀";
+      html += `<div class="mem-card"><div class="label">${icon} ${esc(r.repo)}</div><div class="value">${esc(r.verdict)} — ${esc(r.reason)}</div></div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (skills.length) {
+    html += `<div class="mem-section"><h3>⚡ Skills</h3>`;
+    for (const s of skills) {
+      html += `<div class="mem-card"><div class="label">${esc(s.name)}</div><div class="detail">${esc(s.description)} · ${(s.successRate * 100).toFixed(0)}% success</div></div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (d.highlights?.length || d.lessons?.length) {
+    html += `<div class="mem-section"><h3>📝 Today's Notes</h3>`;
+    for (const h of (d.highlights || [])) html += `<div class="mem-card"><div class="detail">✅ ${esc(h)}</div></div>`;
+    for (const l of (d.lessons || [])) html += `<div class="mem-card"><div class="detail">💡 ${esc(l)}</div></div>`;
+    html += `</div>`;
+  }
+
+  if (!html.includes("mem-section")) {
+    html = `<div class="empty-state">Memory vault is empty — Nova will populate it as it works. Run a bounty sweep to start building intelligence.</div>`;
+  }
+
+  document.getElementById("memory-content").innerHTML = html;
+}
+
+function showMemory() {
+  stopPolling();
+  state.activeId = null;
+  document.getElementById("hero-view").hidden = true;
+  document.getElementById("task-view").hidden = true;
+  document.getElementById("connectors-view").hidden = true;
+  document.getElementById("vault-view").hidden = true;
+  document.getElementById("scheduled-view").hidden = true;
+  document.getElementById("bounties-view").hidden = true;
+  document.getElementById("memory-view").hidden = false;
+  setActiveNav("memory");
+  loadMemory();
+}
+/* ------------------------------------------------------------------ */
+/* Nova Visualizer — cyberpunk animated background                     */
+/* ------------------------------------------------------------------ */
+
+function initVisualizer() {
+  const canvas = document.getElementById("nova-visualizer");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  let w = 0, h = 0, t = 0;
+  const particles = [];
+  const NUM = 60;
+
+  function resize() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    w = canvas.width = rect.width;
+    h = canvas.height = rect.height;
+  }
+  resize();
+  window.addEventListener("resize", resize);
+
+  for (let i = 0; i < NUM; i++) {
+    particles.push({
+      x: Math.random() * 2000, y: Math.random() * 1200,
+      vx: (Math.random() - 0.5) * 0.5, vy: (Math.random() - 0.5) * 0.5,
+      r: Math.random() * 2 + 1, hue: Math.random() * 60 + 250,
+    });
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    t += 0.008;
+    ctx.strokeStyle = "rgba(124, 108, 255, 0.06)";
+    ctx.lineWidth = 1;
+    const gridSize = 60;
+    for (let x = (t * 20) % gridSize; x < w; x += gridSize) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    }
+    for (let y = (t * 15) % gridSize; y < h; y += gridSize) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+    for (const p of particles) {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0) p.x = w; if (p.x > w) p.x = 0;
+      if (p.y < 0) p.y = h; if (p.y > h) p.y = 0;
+      const alpha = 0.3 + 0.2 * Math.sin(t * 2 + p.hue);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = "hsla(" + p.hue + ", 70%, 60%, " + alpha + ")";
+      ctx.fill();
+    }
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 120) {
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = "rgba(124, 108, 255, " + (0.08 * (1 - dist / 120)) + ")";
+          ctx.stroke();
+        }
+      }
+    }
+    const grd = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, 200);
+    grd.addColorStop(0, "rgba(124, 108, 255, " + (0.04 + 0.02 * Math.sin(t)) + ")");
+    grd.addColorStop(1, "rgba(124, 108, 255, 0)");
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, w, h);
+    requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+/* ------------------------------------------------------------------ */
+/* Voice commands — Web Speech API push-to-talk                        */
+/* ------------------------------------------------------------------ */
+
+let recognition = null;
+let isListening = false;
+
+function initVoice() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    const btn = document.getElementById("voice-btn");
+    if (btn) btn.title = "Voice not supported in this browser";
+    return;
+  }
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = "en-US";
+
+  recognition.onresult = function(event) {
+    var transcript = event.results[0][0].transcript;
+    var input = document.getElementById("task-input");
+    if (input) {
+      input.value = transcript;
+      input.dispatchEvent(new Event("input"));
+    }
+    stopListening();
+    toast("Voice: \"" + transcript + "\"");
+    setTimeout(function() {
+      var send = document.getElementById("send-btn");
+      if (send && !send.disabled) send.click();
+    }, 300);
+  };
+
+  recognition.onerror = function(event) {
+    stopListening();
+    if (event.error !== "no-speech") toast("Voice error: " + event.error, true);
+  };
+
+  recognition.onend = function() { stopListening(); };
+
+  var btn = document.getElementById("voice-btn");
+  if (btn) {
+    btn.addEventListener("click", function(e) {
+      e.preventDefault();
+      if (isListening) stopListening(); else startListening();
+    });
+    btn.addEventListener("mousedown", function() { if (!isListening) startListening(); });
+    btn.addEventListener("mouseup", function() {});
+    btn.addEventListener("mouseleave", function() { if (isListening) stopListening(); });
+  }
+}
+
+function startListening() {
+  if (!recognition || isListening) return;
+  isListening = true;
+  var btn = document.getElementById("voice-btn");
+  if (btn) btn.classList.add("listening");
+  try { recognition.start(); } catch(e) {}
+}
+
+function stopListening() {
+  isListening = false;
+  var btn = document.getElementById("voice-btn");
+  if (btn) btn.classList.remove("listening");
+  try { if (recognition) recognition.stop(); } catch(e) {}
+}
+
 /* Nova UI — vanilla JS client (no frameworks, no build step)          */
 /* ------------------------------------------------------------------ */
 
@@ -1288,6 +1599,7 @@ function showHero() {
   $("#scheduled-view").hidden = true;
   $("#vault-view").hidden = true;
   $("#hero-view").hidden = false;
+  $("#memory-view").hidden = true;
   setActiveNav("agent");
   loadTasks();
 }
@@ -1389,6 +1701,7 @@ function showConnectors() {
   $("#scheduled-view").hidden = true;
   $("#vault-view").hidden = true;
   $("#connectors-view").hidden = false;
+  $("#memory-view").hidden = true;
   setActiveNav("plugins");
   loadConnectors();
 }
@@ -1451,6 +1764,7 @@ function showVault() {
   $("#connectors-view").hidden = true;
   $("#scheduled-view").hidden = true;
   $("#vault-view").hidden = false;
+  $("#memory-view").hidden = true;
   setActiveNav("vault");
   loadVault();
 }
@@ -1530,6 +1844,7 @@ function showScheduled() {
   $("#connectors-view").hidden = true;
   $("#vault-view").hidden = true;
   $("#scheduled-view").hidden = false;
+  $("#memory-view").hidden = true;
   setActiveNav("scheduled");
   loadScheduled();
 }
@@ -1605,11 +1920,14 @@ function init() {
     else if (view === "plugins") showConnectors();
     else if (view === "scheduled") showScheduled();
     else if (view === "vault") showVault();
+    else if (view === "memory") showMemory();
     else toast("Coming soon — this view ships in a later build.");
   }));
   $("#settings-btn").addEventListener("click", () => toast("Settings live in .env — see README and env.example."));
   $("#attach-btn").addEventListener("click", () => toast("File attach is coming soon."));
 
+  initVisualizer();
+  initVoice();
   loadHealth();
   loadTasks();
   setInterval(loadTasks, 6000);

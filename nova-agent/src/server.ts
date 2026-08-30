@@ -18,6 +18,16 @@
  *   GET  /api/vault               -> vault entry names (never values)
  *   POST /api/vault               -> { name, value } store an encrypted entry
  *   DELETE /api/vault/:name       -> remove an entry
+ *   GET  /api/memory              -> memory summary
+ *   GET  /api/memory/daily        -> today's daily note
+ *   GET  /api/memory/patterns     -> bounty patterns
+ *   GET  /api/memory/repos        -> repo knowledge index
+ *   POST /api/memory/patterns     -> add a pattern
+ *   POST /api/memory/repos        -> add repo knowledge
+ *   POST /api/memory/daily        -> update daily note
+ *   POST /api/memory/skills       -> add a skill
+ *   GET  /api/memory/profile      -> operator profile
+ *   POST /api/memory/profile      -> update operator profile
  *   GET  /                   -> the web UI
  */
 import { createServer, type Server } from "node:http";
@@ -30,6 +40,7 @@ import { buildToolDefinitions, verifyConnectors } from "./tools/index.js";
 import { automationTool, buildDailyReport, reportDeliveryProvider } from "./tools/automations.js";
 import { applyVaultOverrides, vaultDelete, vaultGet, vaultInfo, vaultList, vaultPushToRemote, vaultSet, vaultSyncFromRemote } from "./tools/vault.js";
 import { firstLine, redactSecrets } from "./util.js";
+import { getDailyNote, updateDailyNote, writeDailyNoteMarkdown, getPatterns, addPattern, getRepoKnowledge, saveRepoKnowledge, listRepoKnowledge, updateRepoIndex, getProfile, updateProfile, getSkills, addSkill, memorySummary } from "./memory.js";
 
 export const VERSION = "0.4.0";
 
@@ -488,6 +499,19 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           if (mdFiles.length > 0) vaultPushToRemote();
         } catch { /* best effort — vault save is non-critical */ }
       }
+      // Auto-write daily note after any completed task
+      if (rec.status === "done") {
+        try {
+          const isSweep = /sweep/i.test(rec.task || "");
+          const isSolve = /solve|bounty/i.test(rec.task || "");
+          updateDailyNote({
+            sweeps: isSweep ? 1 : 0,
+            solves: isSolve ? 1 : 0,
+            bountiesFound: isSweep ? Math.min(rec.toolCalls, 10) : 0,
+            highlights: [`[${isSweep ? 'sweep' : isSolve ? 'solve' : 'task'}] Completed in ${(result.durationMs / 1000).toFixed(0)}s (${result.steps} steps, ${result.toolCalls} tool calls)`],
+          });
+        } catch { /* best effort */ }
+      }
     })();
 
     return rec;
@@ -904,6 +928,112 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
         const ok = vaultDelete(decodeURIComponent(vm[1]!));
         const sync = ok ? await vaultPushToRemote() : { ok: true };
         sendJson(res, 200, { ok, remoteSynced: sync.ok, remoteError: sync.error ?? null });
+        return;
+      }
+
+      // ── Memory Vault endpoints ──────────────────────────────────
+
+      if (req.method === "GET" && pathname === "/api/memory") {
+        sendJson(res, 200, {
+          summary: memorySummary(),
+          daily: getDailyNote(),
+          patterns: getPatterns(),
+          repos: listRepoKnowledge(),
+          skills: getSkills(),
+          profile: getProfile(),
+        });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/memory/daily") {
+        const date = url.searchParams.get("date") ?? undefined;
+        const note = getDailyNote(date);
+        sendJson(res, 200, { note, markdown: writeDailyNoteMarkdown(note) });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/memory/daily") {
+        const body = await readBody(req);
+        const updated = updateDailyNote(body as Record<string, unknown>);
+        await vaultPushToRemote();
+        sendJson(res, 200, { ok: true, note: updated });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/memory/patterns") {
+        sendJson(res, 200, { patterns: getPatterns() });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/memory/patterns") {
+        const body = await readBody(req);
+        if (!body.pattern) {
+          sendJson(res, 400, { error: "pattern is required" });
+          return;
+        }
+        addPattern({
+          pattern: String(body.pattern),
+          confidence: Number(body.confidence) || 0.5,
+          examples: Array.isArray(body.examples) ? body.examples : [],
+          lastUpdated: Date.now(),
+        });
+        await vaultPushToRemote();
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/memory/repos") {
+        sendJson(res, 200, { repos: listRepoKnowledge() });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/memory/repos") {
+        const body = await readBody(req);
+        if (!body.repo) {
+          sendJson(res, 400, { error: "repo is required" });
+          return;
+        }
+        const knowledge = {
+          repo: String(body.repo),
+          verdict: (body.verdict as "pursue" | "avoid" | "monitor") || "monitor",
+          reason: String(body.reason || ""),
+          bountyHistory: Array.isArray(body.bountyHistory) ? body.bountyHistory : [],
+          lastScanned: Date.now(),
+        };
+        saveRepoKnowledge(knowledge);
+        updateRepoIndex(knowledge.repo);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/memory/profile") {
+        sendJson(res, 200, { profile: getProfile() });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/memory/profile") {
+        const body = await readBody(req);
+        const updated = updateProfile(body as Record<string, unknown>);
+        await vaultPushToRemote();
+        sendJson(res, 200, { ok: true, profile: updated });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/memory/skills") {
+        const body = await readBody(req);
+        if (!body.name) {
+          sendJson(res, 400, { error: "name is required" });
+          return;
+        }
+        addSkill({
+          name: String(body.name),
+          description: String(body.description || ""),
+          learnedFrom: String(body.learnedFrom || ""),
+          lastUsed: Date.now(),
+          successRate: Number(body.successRate) || 1.0,
+        });
+        await vaultPushToRemote();
+        sendJson(res, 200, { ok: true });
         return;
       }
 

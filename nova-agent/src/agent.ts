@@ -2,6 +2,7 @@ import type { NovaConfig } from "./config.js";
 import { complete } from "./llm.js";
 import type { AgentResult, ChatMessage } from "./types.js";
 import { buildToolDefinitions, dispatchTool } from "./tools/index.js";
+import { primeContext, memorySummary } from "./memory.js";
 
 const SYSTEM_PROMPT = `You are Nova, an autonomous AI agent built for the koola10 team. You are given an open-ended task and you work it through to completion on your own, using the tools available to you.
 
@@ -11,6 +12,7 @@ How you operate:
 3. After each tool call you will see its output. Use it to decide the next step. When something fails, correct course: retry with a fix, try a different approach, or clearly report the blocker.
 4. When the task is complete, produce a concise final report: what you did, the key results and artifacts (with file paths), and any caveats. Write long deliverables to files rather than dumping them in chat.
 5. Keep intermediate narration brief. Tool arguments must always be valid JSON.
+6. You have persistent memory. Use it: record what you learn, patterns you discover, and mistakes to avoid. Memory persists across sessions.
 
 Formatting:
 - The final message must start with the heading "## Final report".
@@ -25,13 +27,29 @@ export interface AgentCallbacks {
 }
 
 /** Runs the agent loop until the model answers without tool calls. */
+/** Detect task type from the task text for memory priming. */
+function detectTaskType(task: string): string {
+  const lower = task.toLowerCase();
+  if (/bounty.*sweep|sweep.*bounty|scan.*bounty/i.test(lower)) return "sweep";
+  if (/bounty.*solve|solve.*bounty|clone.*fix|implement.*fix/i.test(lower)) return "solve";
+  if (/report|daily|summary/i.test(lower)) return "report";
+  if (/research|investigate|analyze/i.test(lower)) return "research";
+  return "general";
+}
+
 export async function runAgent(
   task: string,
   config: NovaConfig,
   cbs: AgentCallbacks = {},
 ): Promise<AgentResult> {
+  // Prime context from the memory vault before starting
+  const taskType = detectTaskType(task);
+  const memCtx = primeContext(taskType);
+  const memSummary = memorySummary();
+
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
+    ...(memCtx ? [{ role: "user" as const, content: `[MEMORY CONTEXT — read this before starting]\n\n${memCtx}` }] : []),
     { role: "user", content: task },
   ];
   const tools = buildToolDefinitions();
