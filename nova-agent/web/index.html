@@ -549,6 +549,7 @@
             <option value="deepseek">DeepSeek</option>
             <option value="anthropic">Claude (Anthropic)</option>
             <option value="openai">GPT (OpenAI)</option>
+            <option value="gemini">Gemini (Free)</option>
           </select>
           <button class="send-btn" id="send-btn" title="Run task" disabled>
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 11.5 21 3l-8.5 18-2.2-7.3L3 11.5Zm8 4 8.3-9.6L11.7 14l-.7.5.7-.5Z"/></svg>
@@ -1911,7 +1912,7 @@ function init() {
   $("#vault-add-btn").addEventListener("click", addVaultKey);
   $("#vault-value").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addVaultKey(); } });
   $("#provider-select").addEventListener("change", (e) => {
-    const names = { deepseek: "DeepSeek", anthropic: "Claude", openai: "GPT" };
+    const names = { deepseek: "DeepSeek", anthropic: "Claude", openai: "GPT", gemini: "Gemini (Free)" };
     toast(`Provider: ${names[e.target.value]} (needs its API key in .env to run for real)`);
   });
   document.querySelectorAll(".nav-item").forEach((btn) => btn.addEventListener("click", () => {

@@ -41,7 +41,7 @@ export function loadDotEnv(cwd: string): void {
   }
 }
 
-export type Provider = "deepseek" | "anthropic" | "openai";
+export type Provider = "deepseek" | "anthropic" | "openai" | "gemini";
 
 export interface NovaConfig {
   provider: Provider;
@@ -93,7 +93,7 @@ function boolEnv(name: string, fallback = false): boolean {
 }
 
 function normalizeProvider(v: string | undefined): Provider {
-  if (v === "anthropic" || v === "openai" || v === "deepseek") return v;
+  if (v === "anthropic" || v === "openai" || v === "deepseek" || v === "gemini") return v;
   return "deepseek";
 }
 
@@ -111,18 +111,21 @@ const DEFAULT_MODEL: Record<Provider, string> = {
   deepseek: "deepseek-chat",
   anthropic: "claude-sonnet-4-5",
   openai: "gpt-4o-mini",
+  gemini: "gemini-2.5-flash",
 };
 
 const DEFAULT_BASE: Record<Provider, string> = {
   deepseek: "https://api.deepseek.com",
   anthropic: "https://api.anthropic.com",
   openai: "https://api.openai.com/v1",
+  gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
 };
 
 const KEY_ENV: Record<Provider, string> = {
   deepseek: "DEEPSEEK_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
+  gemini: "GEMINI_API_KEY",
 };
 
 export function keyEnvFor(provider: Provider): string {
