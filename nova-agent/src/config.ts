@@ -68,6 +68,10 @@ export interface NovaConfig {
   autoSolveMaxPerSweep: number;
   /** Enable PR merge watcher (checks every 30 min). */
   prWatcher: boolean;
+  /** Security bounty scanning (HackerOne/Bugcrowd). */
+  securityScan: boolean;
+  /** Max programs to scan per security sweep. */
+  securityScanMax: number;
   stripeKey: string;
   clawdbotCli: string;
   /** Browser tool settings. */
@@ -82,9 +86,14 @@ export interface NovaConfig {
   makeWebhookUrl: string;
   /** Hugging Face access token. */
   huggingfaceApiKey: string;
+  /** HackerOne API credentials. */
+  hackeroneUsername: string;
+  hackeroneApiToken: string;
+  /** Bugcrowd API credentials. */
+  bugcrowdApiToken: string;
 }
 
-function env(name: string): string | undefined {
+export function env(name: string): string | undefined {
   const v = process.env[name];
   return v && v.trim() !== "" ? v : undefined;
 }
@@ -176,6 +185,8 @@ export function loadConfig(flags: CliFlags = {}): NovaConfig {
     autoSolveMinScore: floatEnv("NOVA_AUTO_SOLVE_MIN_SCORE", 5.0),
     autoSolveMaxPerSweep: intEnv("NOVA_AUTO_SOLVE_MAX", 5),
     prWatcher: boolEnv("NOVA_PR_WATCHER", true),
+    securityScan: boolEnv("NOVA_SECURITY_SCAN", true),
+    securityScanMax: intEnv("NOVA_SECURITY_SCAN_MAX", 5),
     clawdbotCli: env("CLAWDBOT_CLI") ?? "openclaw",
     browserHeadless: boolEnv("NOVA_BROWSER_HEADLESS", true),
     composioApiKey: env("COMPOSIO_API_KEY") ?? "",
@@ -185,5 +196,8 @@ export function loadConfig(flags: CliFlags = {}): NovaConfig {
     n8nApiKey: env("N8N_API_KEY") ?? "",
     makeWebhookUrl: env("MAKE_WEBHOOK_URL") ?? "",
     huggingfaceApiKey: env("HUGGINGFACE_TOKEN") ?? "",
+    hackeroneUsername: env("HACKERONE_USERNAME") ?? "",
+    hackeroneApiToken: env("HACKERONE_API_TOKEN") ?? "",
+    bugcrowdApiToken: env("BUGCROWD_API_TOKEN") ?? "",
   };
 }

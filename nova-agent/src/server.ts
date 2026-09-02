@@ -772,6 +772,12 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           },
           prWatcher: prWatcher.status(),
           dailyReport: reporter.status(),
+          securityScan: {
+            enabled: config.securityScan,
+            maxPrograms: config.securityScanMax,
+            hackerOne: !!config.hackeroneUsername,
+            bugcrowd: !!config.bugcrowdApiToken,
+          },
         });
         return;
       }
@@ -1206,6 +1212,65 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
         return;
       }
 
+      // ── Security Bounty Scanning (HackerOne/Bugcrowd) ───────────
+
+      if (req.method === "GET" && pathname === "/api/security-scan") {
+        if (!config.securityScan) {
+          sendJson(res, 200, { enabled: false, message: "Security scanning is disabled (NOVA_SECURITY_SCAN=0)" });
+          return;
+        }
+        try {
+          const { runSecurityScan } = await import("./tools/security-bounty.js");
+          const result = await runSecurityScan();
+          sendJson(res, 200, {
+            enabled: true,
+            programs: result.programs.length,
+            findings: result.findings.length,
+            submissions: result.submissions.length,
+            totalEstimatedPayout: result.totalEstimatedPayout,
+            topFindings: result.findings.slice(0, 5),
+          });
+        } catch (err) {
+          sendJson(res, 500, { error: String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/security-scan") {
+        if (!config.securityScan) {
+          sendJson(res, 200, { enabled: false, message: "Security scanning is disabled" });
+          return;
+        }
+        try {
+          const { runSecurityScan } = await import("./tools/security-bounty.js");
+          const result = await runSecurityScan();
+          // Track security bounty earnings
+          for (const finding of result.findings) {
+            if (finding.severity === "critical" || finding.severity === "high") {
+              addEarning({
+                date: new Date().toISOString(),
+                repo: finding.program,
+                issue: 0,
+                amount: finding.estimatedPayout,
+                currency: "USD",
+                status: "pending",
+                platform: "hackerone",
+              });
+            }
+          }
+          sendJson(res, 200, {
+            ok: true,
+            programs: result.programs.length,
+            findings: result.findings.length,
+            submissions: result.submissions.length,
+            totalEstimatedPayout: result.totalEstimatedPayout,
+          });
+        } catch (err) {
+          sendJson(res, 500, { error: String(err) });
+        }
+        return;
+      }
+
       // ── Memory Vault endpoints ──────────────────────────────────
 
       if (req.method === "GET" && pathname === "/api/memory") {
@@ -1442,7 +1507,7 @@ async function main(): Promise<void> {
   console.log(`⚡ Nova UI v${VERSION}`);
   console.log(`   brain:    ${cfg.provider}/${cfg.model}${autoMock ? "  (no API key — mock mode)" : ""}`);
   console.log(`   url:      http://0.0.0.0:${shown}`);
-  console.log(`   api:      GET /api/health · GET /api/tasks · POST /api/tasks · POST /api/sweep · GET /api/sweep/status · GET /api/connectors/verify · GET /api/scheduled/status`);
+  console.log(`   api:      GET /api/health · GET /api/tasks · POST /api/tasks · POST /api/sweep · GET /api/sweep/status · GET /api/security-scan · GET /api/connectors/verify · GET /api/scheduled/status`);
 
   const monitorStatus = server.connectorMonitor ? server.connectorMonitor.status() : null;
   console.log(`   monitor:  connector self-check every ${monitorStatus && monitorStatus.intervalHours > 0 ? `${monitorStatus.intervalHours}h` : "disabled"} (NOVA_CONNECTOR_CHECK_HOURS)`);
@@ -1456,6 +1521,7 @@ async function main(): Promise<void> {
     : "";
   console.log(`   vault:    ${vaultStatus.count} encrypted entr${vaultStatus.count === 1 ? "y" : "ies"} (${vaultStatus.dir}${vaultStatus.usingEnvKey ? " · NOVA_VAULT_KEY" : ""}${remoteText})`);
   console.log(`   auto:     ${config.autoSolve ? `auto-solve ON (min score ${config.autoSolveMinScore}, max ${config.autoSolveMaxPerSweep}/sweep)` : "auto-solve OFF"} · ${config.prWatcher ? "PR watcher ON (30m interval)" : "PR watcher OFF"}`);
+  console.log(`   security: ${config.securityScan ? `security scan ON (max ${config.securityScanMax} programs/sweep) · HackerOne ${config.hackeroneUsername ? "✓" : "✗"} · Bugcrowd ${config.bugcrowdApiToken ? "✓" : "✗"}` : "security scan OFF"} (NOVA_SECURITY_SCAN)`);
   console.log(`   ctrl-c to stop`);
 
   server.on("error", (err) => {

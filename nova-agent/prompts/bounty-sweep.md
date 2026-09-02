@@ -28,6 +28,12 @@ label:bounty state:open type:issue sort:created
 label:reward state:open type:issue
 ```
 
+### Query 5: Security bounties (highest $/bounty)
+```
+label:"security bounty" state:open type:issue sort:created
+label:"security" bounty state:open type:issue sort:created
+```
+
 For each query, get the first 30 results. Extract:
 - repo (owner/name)
 - issue number
@@ -58,6 +64,23 @@ These are funded bounties that pay via Stripe on merge.
 Fetch: `https://immunefi.com/public-api/bounties.json`
 These are security audit bounties. Higher value but require security expertise.
 Only include if the bounty is within Nova's capability scope.
+
+### HackerOne — Public programs (avg $500-$3,000 per bounty)
+If HACKERONE_USERNAME and HACKERONE_API_TOKEN are set:
+1. List public programs via `GET /hackers/programs?filter[hunters_allowed]=true`
+2. Get program scope via `GET /hackers/programs/{handle}/structured_scopes`
+3. For each target URL, run automated checks:
+   - XSS (inject payloads, check if reflected)
+   - SSRF (test internal metadata endpoints)
+   - IDOR (test sequential IDs)
+   - Open Redirect (test redirect params)
+4. If findings detected, generate structured report and submit
+
+### Bugcrowd — Public programs (avg $500-$2,500 per bounty)
+If BUGCROWD_API_TOKEN is set:
+1. List programs via `GET /programs`
+2. Scan in-scope targets for common vulnerabilities
+3. Submit findings via Bugcrowd submission API
 
 ## Step 2: Filter
 
