@@ -21,7 +21,7 @@ iterates, and delivers a final report.
 
 OPTIONS
   --mock                Use a scripted mock brain (no API key needed; for testing)
-  --provider <name>     deepseek | anthropic | openai | gemini (default: deepseek)
+  --provider <name>     deepseek | anthropic | openai | gemini | tencent (default: deepseek)
   --model <name>        Override NOVA_MODEL (default: per-provider)
   --max-steps <n>       Override NOVA_MAX_STEPS (default: 25)
   --verbose, -v         Print full tool outputs
@@ -35,7 +35,7 @@ OPTIONS
   --version             Show version
 
 ENVIRONMENT (or .env in the working directory)
-  NOVA_PROVIDER         deepseek (default) | anthropic (Claude) | openai | gemini (free tier)
+  NOVA_PROVIDER         deepseek (default) | anthropic (Claude) | openai | gemini (free) | tencent (Hy4)
   DEEPSEEK_API_KEY      Required for deepseek provider
   ANTHROPIC_API_KEY     Required for anthropic provider
   OPENAI_API_KEY        Required for openai provider

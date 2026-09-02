@@ -41,7 +41,7 @@ export function loadDotEnv(cwd: string): void {
   }
 }
 
-export type Provider = "deepseek" | "anthropic" | "openai" | "gemini";
+export type Provider = "deepseek" | "anthropic" | "openai" | "gemini" | "tencent";
 
 export interface NovaConfig {
   provider: Provider;
@@ -94,7 +94,7 @@ function boolEnv(name: string, fallback = false): boolean {
 
 function normalizeProvider(v: string | undefined): Provider {
   const lower = v?.toLowerCase();
-  if (lower === "anthropic" || lower === "openai" || lower === "deepseek" || lower === "gemini") return lower as Provider;
+  if (lower === "anthropic" || lower === "openai" || lower === "deepseek" || lower === "gemini" || lower === "tencent") return lower as Provider;
   return "deepseek";
 }
 
@@ -113,6 +113,7 @@ const DEFAULT_MODEL: Record<Provider, string> = {
   anthropic: "claude-sonnet-4-5",
   openai: "gpt-4o-mini",
   gemini: "gemini-2.5-flash",
+  tencent: "hy4-preview",
 };
 
 const DEFAULT_BASE: Record<Provider, string> = {
@@ -120,6 +121,7 @@ const DEFAULT_BASE: Record<Provider, string> = {
   anthropic: "https://api.anthropic.com",
   openai: "https://api.openai.com/v1",
   gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
+  tencent: "https://tokenhub-intl.tencentcloudmaas.com/v1",
 };
 
 const KEY_ENV: Record<Provider, string> = {
@@ -127,6 +129,7 @@ const KEY_ENV: Record<Provider, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
   gemini: "GEMINI_API_KEY",
+  tencent: "TENCENT_API_KEY",
 };
 
 export function keyEnvFor(provider: Provider): string {
