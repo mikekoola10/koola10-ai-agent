@@ -50,6 +50,8 @@ export interface NovaConfig {
   apiBase: string;
   model: string;
   maxSteps: number;
+  /** Step limit for bounty-solve tasks (higher than maxSteps). */
+  solveSteps: number;
   maxToolOutputChars: number;
   toolTimeoutMs: number;
   mock: boolean;
@@ -58,6 +60,14 @@ export interface NovaConfig {
   cwd: string;
   /** Connector secrets (optional). */
   githubToken: string;
+  /** Auto-solve: automatically approve and solve bounties after sweep. */
+  autoSolve: boolean;
+  /** Minimum bounty score (0-10) to auto-solve. */
+  autoSolveMinScore: number;
+  /** Max bounties to auto-solve per sweep cycle. */
+  autoSolveMaxPerSweep: number;
+  /** Enable PR merge watcher (checks every 30 min). */
+  prWatcher: boolean;
   stripeKey: string;
   clawdbotCli: string;
   /** Browser tool settings. */
@@ -90,6 +100,13 @@ function boolEnv(name: string, fallback = false): boolean {
   const v = env(name);
   if (!v) return fallback;
   return !["0", "false", "no", "off"].includes(v.toLowerCase());
+}
+
+function floatEnv(name: string, fallback: number): number {
+  const v = env(name);
+  if (!v) return fallback;
+  const n = Number.parseFloat(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function normalizeProvider(v: string | undefined): Provider {
@@ -146,6 +163,7 @@ export function loadConfig(flags: CliFlags = {}): NovaConfig {
     apiBase: (env("NOVA_API_BASE") ?? DEFAULT_BASE[provider]).replace(/\/+$/, ""),
     model: flags.model ?? env("NOVA_MODEL") ?? DEFAULT_MODEL[provider],
     maxSteps: flags.maxSteps ? Number.parseInt(flags.maxSteps, 10) : intEnv("NOVA_MAX_STEPS", 50),
+    solveSteps: intEnv("NOVA_SOLVE_STEPS", 80),
     maxToolOutputChars,
     toolTimeoutMs: intEnv("NOVA_TOOL_TIMEOUT_MS", 60_000),
     mock: flags.mock ?? boolEnv("NOVA_MOCK"),
@@ -154,6 +172,10 @@ export function loadConfig(flags: CliFlags = {}): NovaConfig {
     cwd,
     githubToken: env("GITHUB_TOKEN") ?? "",
     stripeKey: env("STRIPE_SECRET_KEY") ?? "",
+    autoSolve: boolEnv("NOVA_AUTO_SOLVE", true),
+    autoSolveMinScore: floatEnv("NOVA_AUTO_SOLVE_MIN_SCORE", 5.0),
+    autoSolveMaxPerSweep: intEnv("NOVA_AUTO_SOLVE_MAX", 2),
+    prWatcher: boolEnv("NOVA_PR_WATCHER", true),
     clawdbotCli: env("CLAWDBOT_CLI") ?? "openclaw",
     browserHeadless: boolEnv("NOVA_BROWSER_HEADLESS", true),
     composioApiKey: env("COMPOSIO_API_KEY") ?? "",

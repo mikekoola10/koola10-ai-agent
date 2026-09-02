@@ -323,6 +323,110 @@ function startSweepScheduler(
   };
 }
 
+/**
+ * PR Merge Watcher — periodically checks tracked bounties for PR status changes.
+ * When a PR is merged, updates the bounty lifecycle to "paid" status.
+ * Checks every 30 minutes to stay within API rate limits.
+ */
+function startPrWatcher(config: NovaConfig): { status(): PrWatcherStatus; stop(): void } {
+  const CHECK_INTERVAL_MS = 30 * 60_000; // 30 minutes
+  let lastCheckAt = 0;
+  let lastOk: boolean | null = null;
+  let lastDetail: string | null = null;
+  let mergedCount = 0;
+  let totalChecked = 0;
+
+  const checkPrStatuses = async (): Promise<void> => {
+    if (!config.githubToken) return;
+    lastCheckAt = Date.now();
+    try {
+      const raw = vaultGet("BOUNTY_DECK");
+      if (!raw) { lastDetail = "no deck in vault"; return; }
+      const deck = JSON.parse(raw);
+      const bounties = (deck.bounties || []) as Array<Record<string, unknown>>;
+      const solving = bounties.filter((b) => b.status === "solving" && b.solveTaskId);
+      if (solving.length === 0) { lastDetail = `no active solves (${bounties.length} total bounties)`; lastOk = true; return; }
+      for (const bounty of solving) {
+        totalChecked++;
+        const repo = bounty.repo as string;
+        const issueNumber = bounty.issueNumber as number;
+        const prUrl = bounty.prUrl as string | undefined;
+        // Check if we have a PR URL from the solve task report
+        if (!prUrl) {
+          // Check the solve task status
+          const taskId = bounty.solveTaskId as string;
+          // Tasks are in-memory, so check by looking at the bounty's solve status
+          continue;
+        }
+        // Check PR status via GitHub API
+        try {
+          const prMatch = prUrl.match(/github\.com\/(.+?)\/pull\/(\d+)/);
+          if (!prMatch) continue;
+          const [, prRepo, prNum] = prMatch;
+          const ghRes = await fetch(`https://api.github.com/repos/${prRepo}/pulls/${prNum}`, {
+            headers: {
+              Authorization: `Bearer ${config.githubToken}`,
+              Accept: "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "koola10-nova-agent",
+            },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (ghRes.ok) {
+            const prData = await ghRes.json() as { state: string; merged: boolean; merged_at: string | null };
+            if (prData.merged) {
+              bounty.status = "merged";
+              bounty.mergedAt = prData.merged_at || new Date().toISOString();
+              bounty.lifecycleStep = 5;
+              mergedCount++;
+            } else if (prData.state === "closed") {
+              bounty.status = "pr-closed";
+              bounty.lifecycleStep = 4;
+            }
+          }
+        } catch { /* individual PR check failed, continue */ }
+      }
+      vaultSet("BOUNTY_DECK", JSON.stringify({ bounties, savedAt: Date.now() }));
+      lastOk = true;
+      lastDetail = `checked ${solving.length} solves, ${mergedCount} merged, ${totalChecked} total checks`;
+    } catch (err) {
+      lastOk = false;
+      lastDetail = `error: ${(err as Error).message}`;
+    }
+  };
+
+  // Start the periodic check
+  const timers: Array<ReturnType<typeof setInterval>> = [];
+  if (config.prWatcher && config.githubToken) {
+    const timer = setInterval(() => { void checkPrStatuses(); }, CHECK_INTERVAL_MS);
+    timers.push(timer);
+    if (typeof timer.unref === "function") timer.unref();
+  }
+
+  return {
+    status: () => ({
+      enabled: config.prWatcher && !!config.githubToken,
+      lastCheckAt,
+      lastOk,
+      lastDetail,
+      mergedCount,
+      totalChecked,
+      intervalMinutes: CHECK_INTERVAL_MS / 60_000,
+    }),
+    stop: () => timers.forEach((t) => clearInterval(t)),
+  };
+}
+
+interface PrWatcherStatus {
+  enabled: boolean;
+  lastCheckAt: number;
+  lastOk: boolean | null;
+  lastDetail: string | null;
+  mergedCount: number;
+  totalChecked: number;
+  intervalMinutes: number;
+}
+
 interface TaskStep {
   step: number;
   toolNames: string[];
@@ -351,6 +455,7 @@ interface NovaServer extends Server {
   connectorMonitor?: ReturnType<typeof startConnectorMonitor>;
   dailyReporter?: ReturnType<typeof startDailyReporter>;
   sweepScheduler?: ReturnType<typeof startSweepScheduler>;
+  prWatcher?: ReturnType<typeof startPrWatcher>;
 }
 
 /** Starts the Nova UI server on 0.0.0.0. Returns the http.Server (already listening). */
@@ -512,6 +617,57 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           });
         } catch { /* best effort */ }
       }
+      // AUTO-SOLVE: After a sweep completes, auto-approve and solve top bounties
+      if (rec.automated && rec.status === "done" && /sweep/i.test(rec.task || "") && config.autoSolve && config.githubToken) {
+        try {
+          const raw = vaultGet("BOUNTY_DECK");
+          if (raw) {
+            const deck = JSON.parse(raw);
+            const bounties = (deck.bounties || []) as Array<Record<string, any>>;
+            // Filter: has issue number, not already claimed/solved, score >= threshold
+            const eligible = bounties
+              .filter((b) => Number(b.issueNumber) > 0 && !b.status && Number(b.score) >= config.autoSolveMinScore)
+              .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0))
+              .slice(0, config.autoSolveMaxPerSweep);
+            for (const bounty of eligible) {
+              // Mark as claimed to avoid re-solving
+              bounty.status = "auto-claimed";
+              bounty.claimedAt = Date.now();
+              // Post the comment on the issue
+              try {
+                const commentUrl = `https://api.github.com/repos/${bounty.repo}/issues/${bounty.issueNumber}/comments`;
+                const ghRes = await fetch(commentUrl, {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${config.githubToken}`,
+                    Accept: "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                    "Content-Type": "application/json",
+                    "User-Agent": "koola10-nova-agent",
+                  },
+                  body: JSON.stringify({ body: bounty.draftComment || `Hi! I'd like to work on this bounty. I've read the acceptance criteria and can deliver a quality solution.` }),
+                  signal: AbortSignal.timeout(15_000),
+                });
+                if (ghRes.ok) {
+                  bounty.commentPostedAt = Date.now();
+                  bounty.status = "comment-posted";
+                }
+              } catch { /* comment failed, skip this bounty */ }
+              // Launch a solve task
+              if (bounty.status === "comment-posted") {
+                const solvePrompt = `Read prompts/bounty-solve.md (relative to the nova-agent project root) and execute the bounty solver exactly as instructed.\n\nREPO: ${bounty.repo}\nISSUE: ${bounty.issueNumber}\nTITLE: ${bounty.title}\nAMOUNT: ${bounty.amount}\nAPPROACH: ${bounty.approach}\nCOMMENT: ${bounty.draftComment}\n\nClone the repo, implement the fix, run tests, and create a PR. Write results to output/bounty-solve-${String(bounty.repo).replace(/\//g, "-")}-${bounty.issueNumber}.md`;
+                const solveRec = launchTask(solvePrompt, config.provider, true);
+                bounty.solveTaskId = solveRec.id;
+                bounty.status = "solving";
+                bounty.solveStartedAt = Date.now();
+              }
+            }
+            // Save updated deck back to vault
+            vaultSet("BOUNTY_DECK", JSON.stringify({ bounties, savedAt: Date.now() }));
+            vaultPushToRemote();
+          }
+        } catch { /* auto-solve is best effort */ }
+      }
     })();
 
     return rec;
@@ -553,7 +709,13 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
             fullScan: config.githubToken !== "",
             repos: config.githubToken !== "" ? 28 : 10,
             sweep: sweepStatus,
+            autoSolve: {
+              enabled: config.autoSolve,
+              minScore: config.autoSolveMinScore,
+              maxPerSweep: config.autoSolveMaxPerSweep,
+            },
           },
+          prWatcher: prWatcher.status(),
           dailyReport: reporter.status(),
         });
         return;
@@ -770,6 +932,28 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           }
         } catch { debug.outputFiles = "dir not found"; }
         sendJson(res, 200, debug);
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/bounties/track") {
+        // Show lifecycle status of all tracked bounties
+        try {
+          const raw = vaultGet("BOUNTY_DECK");
+          if (!raw) { sendJson(res, 200, { bounties: [], summary: {} }); return; }
+          const deck = JSON.parse(raw);
+          const bounties = (deck.bounties || []) as Array<Record<string, unknown>>;
+          const summary = {
+            total: bounties.length,
+            autoClaimed: bounties.filter((b) => b.status === "auto-claimed").length,
+            commentPosted: bounties.filter((b) => b.status === "comment-posted").length,
+            solving: bounties.filter((b) => b.status === "solving").length,
+            solved: bounties.filter((b) => b.status === "solved").length,
+            merged: bounties.filter((b) => b.status === "merged").length,
+            prClosed: bounties.filter((b) => b.status === "pr-closed").length,
+            unclaimed: bounties.filter((b) => !b.status).length,
+          };
+          sendJson(res, 200, { bounties, summary });
+        } catch { sendJson(res, 500, { error: "Failed to read bounty deck" }); }
         return;
       }
 
@@ -1107,9 +1291,11 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
   const monitor = startConnectorMonitor(config);
   const reporter = startDailyReporter(config, tasks);
   const sweep = startSweepScheduler(config, (task, provider, automated) => launchTask(task, provider, automated));
+  const prWatcher = startPrWatcher(config);
   server.connectorMonitor = monitor;
   server.dailyReporter = reporter;
   server.sweepScheduler = sweep;
+  server.prWatcher = prWatcher;
   return server;
 }
 
@@ -1178,6 +1364,7 @@ async function main(): Promise<void> {
     ? ` · remote backup ${vaultStatus.remote.host}${vaultStatus.remote.needsMasterKey ? " ⚠ set NOVA_VAULT_KEY" : ""}`
     : "";
   console.log(`   vault:    ${vaultStatus.count} encrypted entr${vaultStatus.count === 1 ? "y" : "ies"} (${vaultStatus.dir}${vaultStatus.usingEnvKey ? " · NOVA_VAULT_KEY" : ""}${remoteText})`);
+  console.log(`   auto:     ${config.autoSolve ? `auto-solve ON (min score ${config.autoSolveMinScore}, max ${config.autoSolveMaxPerSweep}/sweep)` : "auto-solve OFF"} · ${config.prWatcher ? "PR watcher ON (30m interval)" : "PR watcher OFF"}`);
   console.log(`   ctrl-c to stop`);
 
   server.on("error", (err) => {

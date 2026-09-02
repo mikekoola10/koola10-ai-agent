@@ -57,7 +57,8 @@ export async function runAgent(
   let steps = 0;
   let toolCalls = 0;
 
-  for (let step = 0; step < config.maxSteps; step++) {
+  const effectiveMaxSteps = taskType === "solve" ? config.solveSteps : config.maxSteps;
+  for (let step = 0; step < effectiveMaxSteps; step++) {
     let reply: ChatMessage;
     try {
       reply = await complete(config, messages, tools);
