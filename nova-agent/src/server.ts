@@ -35,7 +35,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runAgent } from "./agent.js";
-import { keyEnvFor, loadConfig, loadDotEnv, type NovaConfig } from "./config.js";
+import { env, keyEnvFor, loadConfig, loadDotEnv, type NovaConfig } from "./config.js";
 import { buildToolDefinitions, verifyConnectors } from "./tools/index.js";
 import { automationTool, buildDailyReport, reportDeliveryProvider } from "./tools/automations.js";
 import { applyVaultOverrides, vaultDelete, vaultGet, vaultInfo, vaultList, vaultPushToRemote, vaultSet, vaultSyncFromRemote } from "./tools/vault.js";
@@ -777,6 +777,11 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
             maxPrograms: config.securityScanMax,
             hackerOne: !!config.hackeroneUsername,
             bugcrowd: !!config.bugcrowdApiToken,
+          trading: {
+            enabled: !!config.alpacaApiKey,
+            paper: config.alpacaPaper,
+            account: config.alpacaApiKey ? "configured" : "not configured",
+          },
           },
         });
         return;
@@ -1271,6 +1276,83 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
         return;
       }
 
+
+      // ── Trading Agent (Alpaca) ─────────────────────────────────
+
+      if (req.method === "GET" && pathname === "/api/trading") {
+        try {
+          const { getTradingPerformance, listTradingStrategies } = await import("./tools/trading.js");
+          const perf = await getTradingPerformance();
+          const strategies = listTradingStrategies();
+          sendJson(res, 200, {
+            enabled: !!env("ALPACA_API_KEY"),
+            paper: (env("ALPACA_PAPER") ?? "1") === "1",
+            performance: perf,
+            strategies: strategies.map((s) => ({ type: s.type, description: s.description, riskLevel: s.riskLevel })),
+          });
+        } catch (err) {
+          sendJson(res, 200, { enabled: false, error: String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/trading/positions") {
+        try {
+          const { getTradingPositions } = await import("./tools/trading.js");
+          const positions = await getTradingPositions();
+          sendJson(res, 200, { positions });
+        } catch (err) {
+          sendJson(res, 500, { error: String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/trading/strategies") {
+        try {
+          const { listTradingStrategies } = await import("./tools/trading.js");
+          sendJson(res, 200, { strategies: listTradingStrategies() });
+        } catch (err) {
+          sendJson(res, 500, { error: String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/trading/execute") {
+        try {
+          const body = await readBody(req);
+          const strategy = String(body.strategy || "growth");
+          const capital = Number(body.capital || 10000);
+          const { executeTradeStrategy } = await import("./tools/trading.js");
+          const result = await executeTradeStrategy(strategy as any, capital);
+          sendJson(res, 200, result);
+        } catch (err) {
+          sendJson(res, 500, { error: String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/trading/rebalance") {
+        try {
+          const { rebalanceAllPortfolios } = await import("./tools/trading.js");
+          const result = await rebalanceAllPortfolios();
+          sendJson(res, 200, result);
+        } catch (err) {
+          sendJson(res, 500, { error: String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/trading/market") {
+        try {
+          const { analyzeMarketConditions } = await import("./tools/trading.js");
+          const analysis = await analyzeMarketConditions();
+          sendJson(res, 200, analysis);
+        } catch (err) {
+          sendJson(res, 500, { error: String(err) });
+        }
+        return;
+      }
+
       // ── Memory Vault endpoints ──────────────────────────────────
 
       if (req.method === "GET" && pathname === "/api/memory") {
@@ -1507,7 +1589,7 @@ async function main(): Promise<void> {
   console.log(`⚡ Nova UI v${VERSION}`);
   console.log(`   brain:    ${cfg.provider}/${cfg.model}${autoMock ? "  (no API key — mock mode)" : ""}`);
   console.log(`   url:      http://0.0.0.0:${shown}`);
-  console.log(`   api:      GET /api/health · GET /api/tasks · POST /api/tasks · POST /api/sweep · GET /api/sweep/status · GET /api/security-scan · GET /api/connectors/verify · GET /api/scheduled/status`);
+  console.log(`   api:      GET /api/health · GET /api/tasks · POST /api/tasks · POST /api/sweep · GET /api/sweep/status · GET /api/security-scan · GET /api/trading · GET /api/trading/positions · GET /api/connectors/verify · GET /api/scheduled/status`);
 
   const monitorStatus = server.connectorMonitor ? server.connectorMonitor.status() : null;
   console.log(`   monitor:  connector self-check every ${monitorStatus && monitorStatus.intervalHours > 0 ? `${monitorStatus.intervalHours}h` : "disabled"} (NOVA_CONNECTOR_CHECK_HOURS)`);

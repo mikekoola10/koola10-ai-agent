@@ -91,6 +91,10 @@ export interface NovaConfig {
   hackeroneApiToken: string;
   /** Bugcrowd API credentials. */
   bugcrowdApiToken: string;
+  // Alpaca trading
+  alpacaApiKey: string;
+  alpacaApiSecret: string;
+  alpacaPaper: boolean;
 }
 
 export function env(name: string): string | undefined {
@@ -199,5 +203,8 @@ export function loadConfig(flags: CliFlags = {}): NovaConfig {
     hackeroneUsername: env("HACKERONE_USERNAME") ?? "",
     hackeroneApiToken: env("HACKERONE_API_TOKEN") ?? "",
     bugcrowdApiToken: env("BUGCROWD_API_TOKEN") ?? "",
+    alpacaApiKey: env("ALPACA_API_KEY") ?? "",
+    alpacaApiSecret: env("ALPACA_API_SECRET") ?? "",
+    alpacaPaper: (env("ALPACA_PAPER") ?? "1") === "1",
   };
 }
