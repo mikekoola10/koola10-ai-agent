@@ -392,6 +392,7 @@ function startPrWatcher(config: NovaConfig): { status(): PrWatcherStatus; stop()
                     amount: amt,
                     currency: "USD",
                     status: "claimed",
+                    platform: String(bounty.platform || "github"),
                     prUrl: bounty.prUrl as string,
                     mergedAt: prData.merged_at || new Date().toISOString(),
                   });
@@ -710,6 +711,7 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
                       amount: amt,
                       currency: "USD",
                       status: "pending",
+                      platform: String(bounty.platform || "github"),
                     });
                   }
                 } catch { /* earnings tracking is best effort */ }
@@ -1184,6 +1186,7 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           amount: Number(body.amount || 0),
           currency: String(body.currency || "USD"),
           status: "pending",
+          platform: String(body.platform || "github"),
           prUrl: body.prUrl ? String(body.prUrl) : undefined,
         });
         sendJson(res, 200, { ok: true });

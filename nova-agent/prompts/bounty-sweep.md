@@ -37,6 +37,28 @@ For each query, get the first 30 results. Extract:
 - created date
 - number of existing comments (competition indicator)
 
+## Step 1b: Multi-Platform Scan
+
+In addition to GitHub search, scan these platforms for bounties:
+
+### Algora (algora.io) — $50-$2,500 per bounty
+Fetch: `https://algora.io/api/orgs/{org}/bounties` for these orgs:
+twentyhq, coolify, formbricks, hoppscotch, infisical, medusajs, documenso, calcom, highlight, unkeyed
+Look for status="open" bounties with reward_amount > 0.
+
+### Boss.dev — GitHub-native bounties, auto-payout on PR merge
+Search GitHub for issues with comments containing "$ bounty" or "💰 bounty" patterns.
+These are auto-funded bounties that pay out when the issue is closed by a PR.
+
+### Opire — GitHub-comment-driven bounties (4% fee)
+Search GitHub for issues with "/bounty" commands in comments.
+These are funded bounties that pay via Stripe on merge.
+
+### Immunefi — Security bounties ($100-$100,000+)
+Fetch: `https://immunefi.com/public-api/bounties.json`
+These are security audit bounties. Higher value but require security expertise.
+Only include if the bounty is within Nova's capability scope.
+
 ## Step 2: Filter
 
 EXCLUDE:
@@ -44,11 +66,14 @@ EXCLUDE:
 - "AI Growth Engine", "AiMPN", "ClankerNation" promotional posts
 - Issues with no dollar amount AND no bounty label
 - Questions ("is there a bounty program?")
+- Bounties older than 30 days (stale)
+- Bounties with 10+ comments (high competition)
 
 KEEP only issues that:
 - Have a bounty/reward/💎 label, OR
 - Contain explicit dollar amounts ($XX), OR
-- Are from verified platforms (Algora, Opire)
+- Are from verified platforms (Algora, Boss.dev, Opire, Immunefi)
+- Have been posted in the last 14 days (fresh)
 
 ## Step 3: Score and rank
 

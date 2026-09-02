@@ -295,6 +295,8 @@ export interface EarningsRecord {
   amount: number;
   currency: string;
   status: "pending" | "claimed" | "paid";
+  /** Which platform the bounty came from */
+  platform: string;
   prUrl?: string;
   mergedAt?: string;
   paidAt?: string;
@@ -310,6 +312,7 @@ export interface RevenueSummary {
   bestBounty: { repo: string; issue: number; amount: number } | null;
   recentEarnings: EarningsRecord[];
   monthlyEarnings: Array<{ month: string; total: number }>;
+  byPlatform: Record<string, { count: number; total: number }>;
 }
 
 export function getEarnings(): EarningsRecord[] {
@@ -347,6 +350,14 @@ export function getRevenueSummary(): RevenueSummary {
     const month = e.paidAt?.slice(0, 7) ?? e.date.slice(0, 7);
     monthly[month] = (monthly[month] ?? 0) + e.amount;
   }
+  // Platform breakdown
+  const byPlatform: Record<string, { count: number; total: number }> = {};
+  for (const e of earnings) {
+    const p = e.platform || "github";
+    if (!byPlatform[p]) byPlatform[p] = { count: 0, total: 0 };
+    byPlatform[p].count++;
+    byPlatform[p].total += e.amount;
+  }
   return {
     totalEarned: totalPaid,
     totalPending,
@@ -357,6 +368,7 @@ export function getRevenueSummary(): RevenueSummary {
     bestBounty: bestBounty ? { repo: bestBounty.repo, issue: bestBounty.issue, amount: bestBounty.amount } : null,
     recentEarnings: earnings.slice(-10).reverse(),
     monthlyEarnings: Object.entries(monthly).sort(([a], [b]) => b.localeCompare(a)).map(([month, total]) => ({ month, total })),
+    byPlatform,
   };
 }
 
