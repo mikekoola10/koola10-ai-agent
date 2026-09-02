@@ -112,7 +112,7 @@ const DEFAULT_MODEL: Record<Provider, string> = {
   deepseek: "deepseek-chat",
   anthropic: "claude-sonnet-4-5",
   openai: "gpt-4o-mini",
-  gemini: "gemini-2.5-flash",
+  gemini: "gemini-3.6-flash",
   tencent: "hy4-preview",
 };
 
