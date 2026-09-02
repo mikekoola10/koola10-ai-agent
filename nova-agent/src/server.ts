@@ -530,7 +530,6 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           version: VERSION,
           provider: config.provider,
           model: config.model,
-          rawProviderEnv: process.env["NOVA_PROVIDER"] ?? "(not set)",
           mock: autoMock,
           tools: tools.length,
           maxSteps: config.maxSteps,

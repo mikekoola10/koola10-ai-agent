@@ -93,7 +93,8 @@ function boolEnv(name: string, fallback = false): boolean {
 }
 
 function normalizeProvider(v: string | undefined): Provider {
-  if (v === "anthropic" || v === "openai" || v === "deepseek" || v === "gemini") return v;
+  const lower = v?.toLowerCase();
+  if (lower === "anthropic" || lower === "openai" || lower === "deepseek" || lower === "gemini") return lower as Provider;
   return "deepseek";
 }
 
