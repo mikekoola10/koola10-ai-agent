@@ -951,7 +951,7 @@ async function loadMemory() {
   }
 }
 
-function renderMemory(data) {
+async function renderMemory(data) {
   if (!data) { document.getElementById("memory-content").innerHTML = `<div class="empty-state">Loading memory…</div>`; return; }
   const p = data.profile || {};
   const d = data.daily || {};
@@ -964,6 +964,50 @@ function renderMemory(data) {
     <div class="mem-stat-item"><div class="num">${d.solves || 0}</div><div class="lbl">Solves Today</div></div>
     <div class="mem-stat-item"><div class="num">${d.bountiesFound || 0}</div><div class="lbl">Bounties Found</div></div>
     <div class="mem-stat-item"><div class="num">$${d.earnings || 0}</div><div class="lbl">Earnings</div></div>
+
+  // Revenue dashboard
+  try {
+    const rev = await jget("/api/revenue");
+    if (rev && (rev.bountyCount > 0 || rev.totalPending > 0)) {
+      html += `<div class="mem-section"><h3>💰 Revenue Dashboard</h3>
+        <div class="mem-stat">
+          <div class="mem-stat-item"><div class="num" style="color:#39ff14">$${rev.totalPaid || 0}</div><div class="lbl">Total Paid</div></div>
+          <div class="mem-stat-item"><div class="num" style="color:#ffa500">$${rev.totalPending || 0}</div><div class="lbl">Pending</div></div>
+          <div class="mem-stat-item"><div class="num">${rev.paidCount || 0}/${rev.bountyCount || 0}</div><div class="lbl">Paid/Total</div></div>
+          <div class="mem-stat-item"><div class="num">$${(rev.avgBounty || 0).toFixed(0)}</div><div class="lbl">Avg Bounty</div></div>
+        </div>`;
+      if (rev.bestBounty) {
+        html += `<div class="mem-card"><div class="label">🏆 Best Bounty</div><div class="value">${esc(rev.bestBounty.repo)} #${rev.bestBounty.issue} — $${rev.bestBounty.amount}</div></div>`;
+      }
+      html += `</div>`;
+    }
+  } catch { /* revenue endpoint may not have data yet */ }
+
+  // Bounty pipeline status
+  try {
+    const track = await jget("/api/bounties/track");
+    if (track && track.summary && track.summary.total > 0) {
+      const s = track.summary;
+      html += `<div class="mem-section"><h3>🎯 Bounty Pipeline</h3>
+        <div class="mem-stat">
+          <div class="mem-stat-item"><div class="num">${s.total}</div><div class="lbl">Total</div></div>
+          <div class="mem-stat-item"><div class="num" style="color:#ffa500">${s.solving || 0}</div><div class="lbl">Solving</div></div>
+          <div class="mem-stat-item"><div class="num" style="color:#39ff14">${s.merged || 0}</div><div class="lbl">Merged</div></div>
+          <div class="mem-stat-item"><div class="num" style="color:#7c6cff">${s.unclaimed || 0}</div><div class="lbl">Unclaimed</div></div>
+        </div>`;
+      const active = (track.bounties || []).filter((b) => b.status && b.status !== "unclaimed");
+      if (active.length) {
+        html += `<div style="margin-top:8px">`;
+        for (const b of active.slice(0, 5)) {
+          const sc = {"auto-claimed":"#ffa500","comment-posted":"#00bfff","solving":"#7c6cff","solved":"#39ff14","merged":"#39ff14"};
+          const c = sc[b.status] || "var(--muted)";
+          html += `<div class="mem-card"><div class="label" style="color:${c}">${esc(b.status)}</div><div class="value">${esc(b.repo)} #${b.issueNumber} — ${esc(String(b.title||"").slice(0, 60))}</div></div>`;
+        }
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+  } catch { /* track endpoint may not have data yet */ }
   </div>`;
 
   html += `<div class="mem-section"><h3>🧠 Operator Profile</h3>

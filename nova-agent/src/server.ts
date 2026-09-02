@@ -40,7 +40,7 @@ import { buildToolDefinitions, verifyConnectors } from "./tools/index.js";
 import { automationTool, buildDailyReport, reportDeliveryProvider } from "./tools/automations.js";
 import { applyVaultOverrides, vaultDelete, vaultGet, vaultInfo, vaultList, vaultPushToRemote, vaultSet, vaultSyncFromRemote } from "./tools/vault.js";
 import { firstLine, redactSecrets } from "./util.js";
-import { getDailyNote, updateDailyNote, writeDailyNoteMarkdown, getPatterns, addPattern, getRepoKnowledge, saveRepoKnowledge, listRepoKnowledge, updateRepoIndex, getProfile, updateProfile, getSkills, addSkill, memorySummary } from "./memory.js";
+import { getDailyNote, updateDailyNote, writeDailyNoteMarkdown, getPatterns, addPattern, getRepoKnowledge, saveRepoKnowledge, listRepoKnowledge, updateRepoIndex, getProfile, updateProfile, getSkills, addSkill, memorySummary, getRevenueSummary, getEarnings, addEarning, updateEarning, scoreBounty, rescoreBounties } from "./memory.js";
 
 export const VERSION = "0.4.0";
 
@@ -379,6 +379,24 @@ function startPrWatcher(config: NovaConfig): { status(): PrWatcherStatus; stop()
               bounty.mergedAt = prData.merged_at || new Date().toISOString();
               bounty.lifecycleStep = 5;
               mergedCount++;
+              // Track earnings when a bounty PR is merged
+              try {
+                const amtStr = String(bounty.amount || "");
+                const amtMatch = amtStr.match(/\$([\d,]+)/);
+                const amt = amtMatch ? parseInt(amtMatch[1].replace(/,/g, ""), 10) : 0;
+                if (amt > 0) {
+                  addEarning({
+                    date: new Date().toISOString().slice(0, 10),
+                    repo: bounty.repo as string,
+                    issue: Number(bounty.issueNumber),
+                    amount: amt,
+                    currency: "USD",
+                    status: "claimed",
+                    prUrl: bounty.prUrl as string,
+                    mergedAt: prData.merged_at || new Date().toISOString(),
+                  });
+                }
+              } catch { /* earnings tracking is best effort */ }
             } else if (prData.state === "closed") {
               bounty.status = "pr-closed";
               bounty.lifecycleStep = 4;
@@ -617,9 +635,28 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
           });
         } catch { /* best effort */ }
       }
+      // AUTO-RETRY: If a solve task failed or ran out of steps, retry once with a simpler approach
+      if (rec.status === "error" && /solve|bounty/i.test(rec.task || "") && rec.automated) {
+        try {
+          // Extract repo/issue from the failed task
+          const repoMatch = rec.task.match(/REPO:\s*(.+)/m);
+          const issueMatch = rec.task.match(/ISSUE:\s*(\d+)/m);
+          const titleMatch = rec.task.match(/TITLE:\s*(.+)/m);
+          if (repoMatch && issueMatch) {
+            const repo = repoMatch[1].trim();
+            const issue = issueMatch[1].trim();
+            const title = titleMatch?.[1].trim() || "";
+            // Simplified retry prompt — fewer steps, focused on just the fix
+            const retryPrompt = `Solve this GitHub bounty with minimal steps. Clone the repo, read the issue, implement the smallest possible fix, and create a PR.\n\nREPO: ${repo}\nISSUE: ${issue}\nTITLE: ${title}\n\nFocus on the MINIMAL change. Don't read the entire codebase — just find the file that needs changing, make the fix, and create a PR.`;
+            launchTask(retryPrompt, config.provider, true);
+          }
+        } catch { /* retry is best effort */ }
+      }
       // AUTO-SOLVE: After a sweep completes, auto-approve and solve top bounties
       if (rec.automated && rec.status === "done" && /sweep/i.test(rec.task || "") && config.autoSolve && config.githubToken) {
         try {
+          // Re-score all bounties with smarter scoring before picking
+          rescoreBounties();
           const raw = vaultGet("BOUNTY_DECK");
           if (raw) {
             const deck = JSON.parse(raw);
@@ -660,6 +697,22 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
                 bounty.solveTaskId = solveRec.id;
                 bounty.status = "solving";
                 bounty.solveStartedAt = Date.now();
+                // Track as pending earnings
+                try {
+                  const amtStr = String(bounty.amount || "");
+                  const amtMatch = amtStr.match(/\$([\d,]+)/);
+                  const amt = amtMatch ? parseInt(amtMatch[1].replace(/,/g, ""), 10) : 0;
+                  if (amt > 0) {
+                    addEarning({
+                      date: new Date().toISOString().slice(0, 10),
+                      repo: String(bounty.repo),
+                      issue: Number(bounty.issueNumber),
+                      amount: amt,
+                      currency: "USD",
+                      status: "pending",
+                    });
+                  }
+                } catch { /* earnings tracking is best effort */ }
               }
             }
             // Save updated deck back to vault
@@ -1112,6 +1165,41 @@ export function startServer(config: NovaConfig, port = 0): NovaServer {
         const ok = vaultDelete(decodeURIComponent(vm[1]!));
         const sync = ok ? await vaultPushToRemote() : { ok: true };
         sendJson(res, 200, { ok, remoteSynced: sync.ok, remoteError: sync.error ?? null });
+        return;
+      }
+
+      // ── Revenue endpoints ────────────────────────────────────────
+
+      if (req.method === "GET" && pathname === "/api/revenue") {
+        sendJson(res, 200, getRevenueSummary());
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/revenue") {
+        const body = await readBody(req);
+        addEarning({
+          date: new Date().toISOString().slice(0, 10),
+          repo: String(body.repo || ""),
+          issue: Number(body.issue || 0),
+          amount: Number(body.amount || 0),
+          currency: String(body.currency || "USD"),
+          status: "pending",
+          prUrl: body.prUrl ? String(body.prUrl) : undefined,
+        });
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method === "PUT" && pathname === "/api/revenue") {
+        const body = await readBody(req);
+        updateEarning(String(body.repo || ""), Number(body.issue || 0), body);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/bounties/rescore") {
+        const updated = rescoreBounties();
+        sendJson(res, 200, { ok: true, updated });
         return;
       }
 

@@ -285,6 +285,187 @@ export function primeContext(taskType: string, extra?: Record<string, string>): 
 }
 
 /* ------------------------------------------------------------------ */
+/* Revenue Tracking                                                    */
+/* ------------------------------------------------------------------ */
+
+export interface EarningsRecord {
+  date: string;
+  repo: string;
+  issue: number;
+  amount: number;
+  currency: string;
+  status: "pending" | "claimed" | "paid";
+  prUrl?: string;
+  mergedAt?: string;
+  paidAt?: string;
+}
+
+export interface RevenueSummary {
+  totalEarned: number;
+  totalPending: number;
+  totalPaid: number;
+  bountyCount: number;
+  paidCount: number;
+  avgBounty: number;
+  bestBounty: { repo: string; issue: number; amount: number } | null;
+  recentEarnings: EarningsRecord[];
+  monthlyEarnings: Array<{ month: string; total: number }>;
+}
+
+export function getEarnings(): EarningsRecord[] {
+  return vaultGetJSON<EarningsRecord[]>("MEM:EARNINGS") ?? [];
+}
+
+export function addEarning(record: EarningsRecord): void {
+  const earnings = getEarnings();
+  // Deduplicate by repo+issue
+  const filtered = earnings.filter((e) => !(e.repo === record.repo && e.issue === record.issue));
+  filtered.push(record);
+  vaultSetJSON("MEM:EARNINGS", filtered);
+}
+
+export function updateEarning(repo: string, issue: number, update: Partial<EarningsRecord>): void {
+  const earnings = getEarnings();
+  const idx = earnings.findIndex((e) => e.repo === repo && e.issue === issue);
+  if (idx >= 0) {
+    earnings[idx] = { ...earnings[idx], ...update };
+    vaultSetJSON("MEM:EARNINGS", earnings);
+  }
+}
+
+export function getRevenueSummary(): RevenueSummary {
+  const earnings = getEarnings();
+  const totalPaid = earnings.filter((e) => e.status === "paid").reduce((s, e) => s + e.amount, 0);
+  const totalPending = earnings.filter((e) => e.status !== "paid").reduce((s, e) => s + e.amount, 0);
+  const paidCount = earnings.filter((e) => e.status === "paid").length;
+  const bestBounty = earnings.length > 0
+    ? earnings.reduce((best, e) => e.amount > (best?.amount ?? 0) ? e : best, earnings[0])
+    : null;
+  // Monthly breakdown
+  const monthly: Record<string, number> = {};
+  for (const e of earnings.filter((e) => e.status === "paid")) {
+    const month = e.paidAt?.slice(0, 7) ?? e.date.slice(0, 7);
+    monthly[month] = (monthly[month] ?? 0) + e.amount;
+  }
+  return {
+    totalEarned: totalPaid,
+    totalPending,
+    totalPaid,
+    bountyCount: earnings.length,
+    paidCount,
+    avgBounty: paidCount > 0 ? totalPaid / paidCount : 0,
+    bestBounty: bestBounty ? { repo: bestBounty.repo, issue: bestBounty.issue, amount: bestBounty.amount } : null,
+    recentEarnings: earnings.slice(-10).reverse(),
+    monthlyEarnings: Object.entries(monthly).sort(([a], [b]) => b.localeCompare(a)).map(([month, total]) => ({ month, total })),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Smarter Bounty Scoring                                              */
+/* ------------------------------------------------------------------ */
+
+/** Language difficulty weights — lower = easier for Nova to solve */
+const LANGUAGE_WEIGHTS: Record<string, number> = {
+  python: 1.0,
+  javascript: 1.0,
+  typescript: 1.1,
+  go: 1.3,
+  rust: 1.6,
+  java: 1.4,
+  cpp: 1.8,
+  c: 1.8,
+  haskell: 2.0,
+  unknown: 1.2,
+};
+
+/** Extract likely language from repo or title hints */
+function detectLanguage(repo: string, title: string, approach: string): string {
+  const combined = `${repo} ${title} ${approach}`.toLowerCase();
+  if (combined.includes("python") || combined.includes("pip") || combined.includes(".py")) return "python";
+  if (combined.includes("javascript") || combined.includes("npm") || combined.includes("node")) return "javascript";
+  if (combined.includes("typescript") || combined.includes("tsc")) return "typescript";
+  if (combined.includes("golang") || combined.includes("go ") || combined.includes("go-")) return "go";
+  if (combined.includes("rust") || combined.includes("cargo")) return "rust";
+  if (combined.includes("java ") || combined.includes("maven")) return "java";
+  return "unknown";
+}
+
+/** Parse bounty amount to a number */
+function parseAmount(amount: string): number {
+  const match = amount.match(/\$([\d,]+)/);
+  if (!match) return 0;
+  return parseInt(match[1].replace(/,/g, ""), 10) || 0;
+}
+
+/**
+ * Score a bounty for auto-solve priority.
+ * Higher score = better candidate for Nova.
+ * 
+ * Factors:
+ * - Amount (higher = better)
+ * - Language difficulty (easier = better)
+ * - Has issue number (required)
+ * - Title clarity (more specific = better)
+ * - Has approach description (better defined = better)
+ */
+export function scoreBounty(bounty: {
+  repo: string; issueNumber: number; title: string;
+  amount: string; approach: string; url?: string;
+}): number {
+  let score = 0;
+
+  // 1. Amount score (0-4 points)
+  const amt = parseAmount(bounty.amount);
+  if (amt >= 1000) score += 4;
+  else if (amt >= 500) score += 3.5;
+  else if (amt >= 100) score += 3;
+  else if (amt >= 50) score += 2.5;
+  else if (amt >= 20) score += 2;
+  else if (amt > 0) score += 1;
+  else score += 0.5; // unknown amount, still worth trying
+
+  // 2. Language difficulty (0-2 points, easier = higher)
+  const lang = detectLanguage(bounty.repo, bounty.title, bounty.approach);
+  const weight = LANGUAGE_WEIGHTS[lang] ?? 1.2;
+  score += Math.max(0, 2 - (weight - 1) * 2);
+
+  // 3. Title clarity (0-1.5 points)
+  const titleLen = bounty.title.length;
+  if (titleLen > 30 && titleLen < 120) score += 1.5;
+  else if (titleLen > 15) score += 1;
+  else score += 0.5;
+
+  // 4. Has approach (0-1 point)
+  if (bounty.approach && bounty.approach.length > 20) score += 1;
+  else if (bounty.approach) score += 0.5;
+
+  // 5. Has issue number (required for auto-solve, -2 if missing)
+  if (!bounty.issueNumber) score -= 2;
+
+  return Math.round(score * 100) / 100;
+}
+
+/** Re-score all bounties in the deck and update vault */
+export function rescoreBounties(): number {
+  const raw = vaultGet("BOUNTY_DECK");
+  if (!raw) return 0;
+  const deck = JSON.parse(raw);
+  const bounties = deck.bounties || [];
+  let updated = 0;
+  for (const b of bounties) {
+    const newScore = scoreBounty(b);
+    if (b.score !== newScore) {
+      b.score = newScore;
+      updated++;
+    }
+  }
+  if (updated > 0) {
+    vaultSet("BOUNTY_DECK", JSON.stringify({ bounties, savedAt: Date.now() }));
+  }
+  return updated;
+}
+
+/* ------------------------------------------------------------------ */
 /* Memory summary for the agent system prompt                          */
 /* ------------------------------------------------------------------ */
 

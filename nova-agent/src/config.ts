@@ -174,7 +174,7 @@ export function loadConfig(flags: CliFlags = {}): NovaConfig {
     stripeKey: env("STRIPE_SECRET_KEY") ?? "",
     autoSolve: boolEnv("NOVA_AUTO_SOLVE", true),
     autoSolveMinScore: floatEnv("NOVA_AUTO_SOLVE_MIN_SCORE", 5.0),
-    autoSolveMaxPerSweep: intEnv("NOVA_AUTO_SOLVE_MAX", 2),
+    autoSolveMaxPerSweep: intEnv("NOVA_AUTO_SOLVE_MAX", 5),
     prWatcher: boolEnv("NOVA_PR_WATCHER", true),
     clawdbotCli: env("CLAWDBOT_CLI") ?? "openclaw",
     browserHeadless: boolEnv("NOVA_BROWSER_HEADLESS", true),
