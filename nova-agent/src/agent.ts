@@ -58,7 +58,14 @@ export async function runAgent(
   let toolCalls = 0;
 
   const effectiveMaxSteps = taskType === "solve" ? config.solveSteps : config.maxSteps;
+  // Pace requests to stay under Gemini free-tier RPM limits (20 RPM).
+  // Wait 5s between steps to stay well under the limit.
+  const STEP_DELAY_MS = 5_000;
   for (let step = 0; step < effectiveMaxSteps; step++) {
+    // Delay between steps (skip on first step)
+    if (step > 0 && STEP_DELAY_MS > 0) {
+      await new Promise((r) => setTimeout(r, STEP_DELAY_MS));
+    }
     let reply: ChatMessage;
     try {
       reply = await complete(config, messages, tools);
