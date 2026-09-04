@@ -76,29 +76,38 @@ async function completeOpenAICompatible(
     console.log("[nova:llm] Gemini wire messages:", JSON.stringify(debugMsgs));
   }
 
-  const res = await fetch(`${config.apiBase}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages: wireMessages,
-      tools,
-      tool_choice: "auto",
-      temperature: opts.temperature ?? 0.7,
-      max_tokens: 4096,
-    }),
-    signal: AbortSignal.timeout(180_000),
-  });
-
-  if (!res.ok) {
+  // Retry on transient 503/429 errors (Gemini/OpenAI overload)
+  let res: Response;
+  const MAX_RETRIES = 3;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    res = await fetch(`${config.apiBase}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: wireMessages,
+        tools,
+        tool_choice: "auto",
+        temperature: opts.temperature ?? 0.7,
+        max_tokens: 4096,
+      }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (res.ok) break;
+    if ((res.status === 503 || res.status === 429) && attempt < MAX_RETRIES) {
+      const waitMs = (attempt + 1) * 15_000; // 15s, 30s, 45s
+      console.log(`[nova:llm] ${res.status} overload, retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
     const text = await res.text().catch(() => "");
     throw new Error(`LLM API error ${res.status}: ${text.slice(0, 500)}`);
   }
 
-  const data = (await res.json()) as {
+  const data = (await res!.json()) as {
     choices?: {
       message?: {
         role?: string;
