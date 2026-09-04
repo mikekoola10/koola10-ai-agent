@@ -76,7 +76,7 @@ async function completeOpenAICompatible(
     console.log("[nova:llm] Gemini wire messages:", JSON.stringify(debugMsgs));
   }
 
-  // Retry on transient 503/429 errors (Gemini/OpenAI overload)
+  // Retry on transient 503 (server overload) or 429 (rate limit — wait for quota reset)
   let res: Response;
   const MAX_RETRIES = 3;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -97,9 +97,16 @@ async function completeOpenAICompatible(
       signal: AbortSignal.timeout(180_000),
     });
     if (res.ok) break;
-    if ((res.status === 503 || res.status === 429) && attempt < MAX_RETRIES) {
-      const waitMs = (attempt + 1) * 15_000; // 15s, 30s, 45s
-      console.log(`[nova:llm] ${res.status} overload, retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+    // 429 = quota/rate limit — wait 60s for per-minute quota reset, max 1 retry
+    if (res.status === 429 && attempt === 0) {
+      console.log(`[nova:llm] 429 rate limited, waiting 60s for quota reset...`);
+      await new Promise((r) => setTimeout(r, 60_000));
+      continue;
+    }
+    // 503 = server overload — retry with backoff
+    if (res.status === 503 && attempt < MAX_RETRIES) {
+      const waitMs = (attempt + 1) * 20_000; // 20s, 40s, 60s
+      console.log(`[nova:llm] 503 overload, retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
       await new Promise((r) => setTimeout(r, waitMs));
       continue;
     }
