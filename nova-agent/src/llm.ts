@@ -37,7 +37,7 @@ async function completeOpenAICompatible(
   // {role: "tool", tool_call_id, content}. Convert the internal shape back.
   const wireMessages = messages.map((m) => {
     if (m.tool_calls?.length) {
-      return {
+      const msg: Record<string, unknown> = {
         role: m.role,
         content: m.content,
         tool_calls: m.tool_calls.map((tc) => ({
@@ -46,6 +46,9 @@ async function completeOpenAICompatible(
           function: { name: tc.name, arguments: tc.arguments },
         })),
       };
+      // Gemini requires thought_signature to be echoed back on tool-call messages
+      if (m.thought_signature) msg.thought_signature = m.thought_signature;
+      return msg;
     }
     if (m.role === "tool") {
       return { role: "tool", tool_call_id: m.tool_call_id, content: m.content };
@@ -80,6 +83,8 @@ async function completeOpenAICompatible(
       message?: {
         role?: string;
         content?: string | null;
+        /** Gemini thought_signature — must be preserved and echoed back. */
+        thought_signature?: string;
         tool_calls?: Array<{
           id?: string;
           type?: string;
@@ -112,6 +117,8 @@ async function completeOpenAICompatible(
     role: (message.role as ChatMessage["role"]) ?? "assistant",
     content: message.content ?? null,
     tool_calls,
+    // Gemini requires thought_signature to be echoed back on tool-call messages
+    ...(message.thought_signature ? { thought_signature: message.thought_signature } : {}),
   };
 }
 
