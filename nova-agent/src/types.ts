@@ -10,6 +10,8 @@ export interface ToolCall {
   name: string;
   /** JSON-encoded arguments for the tool. */
   arguments: string;
+  /** Gemini thought_signature — must be echoed back on the tool-call message. */
+  thought_signature?: string;
 }
 
 /** One message in the agent conversation. */
@@ -19,8 +21,6 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
-  /** Gemini thought_signature — required when echoing back tool-call messages. */
-  thought_signature?: string;
 }
 
 /** OpenAI-style tool definition sent to the model. */

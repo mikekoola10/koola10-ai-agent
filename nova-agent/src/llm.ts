@@ -37,18 +37,22 @@ async function completeOpenAICompatible(
   // {role: "tool", tool_call_id, content}. Convert the internal shape back.
   const wireMessages = messages.map((m) => {
     if (m.tool_calls?.length) {
-      const msg: Record<string, unknown> = {
+      return {
         role: m.role,
         content: m.content,
-        tool_calls: m.tool_calls.map((tc) => ({
-          id: tc.id,
-          type: "function",
-          function: { name: tc.name, arguments: tc.arguments },
-        })),
+        tool_calls: m.tool_calls.map((tc) => {
+          const wire: Record<string, unknown> = {
+            id: tc.id,
+            type: "function",
+            function: { name: tc.name, arguments: tc.arguments },
+          };
+          // Gemini thought_signature — must be echoed back exactly as received
+          if (tc.thought_signature) {
+            wire.extra_content = { google: { thought_signature: tc.thought_signature } };
+          }
+          return wire;
+        }),
       };
-      // Gemini requires thought_signature to be echoed back on tool-call messages
-      if (m.thought_signature) msg.thought_signature = m.thought_signature;
-      return msg;
     }
     if (m.role === "tool") {
       return { role: "tool", tool_call_id: m.tool_call_id, content: m.content };
@@ -83,13 +87,13 @@ async function completeOpenAICompatible(
       message?: {
         role?: string;
         content?: string | null;
-        /** Gemini thought_signature — must be preserved and echoed back. */
-        thought_signature?: string;
         tool_calls?: Array<{
           id?: string;
           type?: string;
           name?: string;
           function?: { name?: string; arguments?: string };
+          /** Gemini thought_signature lives inside extra_content.google.thought_signature */
+          extra_content?: { google?: { thought_signature?: string } };
         }>;
       };
     }[];
@@ -110,6 +114,10 @@ async function completeOpenAICompatible(
         id: tc.id ?? `call_${Math.random().toString(36).slice(2, 10)}`,
         name: tc.function?.name ?? tc.name ?? "unknown",
         arguments: tc.function?.arguments ?? "",
+        // Gemini thought_signature — must be echoed back on the assistant message
+        ...(tc.extra_content?.google?.thought_signature
+          ? { thought_signature: tc.extra_content.google.thought_signature }
+          : {}),
       }))
     : undefined;
 
@@ -117,8 +125,6 @@ async function completeOpenAICompatible(
     role: (message.role as ChatMessage["role"]) ?? "assistant",
     content: message.content ?? null,
     tool_calls,
-    // Gemini requires thought_signature to be echoed back on tool-call messages
-    ...(message.thought_signature ? { thought_signature: message.thought_signature } : {}),
   };
 }
 
