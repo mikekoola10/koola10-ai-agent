@@ -60,6 +60,22 @@ async function completeOpenAICompatible(
     return { role: m.role, content: m.content };
   });
 
+  // Debug: log wire messages for Gemini to diagnose thought_signature issues
+  if (config.provider === "gemini") {
+    const debugMsgs = wireMessages.map((m) => {
+      const base = { role: m.role, hasToolCalls: !!(m as Record<string, unknown>).tool_calls };
+      const tc = (m as Record<string, unknown>).tool_calls as Array<Record<string, unknown>> | undefined;
+      if (tc && tc.length > 0) {
+        return { ...base, toolCalls: tc.map((t: Record<string, unknown>) => {
+          const fn = t.function as Record<string, unknown> | undefined;
+          return { name: fn?.name ?? t.name, hasExtraContent: !!t.extra_content, extraContent: t.extra_content };
+        }) };
+      }
+      return base;
+    });
+    console.log("[nova:llm] Gemini wire messages:", JSON.stringify(debugMsgs));
+  }
+
   const res = await fetch(`${config.apiBase}/chat/completions`, {
     method: "POST",
     headers: {
@@ -109,6 +125,18 @@ async function completeOpenAICompatible(
   // internal shape `{ id, name, arguments }`. Normalize here so the dispatcher
   // never sees a tool named "undefined".
   const rawCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  
+  // Debug: log raw tool call structure from Gemini
+  if (config.provider === "gemini" && rawCalls.length > 0) {
+    console.log("[nova:llm] Gemini raw tool_calls:", JSON.stringify(rawCalls.map((tc) => ({
+      id: tc.id,
+      name: tc.function?.name,
+      hasExtraContent: !!tc.extra_content,
+      hasThoughtSig: !!tc.extra_content?.google?.thought_signature,
+      extraContentKeys: tc.extra_content ? Object.keys(tc.extra_content) : [],
+    }))));
+  }
+
   const tool_calls: ToolCall[] | undefined = rawCalls.length
     ? rawCalls.map((tc) => ({
         id: tc.id ?? `call_${Math.random().toString(36).slice(2, 10)}`,
