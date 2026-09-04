@@ -138,15 +138,24 @@ async function completeOpenAICompatible(
   }
 
   const tool_calls: ToolCall[] | undefined = rawCalls.length
-    ? rawCalls.map((tc) => ({
-        id: tc.id ?? `call_${Math.random().toString(36).slice(2, 10)}`,
-        name: tc.function?.name ?? tc.name ?? "unknown",
-        arguments: tc.function?.arguments ?? "",
-        // Gemini thought_signature — must be echoed back on the assistant message
-        ...(tc.extra_content?.google?.thought_signature
-          ? { thought_signature: tc.extra_content.google.thought_signature }
-          : {}),
-      }))
+    ? rawCalls.map((tc, idx) => {
+        const call: ToolCall = {
+          id: tc.id ?? `call_${Math.random().toString(36).slice(2, 10)}`,
+          name: tc.function?.name ?? tc.name ?? "unknown",
+          arguments: tc.function?.arguments ?? "",
+        };
+        // Gemini thought_signature: first call gets the real sig, rest get sentinel.
+        // For parallel calls, Gemini only puts the signature on the FIRST call.
+        // skip_thought_signature_validator is a documented Google bypass.
+        if (config.provider === "gemini") {
+          if (idx === 0 && tc.extra_content?.google?.thought_signature) {
+            call.thought_signature = tc.extra_content.google.thought_signature;
+          } else {
+            call.thought_signature = "skip_thought_signature_validator";
+          }
+        }
+        return call;
+      })
     : undefined;
 
   return {
