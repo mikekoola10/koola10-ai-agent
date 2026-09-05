@@ -61,6 +61,13 @@ services:
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
+      # BOUNTY HUNT PAUSED 2026-09-05 (free-tier Gemini quota exhausted too fast;
+      # paused until capital/credits accumulate). To resume hunting: remove these
+      # two lines and set NOVA_SWEEP_TIMES to e.g. "07:40,19:40".
+      - key: NOVA_SWEEP_TIMES
+        value: "0"
+      - key: NOVA_AUTO_SOLVE
+        value: "0"
       # Durable vault: without these the encrypted vault (and any key stored
       # in the Nova Vault view) is wiped on every deploy. Set NOVA_VAULT_KEY
       # (master encryption key — any long string) plus ONE remote backend:

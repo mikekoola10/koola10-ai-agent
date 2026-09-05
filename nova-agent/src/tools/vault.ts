@@ -71,6 +71,18 @@ export function vaultRemoteEnabled(): boolean {
 let redisClient: RedisClientType | null = null;
 let redisErrorLogged = false;
 
+/** Drop a wedged client so the next attempt builds a fresh connection. */
+function dropRedisClient(): void {
+  if (redisClient) {
+    try {
+      redisClient.destroy();
+    } catch {
+      /* best effort */
+    }
+  }
+  redisClient = null;
+}
+
 /**
  * Bound a redis operation so a wedged/stale socket can never hang the vault.
  * node-redis has no per-command timeout; the underlying promise keeps running
@@ -130,16 +142,7 @@ async function redisGetClient(): Promise<RedisClientType | null> {
       redisErrorLogged = true;
       console.error(`vault: redis connect failed — ${err instanceof Error ? err.message : String(err)}`);
     }
-    // Drop the dead client so the next call retries a fresh connection instead
-    // of reusing a broken one.
-    if (redisClient) {
-      try {
-        redisClient.destroy();
-      } catch {
-        /* best effort */
-      }
-    }
-    redisClient = null;
+    dropRedisClient();
     return null;
   }
 }
@@ -158,8 +161,13 @@ async function remoteGet(): Promise<string | null> {
     if (remoteBackend() === "redis") {
       const client = await redisGetClient();
       if (!client) return null;
-      const value = await withTimeout(client.get(REMOTE_KEY), 8000, "GET");
-      return typeof value === "string" ? value : null;
+      try {
+        const value = await withTimeout(client.get(REMOTE_KEY), 8000, "GET");
+        return typeof value === "string" ? value : null;
+      } catch (err) {
+        dropRedisClient(); // wedged socket — next attempt reconnects fresh
+        throw err;
+      }
     }
     return null;
   } catch {
@@ -181,8 +189,13 @@ async function remoteSet(value: string): Promise<boolean> {
     if (remoteBackend() === "redis") {
       const client = await redisGetClient();
       if (!client) return false;
-      await withTimeout(client.set(REMOTE_KEY, value), 8000, "SET");
-      return true;
+      try {
+        await withTimeout(client.set(REMOTE_KEY, value), 8000, "SET");
+        return true;
+      } catch (err) {
+        dropRedisClient(); // wedged socket — next attempt reconnects fresh
+        throw err;
+      }
     }
     return false;
   } catch {
@@ -290,21 +303,68 @@ export function vaultInfo(): {
   };
 }
 
+/* Self-healing push retries: if a mirror push fails (Redis briefly down, cold
+ * start, transient socket issue), keep re-pushing the latest vault state in
+ * the background until it lands. This is what makes UI-added keys durable: a
+ * failed mirror can no longer be silently lost — the API reports it, and the
+ * server keeps retrying. Bounded: gives up after a few attempts and logs, and
+ * the next save()/push starts fresh attempts. */
+const PUSH_RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 120_000];
+const PUSH_RETRY_MAX = 8;
+let pushRetryTimer: NodeJS.Timeout | null = null;
+let pushRetryAttempts = 0;
+
+function schedulePushRetry(): void {
+  if (pushRetryTimer) return;
+  if (pushRetryAttempts >= PUSH_RETRY_MAX) {
+    console.error("vault: remote backup push gave up after retries — will retry on next vault change");
+    return;
+  }
+  const delay = PUSH_RETRY_DELAYS_MS[Math.min(pushRetryAttempts, PUSH_RETRY_DELAYS_MS.length - 1)];
+  pushRetryTimer = setTimeout(() => {
+    pushRetryTimer = null;
+    pushRetryAttempts += 1;
+    void (async () => {
+      try {
+        const ok = await remoteSet(encrypt(JSON.stringify(load())));
+        if (ok) {
+          pushRetryAttempts = 0;
+          console.log("vault: remote backup push recovered (background retry)");
+        } else {
+          schedulePushRetry();
+        }
+      } catch {
+        schedulePushRetry();
+      }
+    })();
+  }, delay);
+}
+
 /** Push the current vault to the durable remote store (awaited variant). */
 export async function vaultPushToRemote(): Promise<{ ok: boolean; error?: string }> {
   if (!vaultRemoteEnabled()) return { ok: true };
   try {
-    await remoteSet(encrypt(JSON.stringify(load())));
+    const pushed = await remoteSet(encrypt(JSON.stringify(load())));
+    if (!pushed) {
+      schedulePushRetry();
+      return { ok: false, error: "remote backend unreachable — will keep retrying in the background" };
+    }
     return { ok: true };
   } catch (err) {
+    schedulePushRetry();
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
 async function pushRemote(data: VaultData): Promise<void> {
   try {
-    await remoteSet(encrypt(JSON.stringify(data)));
+    const ok = await remoteSet(encrypt(JSON.stringify(data)));
+    if (!ok) {
+      schedulePushRetry();
+      console.error("vault: remote backup push failed (backend unreachable) — retrying in background");
+    }
   } catch (err) {
+    schedulePushRetry();
     console.error(`vault: remote backup push failed — ${err instanceof Error ? err.message : String(err)}`);
   }
 }

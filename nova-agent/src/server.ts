@@ -240,8 +240,9 @@ interface SweepStatus {
  * times (America/New_York by default) so the two-a-day automated run works
  * without cron-job.org. Nova stays READ-ONLY against GitHub: it scans, ranks
  * and drafts a human-review deck — it never posts or submits (see the prompt).
- * Configure with NOVA_SWEEP_TIMES ("HH:MM,HH:MM", default "07:40,19:40"; set
- * to "0" or empty to disable) and NOVA_SWEEP_TZ (default America/New_York).
+ * Configure with NOVA_SWEEP_TIMES ("HH:MM,HH:MM"; "0", empty, or unset
+ * disables the scheduler — sweeps only run when explicitly scheduled) and
+ * NOVA_SWEEP_TZ (default America/New_York).
  */
 function startSweepScheduler(
   config: NovaConfig,
@@ -249,7 +250,7 @@ function startSweepScheduler(
 ): { status(): SweepStatus; stop(): void } {
   const raw = process.env.NOVA_SWEEP_TIMES;
   const times = (raw === undefined || raw.trim() === "" || raw.trim() === "0"
-    ? "07:40,19:40"
+    ? ""
     : raw
   )
     .split(",")

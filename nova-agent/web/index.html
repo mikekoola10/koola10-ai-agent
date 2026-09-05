@@ -963,7 +963,8 @@ async function renderMemory(data) {
     <div class="mem-stat-item"><div class="num">${d.sweeps || 0}</div><div class="lbl">Sweeps Today</div></div>
     <div class="mem-stat-item"><div class="num">${d.solves || 0}</div><div class="lbl">Solves Today</div></div>
     <div class="mem-stat-item"><div class="num">${d.bountiesFound || 0}</div><div class="lbl">Bounties Found</div></div>
-    <div class="mem-stat-item"><div class="num">$${d.earnings || 0}</div><div class="lbl">Earnings</div></div>
+    <div class="mem-stat-item"><div class="num">${d.earnings || 0}</div><div class="lbl">Earnings</div></div>
+  </div>`;
 
   // Revenue dashboard
   try {
@@ -1008,7 +1009,6 @@ async function renderMemory(data) {
       html += `</div>`;
     }
   } catch { /* track endpoint may not have data yet */ }
-  </div>`;
 
   html += `<div class="mem-section"><h3>🧠 Operator Profile</h3>
     <div class="mem-card"><div class="label">Name</div><div class="value">${esc(p.name || "Operator")}</div></div>

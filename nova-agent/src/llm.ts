@@ -97,10 +97,12 @@ async function completeOpenAICompatible(
       signal: AbortSignal.timeout(180_000),
     });
     if (res.ok) break;
-    // 429 = quota/rate limit — wait 60s for per-minute quota reset, max 1 retry
-    if (res.status === 429 && attempt === 0) {
-      console.log(`[nova:llm] 429 rate limited, waiting 60s for quota reset...`);
-      await new Promise((r) => setTimeout(r, 60_000));
+    // 429 = quota/rate limit — wait 5 min per retry (max 3 retries = 15 min total)
+    // Handles both per-minute rate limits AND daily quota exhaustion windows
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      const waitMs = 5 * 60_000; // 5 minutes — covers per-minute AND daily quota gaps
+      console.log(`[nova:llm] 429 rate/quota limited, waiting 5 min for reset (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+      await new Promise((r) => setTimeout(r, waitMs));
       continue;
     }
     // 503 = server overload — retry with backoff
